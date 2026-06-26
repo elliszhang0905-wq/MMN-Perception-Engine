@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>中国汽车营销引擎</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=20260626-founder-distill-9">
+  <link rel="stylesheet" href="knowhow.css?v=20260626-founder-distill-9">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <img class="brand-logo" src="assets/mmn-logo-cn-line-cropped.png" alt="MMN 艾姆恩多模态营销引擎" width="184" height="100" style="width:184px;max-width:184px;height:auto;display:block;object-fit:contain;">
+      <div class="edition-switch" aria-label="版本切换">
+        <button type="button" data-edition="china" class="active">国内版</button>
+        <button type="button" data-edition="global">出海版</button>
+      </div>
+    </div>
+    <nav id="nav">
+      <button class="active" data-page="dashboard">决策驾驶舱</button>
+      <button data-page="data">声量数据中心</button>
+      <button data-page="cognition">认知赛道诊断</button>
+      <button data-page="vertical">垂媒竞争格局</button>
+      <button data-page="videos">内容资产中心</button>
+      <button data-page="actions">行动与预算</button>
+      <button data-page="knowhow">打法知识库</button>
+      <button data-page="founder">创始人蒸馏</button>
+      <button data-page="strategykb">RAG知识库管理</button>
+      <button data-page="learning">人工结论学习</button>
+      <button data-page="architecture">版本架构</button>
+      <button data-page="workspace">空间与权限</button>
+      <button data-page="config">项目与权重</button>
+    </nav>
+    <div class="side-note">
+      <span class="pulse"></span>
+      <div><b id="side-run-title">国内版运行</b><small id="side-run-desc">MMN多模态 / 本土化RAG / 本土规则优先</small></div>
+    </div>
+  </aside>
+
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow" id="edition-eyebrow">MMN PERCEPTION ENGINE · CHINA AUTO</p>
+        <h1 id="page-title">决策驾驶舱</h1>
+      </div>
+      <div class="sales-marquee" id="sales-marquee" aria-label="国内销量快讯">
+        <div class="sales-marquee-label">国内销量快讯</div>
+        <div class="sales-marquee-window">
+          <div class="sales-marquee-track" id="sales-marquee-track">
+            <span>正在连接懂车帝销量榜...</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="page active" id="dashboard">
+      <div class="project-strip">
+        <div><span>当前项目</span><b id="dash-project"></b></div>
+        <div><span>分析对象</span><b id="dash-model"></b></div>
+        <div><span>核心竞品</span><b id="dash-competitor"></b></div>
+        <div><span>样本规模</span><b id="dash-samples"></b></div>
+      </div>
+      <div class="dashboard-import">
+        <div>
+          <span>数据导入工作台</span>
+          <b>导入声量 Excel 后，驾驶舱会自动刷新诊断结果</b>
+        </div>
+        <div>
+          <button type="button" class="primary file-button" data-file-target="xlsx-file">导入 Excel</button>
+          <button type="button" class="ghost file-button" data-file-target="csv-file">导入 CSV</button>
+          <button class="ghost" id="dashboard-template">下载 CSV 模板</button>
+          <button class="ghost" data-page-jump="data">查看数据表</button>
+        </div>
+      </div>
+      <article class="panel model-judgment-panel">
+        <div class="panel-title">
+          <div><span>车型判断工作台</span><h2>想到一台车，就把判断交给MMN沉淀</h2></div>
+          <em>自动识别品牌 / 车型 / 观点 / 下一步动作</em>
+        </div>
+        <form id="model-judgment-form" class="model-judgment-form">
+          <textarea name="judgment" rows="3" placeholder="例如：奥迪E5现在最大问题不是产品力，而是用户还没理解它和上汽奥迪、传统奥迪之间的关系，上市传播要先解决身份认知。"></textarea>
+          <div class="model-judgment-actions">
+            <span>输入你的市场、营销、销售判断，系统会归因拆解并写入车型资产。</span>
+            <button type="submit" class="primary" id="model-judgment-submit">交给MMN学习</button>
+          </div>
+        </form>
+        <div id="model-judgment-result" class="model-judgment-result"></div>
+      </article>
+      <div class="kpis">
+        <article class="kpi"><span>口碑健康 NSR</span><strong id="kpi-nsr">—</strong><small id="kpi-nsr-note"></small></article>
+        <article class="kpi"><span>目标人群穿透 IPS</span><strong id="kpi-ips">—</strong><small>目标身份有效评论占比</small></article>
+        <article class="kpi"><span>购买意向指数</span><strong id="kpi-intent">—</strong><small>越高代表声量越接近购买</small></article>
+        <article class="kpi danger"><span>购买阻力风险</span><strong id="kpi-risk">—</strong><small id="kpi-risk-note"></small></article>
+      </div>
+      <div class="grid two dashboard-workbench">
+        <article class="panel">
+          <div class="panel-title"><div><span>声量数据中心</span><h2>当前样本与导入数据预览</h2></div><em id="dashboard-data-note">—</em></div>
+          <div class="dashboard-data-summary" id="dashboard-data-summary"></div>
+          <div class="table-wrap mini"><table id="dashboard-data-table"></table></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>认知赛道诊断</span><h2>资产、负债与机会排序</h2></div><em>Top 8</em></div>
+          <div class="table-wrap mini"><table id="dashboard-cognition-table"></table></div>
+        </article>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>认知格局</span><h2>资产与负债</h2></div><em>正向 / 负向</em></div>
+          <div id="asset-chart" class="bar-chart"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>决策建议</span><h2>本周期应优先做什么</h2></div></div>
+          <div id="top-actions" class="action-cards"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>机会地图</span><h2>认知赛道优先级</h2></div><em>横轴：竞品领先度 · 纵轴：购买影响</em></div>
+        <div class="map-toolbar">
+          <div id="map-filters" class="segmented">
+            <button class="active" data-filter="all">全部</button>
+            <button data-filter="优先修复">优先修复</button>
+            <button data-filter="抢占空位">抢占空位</button>
+            <button data-filter="持续放大">持续放大</button>
+          </div>
+          <label>地图显示 <select id="map-limit"><option>8</option><option selected>12</option><option>16</option><option>20</option></select> 个</label>
+        </div>
+        <div id="opportunity-map" class="opportunity-map"></div>
+        <div class="map-summary" id="map-summary"></div>
+        <div class="table-wrap mini"><table id="opportunity-table"></table></div>
+      </article>
+    </section>
+
+    <section class="page" id="data">
+      <div class="toolbar">
+        <div>
+          <button class="primary" id="add-row">新增数据</button>
+          <button type="button" class="primary file-button" data-file-target="xlsx-file">导入 Excel</button><input class="file-input-hidden" id="xlsx-file" type="file" accept=".xlsx">
+          <button type="button" class="ghost file-button" data-file-target="csv-file">导入 CSV</button><input class="file-input-hidden" id="csv-file" type="file" accept=".csv">
+          <button class="ghost" id="download-template">下载 CSV 模板</button>
+        </div>
+        <div class="search"><input id="data-search" placeholder="搜索车型、标签、平台…"></div>
+      </div>
+      <div class="notice" id="data-source-note"></div>
+      <div class="model-filter" id="data-model-filter"></div>
+      <div class="model-filter traffic-filter" id="data-traffic-filter"></div>
+      <div class="kpis data-kpis">
+        <article class="kpi"><span>当前车型样本</span><strong id="data-model-samples">—</strong><small>有效评论量</small></article>
+        <article class="kpi"><span>正向加权声量</span><strong id="data-positive-score">—</strong><small>情绪 × 身份 × 平台 × 意向</small></article>
+        <article class="kpi danger"><span>负向风险声量</span><strong id="data-negative-score">—</strong><small>风险 × Impact × 平台 × 意向</small></article>
+        <article class="kpi"><span>覆盖平台</span><strong id="data-platform-count">—</strong><small>已识别渠道数</small></article>
+      </div>
+      <div class="grid two data-visual-grid">
+        <article class="panel">
+          <div class="panel-title"><div><span>商业化 / 自然声量</span><h2>抖音与小红书声量性质</h2></div><em>按有效评论</em></div>
+          <div id="data-traffic-chart" class="data-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>识别规则</span><h2>优先读取导入字段，缺失时规则判断</h2></div><em>可追溯</em></div>
+          <div id="data-traffic-rule" class="rule-cards"></div>
+        </article>
+      </div>
+      <div class="grid two data-visual-grid">
+        <article class="panel">
+          <div class="panel-title"><div><span>平台分布</span><h2>声量来自哪里</h2></div><em>按有效评论</em></div>
+          <div id="data-platform-chart" class="data-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>赛道结构</span><h2>用户在讨论什么</h2></div><em>按一级赛道</em></div>
+          <div id="data-category-chart" class="data-bars"></div>
+        </article>
+      </div>
+      <div class="grid two data-visual-grid">
+        <article class="panel">
+          <div class="panel-title"><div><span>情绪结构</span><h2>正负向与疑虑分布</h2></div><em>按情绪标签</em></div>
+          <div id="data-emotion-chart" class="data-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>认知标签 Top</span><h2>高声量标签</h2></div><em>Top 8</em></div>
+          <div id="data-label-chart" class="data-bars"></div>
+        </article>
+      </div>
+      <div class="table-wrap"><table id="data-table"></table></div>
+    </section>
+
+    <section class="page" id="cognition">
+      <div class="section-intro">
+        <div><p class="eyebrow">COGNITION DIAGNOSIS</p><h2>哪些是资产，哪些是负债，哪里有空位</h2></div>
+        <div class="legend"><i class="green"></i>资产 <i class="red"></i>负债 <i class="amber"></i>机会</div>
+      </div>
+      <div class="table-wrap"><table id="cognition-table"></table></div>
+    </section>
+
+    <section class="page" id="vertical">
+      <div class="section-intro">
+        <div><p class="eyebrow">VERTICAL MEDIA COMPETITION</p><h2>本品与竞品正反向排名趋势</h2></div>
+        <div class="legend"><i class="green"></i>正向排名 <i class="red"></i>反向排名 <i class="amber"></i>趋势变化</div>
+      </div>
+      <div class="toolbar">
+        <div>
+          <button type="button" class="primary file-button" data-file-target="vertical-xlsx-file">导入</button><input class="file-input-hidden" id="vertical-xlsx-file" type="file" accept=".xlsx">
+          <button class="ghost" id="clear-vertical-data">清空垂媒数据</button>
+        </div>
+        <div class="search"><input id="vertical-search" placeholder="筛选车型 / 竞品 / 平台 / 文件"></div>
+      </div>
+      <div class="notice" id="vertical-source-note">支持汽车之家、懂车帝正反向排名 Excel。导入后可查看本品和竞品竞争格局，以及时间轴趋势变化。</div>
+      <div id="vertical-ai-learning" class="qwen-result"></div>
+      <div class="vertical-controls">
+        <div class="field"><label>数据来源</label><select id="vertical-platform"></select></div>
+        <div class="field"><label>数据文件</label><select id="vertical-source-file"></select></div>
+        <div class="field"><label>本品车型</label><select id="vertical-model"></select></div>
+        <div class="field"><label>竞品车型</label><select id="vertical-competitor"></select></div>
+      </div>
+      <div class="kpis video-kpis">
+        <article class="kpi"><span>本品车型数</span><strong id="vertical-model-count">—</strong><small>可切换查看</small></article>
+        <article class="kpi"><span>竞品关系数</span><strong id="vertical-pair-count">—</strong><small>本品 × 竞品</small></article>
+        <article class="kpi danger"><span>周期数</span><strong id="vertical-period-count">—</strong><small>当前来源口径</small></article>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>竞争格局</span><h2>当前周期正反向排名</h2></div><em id="vertical-latest-period">—</em></div>
+          <div id="vertical-rank-board" class="rank-board"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>时间轴趋势</span><h2>正向 / 反向排名变化</h2></div><em>数值越低排名越靠前</em></div>
+          <div id="vertical-trend-chart" class="trend-chart"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>竞争关系矩阵</span><h2>竞品最新排名、变化与趋势</h2></div><em>一行一个真实竞品关系</em></div>
+        <div id="vertical-period-picker" class="period-picker"></div>
+        <div class="table-wrap"><table id="vertical-ranking-table"></table></div>
+        <details class="raw-detail">
+          <summary>查看原始周期明细</summary>
+          <div class="table-wrap mini"><table id="vertical-table"></table></div>
+        </details>
+      </article>
+    </section>
+
+    <section class="page" id="videos">
+      <div class="section-intro">
+        <div><p class="eyebrow">CONTENT ASSET CENTER</p><h2>本品 / 竞品内容资产看板</h2></div>
+        <div class="legend"><i class="green"></i>本品 <i class="amber"></i>竞品 <i class="red"></i>高互动</div>
+      </div>
+      <div class="content-subnav" id="content-subnav">
+        <button type="button" class="active" data-content-view="assets">内容看板</button>
+        <button type="button" data-content-view="douyinCreators">抖音达人库</button>
+        <button type="button" data-content-view="xhsCreators">小红书达人库</button>
+      </div>
+      <article class="panel social-plugin-panel" id="social-plugin-panel">
+        <div class="panel-title"><div><span>CHROME PLUGIN BRIDGE</span><h2>抖音 / 小红书采集插件控制台</h2></div><em id="social-plugin-status">检测中</em></div>
+        <div class="social-plugin-grid">
+          <div class="social-plugin-card">
+            <div><b>抖音采集</b><span id="douyin-plugin-note">等待插件状态</span></div>
+            <div class="social-plugin-actions">
+              <button type="button" class="primary" data-plugin-open="douyin">打开采集页</button>
+              <button type="button" class="ghost" data-plugin-sync="douyin">同步最新导出</button>
+            </div>
+          </div>
+          <div class="social-plugin-card">
+            <div><b>小红书采集</b><span id="xhs-plugin-note">等待插件状态</span></div>
+            <div class="social-plugin-actions">
+              <button type="button" class="primary" data-plugin-open="xiaohongshu">打开采集页</button>
+              <button type="button" class="ghost" data-plugin-sync="xiaohongshu">同步最新导出</button>
+            </div>
+          </div>
+        </div>
+      </article>
+      <div id="content-asset-view">
+      <article class="panel form-panel">
+        <div class="panel-title"><div><span>分析车型预设</span><h2>1 台本品 + 最多 3 台核心竞品</h2></div><em>保存后会用于本轮内容资产归因</em></div>
+        <div class="form-grid" id="content-asset-config"></div>
+      </article>
+      <div class="toolbar">
+        <div>
+          <button class="ghost" id="clear-video-data">清空内容资产</button>
+        </div>
+        <div class="search"><input id="video-search" placeholder="搜索标题、车型、作者、分类…"></div>
+      </div>
+      <div class="notice" id="video-source-note">按平台和车型分别上传采集 Excel：抖音最多 4 份，小红书最多 4 份。系统会自动分类并合并成看板。</div>
+      <div id="content-upload-matrix" class="upload-matrix"></div>
+      <div class="kpis video-kpis">
+        <article class="kpi"><span>视频/笔记数量</span><strong id="video-total">—</strong><small>已导入内容条数</small></article>
+        <article class="kpi"><span>内容分类数</span><strong id="video-cats">—</strong><small>按标题自动归类</small></article>
+        <article class="kpi"><span>最高互动分类</span><strong id="video-top-cat">—</strong><small>点赞/评论/收藏/分享加权</small></article>
+        <article class="kpi danger"><span>高互动内容</span><strong id="video-hot">—</strong><small>互动分 Top 20%</small></article>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>抖音分类看板</span><h2>短视频内容在讲什么</h2></div><em id="douyin-board-note">暂无数据</em></div>
+          <div id="douyin-category-chart" class="video-bars"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>小红书分类看板</span><h2>种草内容在讲什么</h2></div><em id="xhs-board-note">暂无数据</em></div>
+          <div id="xhs-category-chart" class="video-bars"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>车型对比看板</span><h2>本品与核心竞品内容资产结构</h2></div><em>按已上传文件实时汇总</em></div>
+        <div id="content-model-board" class="model-board"></div>
+      </article>
+      <div class="table-wrap"><table id="video-table"></table></div>
+      </div>
+      <div id="creator-library-view" class="creator-library-view" hidden>
+        <article class="panel creator-hero">
+          <div>
+            <span id="creator-library-eyebrow">CREATOR LIBRARY</span>
+            <h2 id="creator-library-title">抖音达人库</h2>
+            <p id="creator-library-desc">沉淀达人能力标签、适配赛道和历史表现，为每次 Campaign 的达人推荐做准备。</p>
+          </div>
+          <div class="creator-recommend-box">
+            <b id="creator-recommend-score">—</b>
+            <span>当前项目可推荐达人</span>
+          </div>
+        </article>
+        <div class="kpis creator-kpis">
+          <article class="kpi"><span>达人数量</span><strong id="creator-total">—</strong><small>当前平台库</small></article>
+          <article class="kpi"><span>覆盖赛道</span><strong id="creator-category-count">—</strong><small>内容能力标签</small></article>
+          <article class="kpi"><span>平均匹配分</span><strong id="creator-avg-fit">—</strong><small>基于当前项目标签</small></article>
+          <article class="kpi danger"><span>高优先级达人</span><strong id="creator-top-count">—</strong><small>适合进入本轮 Campaign</small></article>
+        </div>
+        <div class="creator-filter-row">
+          <div class="segmented" id="creator-type-filter">
+            <button type="button" class="active" data-creator-filter="all">全部</button>
+            <button type="button" data-creator-filter="review">评测</button>
+            <button type="button" data-creator-filter="lifestyle">生活方式</button>
+            <button type="button" data-creator-filter="owner">车主/KOC</button>
+          </div>
+          <div class="search"><input id="creator-search" placeholder="搜索达人、赛道、城市、优势标签…"></div>
+        </div>
+        <div id="creator-card-grid" class="creator-card-grid"></div>
+        <article class="panel creator-planner">
+          <div class="panel-title"><div><span>MMN 推荐逻辑预留</span><h2>未来 Campaign 达人推荐链路</h2></div><em>模型跑通后启用</em></div>
+          <div id="creator-planner-flow" class="creator-planner-flow"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" id="actions">
+      <div class="budget-head">
+        <div><p class="eyebrow">RESULT ENGINE</p><h2>系统展示数据结果；结论与建议由你确认</h2></div>
+        <div class="budget-total"><span>营销预算</span><strong id="budget-total"></strong></div>
+      </div>
+      <div id="action-list" class="action-list"></div>
+    </section>
+
+    <section class="page" id="knowhow">
+      <div class="section-intro">
+        <div><p class="eyebrow">MARKETING KNOW-HOW</p><h2>把数据诊断翻译成可执行打法</h2></div>
+        <div class="legend"><i class="red"></i>先止血 <i class="amber"></i>再抢位 <i class="green"></i>后放大</div>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>作战判断</span><h2>本轮传播的核心命题</h2></div></div>
+          <div id="war-room" class="war-room"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>证据链</span><h2>营销内容必须回答什么</h2></div></div>
+          <div id="evidence-chain" class="evidence-chain"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>优先打法</span><h2>TOP 认知问题的 Know-how 卡片</h2></div><em>问题 → 人群 → 内容 → 证据 → 平台</em></div>
+        <div id="knowhow-cards" class="knowhow-grid"></div>
+      </article>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>内容矩阵</span><h2>不同平台怎么讲</h2></div></div>
+          <div id="platform-playbook" class="platform-playbook"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>30天节奏</span><h2>从止血到放大的排期</h2></div></div>
+          <div id="campaign-calendar" class="timeline"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" id="founder">
+      <div class="section-intro">
+        <div><p class="eyebrow">FOUNDER DISTILLATION</p><h2>创始人蒸馏</h2></div>
+        <button class="primary" id="run-founder-distill">MMN蒸馏话术</button>
+      </div>
+      <div class="founder-hero panel">
+        <div>
+          <span>公开表达归档 / 高管IP Prompt / 双模型质检</span>
+          <h2>把新势力创始人和高管的公开表达，沉淀为可调用的话术资产</h2>
+          <p>每周归档公开互联网环境中的发言内容，按品牌、人物、平台、时间和话题类型分类，蒸馏人物语言风格、品牌叙事框架、技术表达方式、用户沟通方式和舆论攻防话术。</p>
+        </div>
+        <div class="founder-status">
+          <b>每周巡检</b>
+          <span>公开源抓取预留</span>
+          <small>Qwen主控执行 / DeepSeek策略质检</small>
+        </div>
+      </div>
+      <div class="toolbar founder-toolbar">
+        <div class="search"><input id="founder-search" placeholder="搜索品牌、人物、平台、话题"></div>
+        <select id="founder-brand-filter"></select>
+        <select id="founder-person-filter"></select>
+        <select id="founder-topic-filter"></select>
+        <button class="ghost" id="founder-seed">导入公开表达样例</button>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>表达归档</span><h2>按品牌、人物、平台、时间、话题分类</h2></div><em id="founder-archive-count">0 条</em></div>
+          <div id="founder-archive-list" class="founder-archive-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>人物风格蒸馏</span><h2>语言风格、叙事框架与攻防话术</h2></div><em id="founder-distill-source">选择人物后生成</em></div>
+          <div id="founder-profile" class="founder-profile"></div>
+        </article>
+      </div>
+      <article class="panel founder-generator">
+        <div class="panel-title"><div><span>高管 IP 话术生成</span><h2>发布会 / 微博 / 短视频口播 / 内部汇报 / 危机回应</h2></div><em>双模型交叉验证</em></div>
+        <div class="founder-generate-grid">
+          <div class="field"><label>选择人物</label><select id="founder-speaker"></select></div>
+          <div class="field"><label>输出场景</label><select id="founder-scene"><option>发布会</option><option>微博</option><option>短视频口播</option><option>内部汇报</option><option>危机回应</option></select></div>
+          <div class="field"><label>话题方向</label><input id="founder-brief" placeholder="例如：解释智驾路线、回应价格争议、发布新车技术叙事"></div>
+          <button class="primary" id="founder-generate">生成高管IP话术</button>
+        </div>
+        <div id="founder-output" class="founder-output"></div>
+      </article>
+    </section>
+
+    <section class="page" id="learning">
+      <div class="section-intro">
+        <div><p class="eyebrow">HUMAN-IN-THE-LOOP LEARNING</p><h2>你填写结论和建议，系统学习你的判断方式</h2></div>
+        <button class="ghost" id="clear-learning">清空学习记录</button>
+      </div>
+      <div class="grid two">
+        <article class="panel form-panel">
+          <div class="panel-title"><div><span>人工输入</span><h2>本次结论与建议</h2></div><em>保存后成为本地学习案例</em></div>
+          <form id="learning-form" class="learning-form">
+            <div class="form-grid">
+              <div class="field"><label>分析车型</label><input name="model" readonly></div>
+              <div class="field"><label>认知标签</label><select name="label"></select></div>
+            </div>
+            <div class="field"><label>你的结论</label><textarea name="conclusion" placeholder="例如：智己L6当前不是产品认知不足，而是质量/安全疑虑压制试驾转化。"></textarea></div>
+            <div class="field"><label>你的建议</label><textarea name="recommendation" placeholder="例如：先用第三方实测和车主长期反馈修复信任，再把操控/智能座舱做成可复述卖点。"></textarea></div>
+            <div class="form-grid">
+              <div class="field"><label>证据要求</label><input name="evidence" placeholder="第三方测试 / 车主证词 / 工程解释…"></div>
+              <div class="field"><label>推荐平台</label><input name="platform" placeholder="抖音 + 垂媒 + B站…"></div>
+              <div class="field"><label>KPI</label><input name="kpi" placeholder="负面占比下降 / 询价提升…"></div>
+              <div class="field"><label>适用阶段</label><select name="stage"><option>上市期</option><option>口碑修复期</option><option>竞品对抗期</option><option>常态经营期</option></select></div>
+            </div>
+            <div class="dialog-actions"><button type="submit" class="primary">保存并学习</button></div>
+          </form>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>相似案例</span><h2>系统已学到什么</h2></div></div>
+          <div id="similar-learnings" class="learning-list"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>学习记录</span><h2>你的历史结论库</h2></div><em>只保存在本机浏览器</em></div>
+        <div id="learning-history" class="learning-history"></div>
+      </article>
+    </section>
+
+    <section class="page" id="strategykb">
+      <div class="section-intro">
+        <div><p class="eyebrow">RAG KNOWLEDGE BASE</p><h2>把方法论、案例和人工判断变成可召回依据</h2></div>
+        <div class="header-actions"><button class="primary" id="import-rag-seed">导入MMN训练包v1</button><button class="ghost" id="clear-strategy-kb">清空策略知识库</button></div>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>MMN策略对话台</span><h2>输入一个问题，交付可执行营销策略</h2></div><em>RAG巡检 → 千问策略生成</em></div>
+        <div class="rag-console">
+          <div class="search"><input id="rag-query" placeholder="例如：小红书自然声量低，价格焦虑高，下一步怎么打？"></div>
+          <button class="primary" id="run-rag-search">MMN快速策略</button>
+          <button class="ghost" id="run-rag-deep-strategy">MMN深度策略</button>
+        </div>
+        <div class="rag-filters">
+          <select id="rag-platform"><option value="">全部平台</option><option>抖音</option><option>小红书</option><option>懂车帝</option><option>汽车之家</option><option>微博</option><option>B站</option></select>
+          <select id="rag-emotion"><option value="">全部情绪</option><option>兴奋</option><option>认可</option><option>信任</option><option>期待</option><option>焦虑</option><option>怀疑</option><option>失望</option></select>
+          <select id="rag-category"><option value="">全部赛道</option><option>价格权益</option><option>智能化</option><option>空间舒适</option><option>安全质量</option><option>动力操控</option><option>品牌信任</option></select>
+          <select id="rag-stage"><option value="">全部阶段</option><option>上市期</option><option>口碑修复期</option><option>竞品对抗期</option><option>常态经营期</option></select>
+        </div>
+        <div id="rag-results" class="rag-results"></div>
+      </article>
+      <article class="panel">
+        <div class="panel-title"><div><span>知识地图</span><h2>按品牌与模块下钻RAG材料</h2></div><em>默认不外显全部测试语料</em></div>
+        <div id="strategy-kb-map" class="kb-cluster-map"></div>
+        <div id="strategy-kb-list" class="kb-list"></div>
+      </article>
+      <div class="grid two">
+        <article class="panel form-panel">
+          <div class="panel-title"><div><span>知识导入</span><h2>粘贴文本或上传RAG材料</h2></div><em>支持 jsonl / csv / md / json / zip</em></div>
+          <div class="kb-import">
+            <button type="button" class="primary file-button" data-file-target="strategy-kb-file">上传RAG材料</button><input class="file-input-hidden" id="strategy-kb-file" type="file" accept=".txt,.md,.json,.jsonl,.csv,.zip">
+            <textarea id="strategy-kb-input" placeholder="把你和模型、团队或客户关于汽车营销、车型判断、内容打法、客户汇报的话题粘贴到这里。系统会归纳为可复用知识卡。"></textarea>
+            <div class="dialog-actions"><button class="primary" id="import-strategy-kb">归纳并导入知识库</button></div>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>归纳结果</span><h2>系统学到了什么</h2></div><em id="strategy-kb-count">—</em></div>
+          <div id="strategy-kb-summary" class="kb-summary"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>赋能去向</span><h2>这些知识会进入哪些环节</h2></div><em>本地知识库 · 可持续追加</em></div>
+        <div class="kb-routes">
+          <div><b>决策驾驶舱</b><span>补充认知诊断解释和策略判断依据</span></div>
+          <div><b>内容资产中心</b><span>补充标题分类、内容打法和平台表达规则</span></div>
+          <div><b>垂媒竞争格局</b><span>补充正反向 PK 关系的解读方法</span></div>
+          <div><b>打法知识库 / 报告</b><span>补充建议、证据链、KPI 和客户汇报话术</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="page" id="workspace">
+      <div class="section-intro">
+        <div><p class="eyebrow">SAAS FOUNDATION</p><h2>客户空间、项目隔离与知识库分层</h2></div>
+        <button class="primary" id="sync-project-state">保存项目快照</button>
+      </div>
+      <div class="project-strip workspace-strip">
+        <div><span>当前客户空间</span><b id="workspace-org">未登录</b></div>
+        <div><span>权限视角</span><b id="workspace-scope">本机临时模式</b></div>
+        <div><span>数据版本</span><b id="workspace-version">—</b></div>
+        <div><span>项目快照</span><b id="workspace-snapshots-count">0</b></div>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>组织层级</span><h2>集团 → 品牌 → 车型 → 项目</h2></div><em>演示权限模型</em></div>
+          <div id="workspace-tree" class="workspace-tree"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>AI 与规则路由</span><h2>多模型可插拔，不绑定单一供应商</h2></div><em>国内网络可控</em></div>
+          <div id="model-router" class="router-list"></div>
+        </article>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>知识资产隔离</span><h2>MMN 母库 / 客户私库 / 项目学习库</h2></div></div>
+          <div id="knowledge-tiers" class="tier-grid"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>本地数据库</span><h2>从浏览器临时数据升级到企业空间快照</h2></div><em id="workspace-updated">—</em></div>
+          <div id="snapshot-list" class="snapshot-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="page" id="architecture">
+      <div class="section-intro">
+        <div><p class="eyebrow" id="architecture-eyebrow">DOMESTIC FOUNDATION</p><h2 id="architecture-title">国内版数据源与策略智能架构</h2></div>
+        <button class="primary" id="architecture-version-button">国内版优先优化</button>
+      </div>
+      <div class="architecture-hero">
+        <div>
+          <span id="architecture-mode">国内版</span>
+          <h2 id="architecture-headline">从国内声量数据到 MMN 策略闭环</h2>
+          <p id="architecture-desc">优先打通抖音、小红书、垂媒、人工结论、RAG知识库和MMN多模态策略路由，让本地系统先具备稳定可演示、可私有化、可持续学习的能力。</p>
+        </div>
+        <div class="architecture-status" id="architecture-status"></div>
+      </div>
+      <div class="architecture-flow" id="architecture-flow"></div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>数据资产层</span><h2 id="architecture-data-title">国内版数据接入优先级</h2></div><em id="architecture-data-note">可逐步自动化</em></div>
+          <div class="architecture-list" id="architecture-data-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>智能策略层</span><h2 id="architecture-ai-title">MMN策略生成与学习闭环</h2></div><em id="architecture-ai-note">模型隐藏在路由后</em></div>
+          <div class="architecture-list" id="architecture-ai-list"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>产品落地路径</span><h2 id="architecture-roadmap-title">国内版下一步建设顺序</h2></div><em>从本地 demo 到 SaaS 地基</em></div>
+        <div class="architecture-roadmap" id="architecture-roadmap"></div>
+      </article>
+    </section>
+
+    <section class="page" id="config">
+      <div class="grid two">
+        <article class="panel form-panel">
+          <div class="panel-title"><div><span>分析边界</span><h2>项目配置</h2></div></div>
+          <div class="form-grid" id="project-form"></div>
+        </article>
+        <article class="panel form-panel">
+          <div class="panel-title"><div><span>算法阈值</span><h2>决策参数</h2></div></div>
+          <div class="form-grid" id="threshold-form"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>可校准参数</span><h2>平台传播权重</h2></div><em>保存后全局重算</em></div>
+        <div id="platform-weights" class="weight-grid"></div>
+      </article>
+      <article class="panel formula-panel">
+        <div class="panel-title"><div><span>算法说明</span><h2>核心计算逻辑</h2></div></div>
+        <div class="formula-grid">
+          <div><b>NSR</b><span>正向加权量 ÷（正向加权量 + 负向风险量）</span></div>
+          <div><b>IPS</b><span>目标身份有效评论量 ÷ 本品全部有效评论量</span></div>
+          <div><b>White Space</b><span>正向认知 Gap × Impact × Growth ÷ Competition</span></div>
+          <div><b>Priority</b><span>机会分 × 可执行性 × 预算效率；高风险项目优先修复</span></div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <dialog id="row-dialog">
+    <form method="dialog" id="row-form">
+      <div class="dialog-head"><h2>新增声量数据</h2><button value="cancel">×</button></div>
+      <div id="row-fields" class="form-grid"></div>
+      <div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button value="default" class="primary" id="save-row">保存并计算</button></div>
+    </form>
+  </dialog>
+  <dialog id="login-dialog">
+    <form method="dialog" id="login-form">
+      <div class="dialog-head"><h2>商业化试用登录</h2><button value="cancel">×</button></div>
+      <div class="notice">这是本地商业化雏形：不同企业空间的数据和学习案例会隔离保存。</div>
+      <div class="form-grid">
+        <div class="field"><label>客户公司 / 企业空间</label><input name="org" value="演示客户A" required></div>
+        <div class="field"><label>你的姓名</label><input name="name" value="策略顾问" required></div>
+        <div class="field"><label>邮箱 / 账号</label><input name="email" type="email" value="demo@example.com" required></div>
+      </div>
+      <div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button value="default" class="primary" id="login-submit">进入客户空间</button></div>
+    </form>
+  </dialog>
+  <dialog id="trend-dialog" class="wide-dialog">
+    <div class="dialog-head"><h2 id="trend-dialog-title">竞争趋势详情</h2><button id="trend-dialog-close">×</button></div>
+    <div id="trend-dialog-body"></div>
+  </dialog>
+  <dialog id="data-drill-dialog" class="wide-dialog">
+    <div class="dialog-head"><h2 id="data-drill-title">声量拆解详情</h2><button id="data-drill-close">×</button></div>
+    <div id="data-drill-body"></div>
+  </dialog>
+  <dialog id="creator-dialog" class="wide-dialog">
+    <form method="dialog" id="creator-form">
+      <div class="dialog-head"><h2 id="creator-dialog-title">编辑达人画像</h2><button value="cancel">×</button></div>
+      <input type="hidden" name="platform">
+      <input type="hidden" name="id">
+      <div class="form-grid">
+        <div class="field"><label>达人名称</label><input name="name" required></div>
+        <div class="field"><label>类型</label><select name="type"><option value="review">评测</option><option value="lifestyle">生活方式</option><option value="owner">车主/KOC</option></select></div>
+        <div class="field"><label>城市</label><input name="city" placeholder="例如：上海"></div>
+        <div class="field"><label>粉丝数</label><input name="fans" type="number" min="0" placeholder="源数据没有时可手动补充"></div>
+        <div class="field"><label>均播 / 均曝光</label><input name="avgViews" type="number" min="0"></div>
+        <div class="field"><label>互动率 %</label><input name="engagementRate" type="number" min="0" step=".1"></div>
+        <div class="field"><label>成本等级</label><input name="costLevel" placeholder="高 / 中高 / 中 / 中低 / 低 / 待评估"></div>
+        <div class="field"><label>主页链接</label><input name="profileUrl"></div>
+      </div>
+      <div class="field"><label>内容赛道标签</label><textarea name="categories" rows="2" placeholder="用逗号分隔，例如：汽车评测，价格权益，空间舒适"></textarea></div>
+      <div class="field"><label>能力优势</label><textarea name="strengths" rows="2" placeholder="用逗号分隔"></textarea></div>
+      <div class="field"><label>推荐场景</label><textarea name="fitStages" rows="2" placeholder="用逗号分隔，例如：疑虑澄清，口碑修复，试驾转化"></textarea></div>
+      <div class="field"><label>风险提示</label><textarea name="risk" rows="2"></textarea></div>
+      <div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button type="submit" class="primary">保存达人画像</button></div>
+    </form>
+  </dialog>
+  <div id="toast"></div>
+  <script src="data_20260608.js?v=20260626-founder-distill-9"></script>
+  <script src="app.js?v=20260626-founder-distill-9"></script>
+</body>
+</html>

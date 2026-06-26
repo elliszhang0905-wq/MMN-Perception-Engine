@@ -1,0 +1,15 @@
+{
+  "name": "china-auto-marketing-engine",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test:openai": "node scripts/test_openai_client.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "openai": "^6.10.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.53.0"
+  }
+}

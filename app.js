@@ -1,0 +1,1686 @@
+const emotions={兴奋:[1,0],惊喜:[.9,0],期待:[.75,.1],信任:[1,0],认可:[.85,0],自豪:[.95,0],怀疑:[-.4,.5],焦虑:[-.55,.7],失望:[-.75,.85],愤怒:[-1,1],后悔:[-.95,1],嘲讽:[-.7,.9]};
+const identityWeights={目标核心人群:1.35,增量人群:1.2,高影响力车主:1.3,家庭用户:1.15,科技用户:1.15,性能用户:1.1,价格敏感用户:1,未知:.85};
+const intentWeights={高意向:1.5,中意向:1.15,低意向:.8,无:.5};
+const importedDataset=typeof window!=="undefined"?window.importedDataset20260608:null;
+const defaultState={
+ datasetVersion:importedDataset?.version||"demo_v1",
+ sourceNote:importedDataset?.note||"演示数据",
+ config:importedDataset?.config||{project:"智己LS8上市期认知战役（演示）",brand:"智己",model:"智己LS8",competitor:"理想L8",targetIdentity:"目标核心人群",budget:800,priorityThreshold:60,riskThreshold:500},
+ platforms:importedDataset?.platforms||{抖音:1.25,小红书:1.15,微博:1.1,懂车帝:1.2,汽车之家:1.15,微信:1.05,B站:1.1,线下活动:1.3},
+ rows:importedDataset?.rows||[
+["智己LS8","本品","抖音","底盘操控","底盘滤震","兴奋","目标核心人群","高意向",820,4,1.25,2],
+["智己LS8","本品","懂车帝","智能化","智能驾驶","认可","科技用户","中意向",620,5,1.35,4],
+["智己LS8","本品","小红书","空间舒适","二排舒适","认可","家庭用户","中意向",430,4,1.15,3],
+["智己LS8","本品","微博","价格权益","价格","焦虑","价格敏感用户","高意向",520,5,1.4,4],
+["智己LS8","本品","汽车之家","品牌信任","品牌信任","怀疑","增量人群","中意向",390,5,1.25,3],
+["智己LS8","本品","抖音","用户证词","真实口碑","期待","高影响力车主","中意向",510,4,1.3,2],
+["智己LS8","本品","B站","底盘操控","操控稳定","信任","性能用户","高意向",360,4,1.2,3],
+["智己LS8","本品","小红书","能耗补能","城市能耗","失望","目标核心人群","中意向",280,4,1.1,3],
+["智己LS8","本品","线下活动","安全质量","被动安全","信任","家庭用户","高意向",680,5,1.3,3],
+["理想L8","竞品","抖音","家庭场景","家庭场景","信任","家庭用户","高意向",1100,5,1.1,4],
+["理想L8","竞品","小红书","空间舒适","二排舒适","兴奋","家庭用户","高意向",760,5,1.05,4],
+["理想L8","竞品","汽车之家","品牌信任","品牌信任","认可","目标核心人群","中意向",650,5,1.05,5],
+["理想L8","竞品","懂车帝","底盘操控","底盘滤震","怀疑","性能用户","中意向",420,4,1.05,4],
+["理想L8","竞品","微博","价格权益","价格","失望","价格敏感用户","高意向",690,5,1.15,5],
+["理想L8","竞品","抖音","智能化","智能驾驶","认可","科技用户","中意向",830,4,1.2,5],
+["理想L8","竞品","小红书","用户证词","真实口碑","信任","高影响力车主","高意向",590,5,1.05,4]
+ ]};
+const defaultGlobalState={
+ datasetVersion:"global_demo_v1",
+ sourceNote:"出海版演示数据，与国内版完全隔离",
+ config:{project:"Thailand EV Launch Perception Pilot",brand:"BYD",model:"BYD Atto 3",competitor:"Toyota Yaris / Tesla Model Y",targetIdentity:"东南亚新能源意向人群",budget:600,priorityThreshold:60,riskThreshold:400},
+ platforms:{TikTok:1.25,YouTube:1.15,Instagram:1.1,Reddit:1.05,GoogleTrends:1.1,ThailandMarket:1.3,DLT:1.2,ASEANMedia:1.1},
+ rows:[
+["BYD Atto 3","本品","TikTok","EV Adoption","Price / Incentive","期待","东南亚新能源意向人群","高意向",520,4,1.2,3],
+["BYD Atto 3","本品","ThailandMarket","Market Sales","BEV penetration","认可","东南亚新能源意向人群","中意向",410,5,1.15,2],
+["BYD Atto 3","本品","DLT","Registration","BEV registration","信任","家庭用户","中意向",360,4,1.1,2],
+["Toyota Yaris","竞品","ASEANMedia","ICE Reliability","Brand trust","信任","家庭用户","高意向",680,5,1.05,4],
+["Tesla Model Y","竞品","YouTube","Tech Image","Smart cockpit","兴奋","科技用户","中意向",590,5,1.25,5],
+["BYD Atto 3","本品","Instagram","Lifestyle","Design acceptance","期待","增量人群","中意向",330,3,1.1,3]
+ ]};
+let edition=loadEdition();
+let state=load();
+let mapFilter="all",mapLimit=12;
+let dataModelFilter="all",dataTrafficFilter="all",dataSearch="";
+let dataBrandFilter="all";
+let dashBrandOpen="";
+let dashModelMenuOpen=false;
+let contentAssetView="assets",creatorFilter="all",creatorSearch="";
+let socialPluginStatus=null;
+let currentDrillContext=null;
+let aiStatus={qwen:{configured:false,model:"qwen-plus",baseUrl:"https://dashscope.aliyuncs.com/compatible-mode/v1"},deepseek:{configured:false,model:"deepseek-chat",baseUrl:"https://api.deepseek.com"},openai:{configured:false,model:"gpt-5.5",baseUrl:"https://api.openai.com/v1"},rules:{configured:true,model:"MMN规则引擎"}};
+let videoState=loadVideoState(),creatorState=loadCreatorState(),videoSearch="";
+let verticalState=loadVerticalState(),verticalSearch="",verticalPeriodPickerOpen=false;
+let strategyKb=loadStrategyKb();
+let modelJudgments=loadModelJudgments();
+let modelIdentities=loadModelIdentities(),modelIdentitySyncing=false;
+let founderState=loadFounderState(),founderSearch="",founderFilters={brand:"all",person:"all",topic:"all"};
+let selectedKnowledgeCluster="";
+let ragResultsExpanded=false;
+let workspaceState=defaultWorkspaceState(),workspaceSyncTimer=null;
+let salesMarquee={edition:"china",status:"loading",items:[{text:"正在连接懂车帝销量榜..."}],note:""};
+const editions={
+ china:{
+  label:"国内版",
+  title:"MMN汽车营销引擎｜国内版",
+  eyebrow:"MMN PERCEPTION ENGINE · CHINA AUTO",
+  sideTitle:"国内版运行",
+  sideDesc:"MMN多模态 / 本土化RAG / 本土规则优先",
+  logo:"assets/mmn-logo-cn-line-cropped.png",
+  routerTitle:"MMN双模型策略路由（国内版）",
+  routerRole:"Qwen作为主控执行模型，负责RAG检索、知识库调用、结构化输出和常规营销方案生成；DeepSeek作为策略推理与质检模型，负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析。",
+  scopeSuffix:"国内版：集团-品牌-车型-项目隔离",
+  knowledge:[
+   {tier:"MMN母知识库",scope:"中国汽车营销方法论、垂媒/抖音/小红书打法、可复用策略框架",items:13,storage:"平台只读"},
+   {tier:"客户私有知识库",scope:"集团/品牌/车型项目私有资料，按企业空间隔离",items:0,storage:"企业隔离"},
+   {tier:"项目学习库",scope:"本地导入数据、人工结论、RAG巡检、复盘学习",items:0,storage:"项目隔离"}
+  ],
+  architecture:{
+   eyebrow:"DOMESTIC FOUNDATION",
+   title:"国内版数据源与策略智能架构",
+   button:"国内版优先优化",
+   mode:"国内版",
+   headline:"从国内声量数据到 MMN 策略闭环",
+   desc:"优先打通抖音、小红书、垂媒、人工结论、RAG知识库和MMN双模型策略路由，让Qwen负责执行与输出，DeepSeek负责推理质检，本地系统先具备稳定可演示、可私有化、可持续学习的能力。",
+   status:[["当前重点","国内网络可用"],["策略路由","Qwen主控 / DeepSeek质检"],["部署形态","本地 / 私有云"],["数据原则","客户隔离"]],
+   flow:["国内声量数据","清洗与标签拆解","本土化RAG召回","Qwen主控执行","DeepSeek策略质检","行动计划与学习"],
+   data:[
+    ["抖音 / 小红书","短视频与种草内容，区分商业化声量和自然声量，按车型/竞品/平台拆解。","已接入导入面板"],
+    ["汽车之家 / 懂车帝","正反向排名、竞品格局、周期趋势和标签钻取。","已接入 Excel 导入"],
+    ["人工结论 / 客户复盘","把客户判断、项目经验、销售反馈沉淀为项目学习库。","已接入学习表单"],
+    ["企业私有资料","品牌手册、产品资料、FAQ、媒介策略、历史战役复盘。","下一步接入RAG文件库"]
+   ],
+   ai:[
+    ["MMN策略按钮","前台只露出 MMN策略，不暴露底层模型品牌。","已完成"],
+    ["Qwen主控执行模型","负责RAG检索、知识库调用、结构化输出和常规营销方案生成。","主控"],
+    ["DeepSeek策略推理与质检模型","负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析。","质检"],
+    ["本土化RAG巡检","策略生成前召回MMN母库、客户私库、项目学习库，输出可追溯依据。","已接入原型"],
+    ["本土规则兜底","无模型或模型失败时，仍可用本土规则生成保守策略建议。","已运行"]
+   ],
+   roadmap:[
+    ["01","稳定双模型路由","Qwen负责执行输出，DeepSeek负责策略推理与质检，前台统一只显示MMN策略。"],
+    ["02","RAG文件库","支持 PDF/Word/Markdown/Excel 策略资料导入，形成客户私有知识库。"],
+    ["03","数据版本管理","每次导入形成数据版本，支持项目复盘、回滚、对比。"],
+    ["04","权限隔离","集团、品牌、车型、项目四级权限和知识库隔离。"],
+    ["05","国内SaaS地基","把本地SQLite升级为可多租户部署的数据服务。"]
+   ]
+  }
+ },
+ global:{
+  label:"出海版",
+  title:"MMN汽车营销引擎｜出海版",
+  eyebrow:"MMN PERCEPTION ENGINE · GLOBAL AUTO",
+  sideTitle:"出海版预览",
+  sideDesc:"海外平台 / OpenAI / 全球素材预留",
+  logo:"assets/mmn-logo-reverse-cropped.png",
+  ticker:[
+   {text:"SEA EV Watch｜泰国/印尼/马来西亚新能源关注：注册量、TikTok声量、经销商线索待接入"},
+   {text:"Europe Pulse｜英国/德国/法国市场：Google Trends、YouTube评测、媒体试驾热度预留"},
+   {text:"Middle East Signal｜中东区域：豪华SUV/新能源SUV竞品动向、KOC素材表现预留"},
+   {text:"TikTok Creative｜海外短视频素材：完播率、互动率、创作者转化榜待接入"},
+   {text:"Global RAG｜多语言资料库：英文/东南亚/中东/欧洲市场材料进入跨语言RAG"},
+   {text:"Compliance｜出海版按区域隔离数据源，保留原文引用与本地法规标签"}
+  ],
+  routerTitle:"MMN策略路由（出海版）",
+  routerRole:"面向海外市场接入 OpenAI、海外社媒数据、跨语言RAG和区域化合规规则。",
+  scopeSuffix:"出海版：区域-国家-品牌-车型项目隔离",
+  knowledge:[
+   {tier:"MMN Global Playbook",scope:"海外上市、社媒种草、创作者营销、区域定位方法论",items:0,storage:"平台只读"},
+   {tier:"客户海外私有库",scope:"国家/区域市场资料、经销商材料、海外媒体和消费者洞察",items:0,storage:"企业隔离"},
+   {tier:"Campaign Learning",scope:"海外项目复盘、素材表现、跨语言策略学习",items:0,storage:"项目隔离"}
+  ],
+  architecture:{
+   eyebrow:"GLOBAL FOUNDATION",
+   title:"出海版数据源与策略智能架构",
+   button:"出海版同步开发",
+   mode:"出海版",
+   headline:"从海外平台声量到区域化增长策略",
+   desc:"出海版保留独立架构位，面向海外社媒、跨语言RAG、OpenAI/海外模型网关和区域市场隔离，后续与国内版共享MMN方法论底座。",
+   status:[["当前重点","架构占位"],["模型路由","OpenAI / 网关"],["部署形态","SaaS / 专属云"],["数据原则","区域隔离"]],
+   flow:["海外社媒数据","翻译与本地化标签","多语言RAG","全球模型路由","区域策略计划","Campaign Learning"],
+   data:[
+    ["TikTok / YouTube","海外短视频内容、创作者素材、互动表现和话题趋势。","预留"],
+    ["Instagram / Reddit","生活方式种草、社区口碑、真实用户问题和竞品讨论。","预留"],
+    ["海外媒体 / 经销商反馈","海外垂媒、PR报道、经销商销售反馈和区域市场资料。","预留"],
+    ["多语言资料库","英文、东南亚、中东、欧洲市场材料统一进入跨语言RAG。","预留"]
+   ],
+   ai:[
+    ["MMN策略按钮","出海版同样只暴露MMN策略，背后路由不同区域模型与知识库。","已占位"],
+    ["OpenAI / 企业网关","额度和网络可用后接入Responses API，或走客户可控模型网关。","已接入SDK"],
+    ["跨语言RAG","召回海外资料并保留原文引用、中文解释和区域化建议。","待建设"],
+    ["合规规则引擎","区域广告合规、数据合规、素材禁区和风险提示。","待建设"]
+   ],
+   roadmap:[
+    ["01","海外市场模板","建立国家/区域/品牌/车型项目结构。"],
+    ["02","平台数据字段","定义TikTok、YouTube、Instagram、Reddit导入模板。"],
+    ["03","跨语言RAG","支持原文、翻译、摘要、策略引用四层输出。"],
+    ["04","海外模型网关","支持OpenAI、客户网关和无模型规则兜底。"],
+    ["05","全球战役复盘","沉淀Campaign Learning并反哺MMN Global Playbook。"]
+   ]
+  }
+ }
+};
+const headers=["车型","类型","平台","一级赛道","认知标签","情绪","用户身份","购买意向","有效评论","Impact","Growth","Competition"];
+const pageNames={dashboard:"决策驾驶舱",data:"声量数据中心",cognition:"认知赛道诊断",vertical:"垂媒竞争格局",videos:"内容资产中心",actions:"结果与预算",knowhow:"打法知识库",founder:"创始人蒸馏",strategykb:"RAG知识库管理",learning:"人工结论学习",architecture:"版本架构",workspace:"空间与权限",config:"项目与权重"};
+function activeEdition(){try{return typeof edition==="string"?edition:loadEdition()}catch{return"china"}}
+function defaultStateForEdition(ed=activeEdition()){return structuredClone(ed==="global"?defaultGlobalState:defaultState)}
+function storageKey(base,ed=activeEdition()){return `${base}:${ed}`}
+function load(){try{const ed=activeEdition(),saved=JSON.parse(localStorage.getItem(storageKey("mmnEngineState",ed))||(ed==="china"?localStorage.getItem("mmnChinaState"):"null"));return saved&&Array.isArray(saved.rows)?saved:defaultStateForEdition(ed)}catch{return defaultStateForEdition()}}
+function save(){localStorage.setItem(storageKey("mmnEngineState"),JSON.stringify(state));queueWorkspaceSnapshot()}
+function loadEdition(){try{return localStorage.getItem("mmnEngineEdition")==="global"?"global":"china"}catch{return"china"}}
+function loadEditionData(){state=load();videoState=loadVideoState();creatorState=loadCreatorState();verticalState=loadVerticalState();strategyKb=loadStrategyKb();modelJudgments=loadModelJudgments();modelIdentities=loadModelIdentities();founderState=loadFounderState();serverLearnings=[];ragResultsExpanded=false;selectedKnowledgeCluster="";loadServerLearnings();loadWorkspace()}
+function setEdition(next){edition=next==="global"?"global":"china";localStorage.setItem("mmnEngineEdition",edition);loadEditionData();render();loadSalesMarquee();toast(`已切换为${editions[edition].label}，数据域已隔离`)}
+function currentEdition(){return editions[edition]||editions.china}
+const assetSlots=[{key:"own",label:"本品",field:"ownModel"},{key:"comp1",label:"竞品 1",field:"competitor1"},{key:"comp2",label:"竞品 2",field:"competitor2"},{key:"comp3",label:"竞品 3",field:"competitor3"}];
+const assetPlatforms=[{key:"douyin",name:"抖音"},{key:"xiaohongshu",name:"小红书"}];
+function defaultCreatorLibraries(){
+ return{
+  douyin:[
+   {id:"dy_001",name:"车研社阿森",type:"review",city:"上海",fans:1820000,avgViews:420000,engagementRate:5.8,costLevel:"高",categories:["智能驾驶","底盘操控","新能源技术"],strengths:["深度评测","技术解释","横评拆解"],fitStages:["上市预热","技术破圈"],risk:"观点强，需要提前对齐技术边界"},
+   {id:"dy_002",name:"周末试驾计划",type:"lifestyle",city:"杭州",fans:760000,avgViews:210000,engagementRate:7.1,costLevel:"中",categories:["家庭场景","空间舒适","长途出行"],strengths:["家庭叙事","场景体验","女性用户触达"],fitStages:["种草扩散","试驾转化"],risk:"专业参数表达较弱"},
+   {id:"dy_003",name:"新能源老车主李想想",type:"owner",city:"成都",fans:320000,avgViews:98000,engagementRate:8.4,costLevel:"中低",categories:["车主证言","能耗补能","真实口碑"],strengths:["真实体验","评论互动","疑虑回应"],fitStages:["口碑修复","线索承接"],risk:"内容产能需要排期"},
+   {id:"dy_004",name:"性能车观察室",type:"review",city:"北京",fans:940000,avgViews:260000,engagementRate:5.2,costLevel:"中高",categories:["性能操控","底盘操控","安全质量"],strengths:["动态体验","赛道表达","男性用户触达"],fitStages:["卖点证明","竞品对抗"],risk:"适合硬核内容，不适合泛生活种草"}
+  ],
+  xiaohongshu:[
+   {id:"xhs_001",name:"一只会开车的妈妈",type:"lifestyle",city:"苏州",fans:410000,avgViews:68000,engagementRate:9.3,costLevel:"中",categories:["家庭场景","空间舒适","儿童安全"],strengths:["家庭决策","图文种草","女性用户信任"],fitStages:["种草扩散","试驾转化"],risk:"需要真实体验素材支撑"},
+   {id:"xhs_002",name:"城市通勤EV日记",type:"owner",city:"深圳",fans:180000,avgViews:42000,engagementRate:11.2,costLevel:"中低",categories:["能耗补能","城市通勤","用车成本"],strengths:["真实账本","评论答疑","长期追踪"],fitStages:["口碑修复","长尾转化"],risk:"覆盖面小但信任度高"},
+   {id:"xhs_003",name:"设计感车生活",type:"lifestyle",city:"广州",fans:520000,avgViews:73000,engagementRate:8.1,costLevel:"中",categories:["外观设计","座舱体验","生活方式"],strengths:["高质感图片","审美表达","收藏率高"],fitStages:["品牌调性","上市预热"],risk:"不适合承担硬核技术解释"},
+   {id:"xhs_004",name:"懂车的Jane",type:"review",city:"上海",fans:690000,avgViews:88000,engagementRate:7.6,costLevel:"中高",categories:["智能驾驶","安全质量","价格权益"],strengths:["理性评测","女性视角","购买建议"],fitStages:["疑虑澄清","购买决策"],risk:"需要完整FAQ和价格权益口径"}
+  ]
+ }
+}
+function defaultAssetConfig(){
+ const comps=(state?.config?.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+ return{ownModel:state?.config?.model||"本品车型",competitor1:comps[0]||"",competitor2:comps[1]||"",competitor3:comps[2]||""};
+}
+function emptyAssetFiles(){return{douyin:{},xiaohongshu:{}}}
+function loadVideoState(){try{return normalizeVideoState(JSON.parse(localStorage.getItem(storageKey("mmnVideoState"))))}catch{return normalizeVideoState(null)}}
+function normalizeVideoState(raw){
+ const base={config:defaultAssetConfig(),files:emptyAssetFiles(),legacyItems:[]};
+ if(!raw)return base;
+ if(raw.config)base.config={...base.config,...raw.config};
+ if(raw.files)base.files=cleanAssetFiles(raw.files);
+ if(Array.isArray(raw.items)&&!raw.files)base.legacyItems=raw.items;
+ if(Array.isArray(raw.legacyItems))base.legacyItems=raw.legacyItems;
+ return base;
+}
+function cleanAssetFiles(files={}){
+ const cleaned=emptyAssetFiles();
+ assetPlatforms.forEach(p=>assetSlots.forEach(s=>{
+  const file=files?.[p.key]?.[s.key];
+  if(!file||file.pluginExportPath||String(file.source||"").includes("社媒助手"))return;
+  cleaned[p.key][s.key]=file;
+ }));
+ return cleaned;
+}
+function saveVideoState(){localStorage.setItem(storageKey("mmnVideoState"),JSON.stringify(videoState));queueWorkspaceSnapshot()}
+function loadCreatorState(){try{return normalizeCreatorState(JSON.parse(localStorage.getItem(storageKey("mmnCreatorState"))))}catch{return normalizeCreatorState(null)}}
+function normalizeCreatorState(raw){
+ const base={creators:defaultCreatorLibraries(),creatorNotes:{}};
+ let legacy=null;
+ try{legacy=JSON.parse(localStorage.getItem(storageKey("mmnVideoState")))}catch{}
+ if(legacy?.creators)base.creators={...base.creators,...legacy.creators};
+ if(raw?.creators)base.creators={...base.creators,...raw.creators};
+ base.creatorNotes=raw?.creatorNotes||legacy?.creatorNotes||{};
+ return base;
+}
+function saveCreatorState(){localStorage.setItem(storageKey("mmnCreatorState"),JSON.stringify(creatorState));queueWorkspaceSnapshot()}
+function loadVerticalState(){const base={sources:[],items:[],assetSummary:null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};try{return{...base,...(JSON.parse(localStorage.getItem(storageKey("mmnVerticalState")))||{})}}catch{return base}}
+function saveVerticalState(){localStorage.setItem(storageKey("mmnVerticalState"),JSON.stringify(verticalState));queueWorkspaceSnapshot()}
+function loadStrategyKb(){try{return JSON.parse(localStorage.getItem(storageKey("mmnStrategyKnowledgeBase")))||[]}catch{return[]}}
+function saveStrategyKb(){localStorage.setItem(storageKey("mmnStrategyKnowledgeBase"),JSON.stringify(strategyKb));queueWorkspaceSnapshot()}
+function mergeStrategyKnowledge(items=[]){
+ const existing=new Map(strategyKb.map(x=>[x.id,x]));
+ items.forEach(item=>{if(item?.id)existing.set(item.id,{...item,source:item.source||"rag_import"})});
+ strategyKb=[...existing.values()];
+ saveStrategyKb();
+ return items.length;
+}
+function defaultFounderArchive(){
+ return [
+  {id:"li-xiang-2026-01",brand:"理想",person:"李想",role:"创始人/CEO",platform:"微博",date:"2026-06-24",topic:"产品定义",type:"技术表达",content:"用家庭用户真实场景解释产品取舍，把配置、空间、能耗和智能化放回日常用车任务里讲。",sourceUrl:"公开互联网待接入",tags:["家庭场景","产品定义","用户价值"]},
+  {id:"he-xiaopeng-2026-01",brand:"小鹏",person:"何小鹏",role:"董事长/CEO",platform:"发布会",date:"2026-06-20",topic:"智能驾驶",type:"技术叙事",content:"强调技术路线、长期投入和体验边界，把智能驾驶从参数竞争转成可验证的用户体验。",sourceUrl:"公开互联网待接入",tags:["智驾","技术路线","长期主义"]},
+  {id:"lei-jun-2026-01",brand:"小米汽车",person:"雷军",role:"创始人/董事长",platform:"短视频",date:"2026-06-18",topic:"用户沟通",type:"高管IP",content:"用通俗语言降低技术理解门槛，通过个人信誉、工程细节和用户反馈建立品牌亲近感。",sourceUrl:"公开互联网待接入",tags:["用户沟通","工程细节","亲和表达"]},
+  {id:"li-bin-2026-01",brand:"蔚来",person:"李斌",role:"创始人/CEO",platform:"用户沟通会",date:"2026-06-15",topic:"服务体系",type:"品牌叙事",content:"围绕用户社区、补能体系和长期陪伴讲品牌，强调信任关系和服务确定性。",sourceUrl:"公开互联网待接入",tags:["用户社区","服务体系","长期信任"]}
+ ];
+}
+function loadFounderState(){try{return JSON.parse(localStorage.getItem(storageKey("mmnFounderDistill")))||{archive:defaultFounderArchive(),selectedPerson:"李想",lastOutput:""}}catch{return{archive:defaultFounderArchive(),selectedPerson:"李想",lastOutput:""}}}
+function saveFounderState(){localStorage.setItem(storageKey("mmnFounderDistill"),JSON.stringify(founderState));queueWorkspaceSnapshot()}
+async function loadFounderArchives(){
+ try{
+  const data=await api(`/api/founder-archives?edition=${encodeURIComponent(activeEdition())}`);
+  if(data.items?.length)founderState.archive=data.items.map(x=>({
+   id:x.id,brand:x.brand,person:x.person,role:x.role,published_at:x.published_at,date:x.published_at,
+   platform:x.platform,sourceName:x.source_name,sourceUrl:x.source_url,event_type:x.event_type,topic:x.event_type,type:x.event_type,
+   content:x.original_summary,originalSummary:x.original_summary,coreViewpoint:x.core_viewpoint,
+   languageStyleTags:x.language_style_tags||[],tags:x.language_style_tags||[],distillableTalk:x.distillable_talk,
+   promptTemplate:x.prompt_template,riskNote:x.risk_note,capturedAt:x.captured_at
+  }));
+  founderState.scheduler=data.scheduler;
+  founderState.sources=data.sources||[];
+  founderState.modelRoles=data.modelRoles||{};
+  saveFounderState();
+  renderFounderDistill();
+ }catch(e){renderFounderDistill()}
+}
+function founderRows(){
+ const q=founderSearch.trim().toLowerCase();
+ return (founderState.archive||[]).filter(x=>
+  (founderFilters.brand==="all"||x.brand===founderFilters.brand)&&
+  (founderFilters.person==="all"||x.person===founderFilters.person)&&
+  (founderFilters.topic==="all"||x.type===founderFilters.topic||x.topic===founderFilters.topic)&&
+  (!q||[x.brand,x.person,x.role,x.platform,x.topic,x.type,x.content,(x.tags||[]).join(" ")].join(" ").toLowerCase().includes(q))
+ ).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+}
+function founderProfile(person=founderState.selectedPerson){
+ const rows=(founderState.archive||[]).filter(x=>x.person===person);
+ const personRows=rows.length?rows:founderRows();
+ const tags=[...new Set(personRows.flatMap(x=>x.tags||[]))].slice(0,8);
+ const topics=[...new Set(personRows.map(x=>x.topic).filter(Boolean))].slice(0,6);
+ const brand=personRows[0]?.brand||"待选择品牌";
+ return {
+  brand,person:person||personRows[0]?.person||"待选择人物",role:personRows[0]?.role||"高管",
+  style:tags.length?`高频表达围绕${tags.slice(0,4).join("、")}展开，语言应保持具体、克制、可验证。`:"需要更多公开表达样本后再沉淀语言风格。",
+  narrative:topics.length?`品牌叙事主线：${topics.join(" / ")}。`:"品牌叙事框架待补充。",
+  tech:"技术表达要把参数翻译成用户可感知场景，并明确边界、证据和可验证动作。",
+  user:"用户沟通要先承认真实疑虑，再用产品证据、服务承诺和后续动作建立信任。",
+  defense:"舆论攻防不硬怼，优先拆清事实、口径、证据和下一步解决机制。",
+  prompt:`请模仿${brand}${person||"高管"}的公开表达风格，输出面向汽车用户的高管IP话术。要求：表达通俗、证据明确、少空话；先讲用户问题，再讲技术/产品逻辑，最后给出行动承诺。`
+ };
+}
+function founderKnowledgeItem(profile, output){
+ return {id:`founder_${Date.now()}`,type:"创始人蒸馏",title:`${profile.brand}${profile.person}｜高管IP话术模板`,body:output||profile.prompt,keywords:[profile.brand,profile.person,"高管IP","创始人蒸馏"],tags:[profile.brand,profile.person,"高管IP","创始人蒸馏"],targets:["创始人蒸馏","RAG知识库管理","MMN策略"],source:"founder_distillation",metadata:{brand:profile.brand,person:profile.person,domain:"高管IP话术"}};
+}
+function loadModelJudgments(){try{return JSON.parse(localStorage.getItem(storageKey("mmnModelJudgments")))||[]}catch{return[]}}
+function saveModelJudgments(){localStorage.setItem(storageKey("mmnModelJudgments"),JSON.stringify(modelJudgments));queueWorkspaceSnapshot()}
+function upsertModelJudgment(item){
+ if(!item?.id)return;
+ const idx=modelJudgments.findIndex(x=>x.id===item.id);
+ if(idx>=0)modelJudgments[idx]={...modelJudgments[idx],...item};
+ else modelJudgments.unshift(item);
+ modelJudgments=modelJudgments.slice(0,120);
+ saveModelJudgments();
+}
+function modelJudgmentsFor(model=state.config.model){
+ return (modelJudgments||[]).filter(x=>!model||x.model_name===model||x.model===model).sort((a,b)=>(b.created_at||b.createdAt||"").localeCompare(a.created_at||a.createdAt||""));
+}
+function loadModelIdentities(){try{return JSON.parse(localStorage.getItem(storageKey("mmnModelIdentities")))||{items:{},updatedAt:""}}catch{return{items:{},updatedAt:""}}}
+function saveModelIdentities(){localStorage.setItem(storageKey("mmnModelIdentities"),JSON.stringify(modelIdentities))}
+function modelIdentityFor(model){return modelIdentities.items?.[model]||null}
+const knownBrandNames=["沃尔沃","阿维塔","广汽埃安","奇瑞","别克","奥迪","宝马","奔驰","本田","智己","小米汽车","特斯拉","蔚来","极氪","理想","问界","比亚迪","吉利","吉利银河","领克","零跑","小鹏","广汽传祺","腾势","深蓝","长安","长安启源","五菱","丰田","大众","日产","MG","smart","firefly","待确认品牌"];
+function isBadBrandName(brand,model){
+ const b=String(brand||"").trim(),m=String(model||"").trim();
+ if(!b)return true;
+ if(!knownBrandNames.includes(b))return true;
+ if(b===m||m.startsWith(b)&&/\\d|PLUS|PRO|MAX|L|S|T|GT|EV|PHEV|DM|e-tron/i.test(m.slice(b.length)))return true;
+ if(/[0-9]|\\b(PLUS|PRO|MAX|GT|EV|PHEV|HEV|DM-i|DM-p|e-tron|Sportback|Hyper)\\b/i.test(b))return true;
+ if(b.length>8)return true;
+ return false;
+}
+function brandForDisplay(model){
+ const id=modelIdentityFor(model),qBrand=id?.brand_name||id?.brandName||"";
+ return isBadBrandName(qBrand,model)?brandForModel(model):qBrand;
+}
+function canonicalModelLabel(model){
+ const id=modelIdentityFor(model);
+ if(!id)return model;
+ const energy=id.energy_type||id.energyType||"";
+ const family=id.model_family||id.modelFamily||id.normalized_name||id.normalizedName||model;
+ return energy&&energy!=="UNKNOWN"?`${family} · ${energy}`:family;
+}
+async function ensureModelIdentities(models=[]){
+ const missing=[...new Set(models.filter(Boolean))].filter(m=>!modelIdentityFor(m)||isBadBrandName(modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName,m)||((modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName)==="待确认品牌"&&!modelIdentityFor(m)?.qwen_checked&&!modelIdentityFor(m)?.qwenChecked));
+ if(!missing.length||modelIdentitySyncing)return;
+ modelIdentitySyncing=true;
+ try{
+  const data=await api("/api/ai/model-identities",{method:"POST",body:JSON.stringify({edition:activeEdition(),models:missing.slice(0,80)})});
+  (data.items||[]).forEach(item=>{modelIdentities.items[item.raw_name||item.rawName||item.normalized_name]=item});
+  modelIdentities.updatedAt=new Date().toISOString();
+  saveModelIdentities();
+  if(document.querySelector("#data.active"))renderData();
+ }catch(err){
+  missing.forEach(m=>{const brand=brandForModel(m);modelIdentities.items[m]={raw_name:m,normalized_name:m,brand_name:brand,model_family:m,energy_type:"UNKNOWN",canonical_key:`${brand}|${m}|UNKNOWN|`,confidence:"local",qwen_checked:0,qwen_reason:err.message}});
+  saveModelIdentities();
+ }finally{
+  modelIdentitySyncing=false;
+ }
+}
+function defaultWorkspaceState(){
+ return{hierarchy:{group:"未登录客户空间",brands:[],activeScope:"本机临时模式"},knowledge:[
+  {tier:"MMN母知识库",scope:"平台方法论与汽车营销框架",items:13,storage:"平台只读"},
+  {tier:"客户私有知识库",scope:"登录后按企业空间隔离",items:0,storage:"企业隔离"},
+  {tier:"项目学习库",scope:"人工结论、项目复盘、数据版本",items:0,storage:"项目隔离"}
+ ],modelRouter:[
+  {provider:"无模型规则引擎",role:"本地评分、排名、分类、权限判断",status:"已运行"},
+  {provider:"OpenAI / ChatGPT",role:"复杂策略推理与报告生成",status:"可插拔"},
+  {provider:"MMN多模态能力层",role:"国内网络可用的多模态策略、摘要和RAG问答能力",status:"预留"},
+  {provider:"客户私有模型",role:"私有化或专属云部署",status:"预留"}
+ ],snapshots:[],updatedAt:""};
+}
+function assetModel(slot){return (videoState.config?.[assetSlots.find(s=>s.key===slot)?.field]||"").trim()}
+function assetPlatformName(key){return assetPlatforms.find(p=>p.key===key)?.name||key}
+function allVideoItems(){
+ const items=[...(videoState.legacyItems||[])];
+ assetPlatforms.forEach(p=>assetSlots.forEach(s=>{
+  const file=videoState.files?.[p.key]?.[s.key];
+  if(file?.items&&!file.pluginExportPath&&!String(file.source||"").includes("社媒助手"))items.push(...file.items);
+ }));
+ return items;
+}
+let session=loadSession(),serverLearnings=[];
+function loadSession(){try{return JSON.parse(localStorage.getItem("mmnCommercialSession"))||null}catch{return null}}
+function saveSession(s){session=s;localStorage.setItem("mmnCommercialSession",JSON.stringify(s));renderAccount()}
+async function api(path,options={}){const res=await fetch(path,{headers:{"Content-Type":"application/json",...(options.headers||{})},...options});const data=await res.json();if(!data.ok)throw new Error(data.error||"请求失败");return data}
+async function loadServerLearnings(){if(!session)return;try{const data=await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`);serverLearnings=data.items.map(x=>({...x,savedAt:x.saved_at,userId:x.user_id,orgId:x.org_id}));render()}catch(e){toast(`学习库同步失败：${e.message}`)}}
+async function loadWorkspace(){
+ if(!session){workspaceState=defaultWorkspaceState();renderWorkspace();return}
+ try{const data=await api(`/api/workspace?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`);workspaceState={...defaultWorkspaceState(),...data.workspace};renderWorkspace()}
+ catch(e){toast(`空间配置读取失败：${e.message}`)}
+}
+async function loadAiStatus(){
+ try{const data=await api("/api/ai/status");aiStatus=data;renderWorkspace()}
+ catch{aiStatus={qwen:{configured:false,model:"qwen-plus",baseUrl:"https://dashscope.aliyuncs.com/compatible-mode/v1"},deepseek:{configured:false,model:"deepseek-chat",baseUrl:"https://api.deepseek.com"},openai:{configured:false,model:"gpt-5.5",baseUrl:"https://api.openai.com/v1"},rules:{configured:true,model:"MMN规则引擎"}}}
+}
+function projectSnapshotPayload(){return{edition:activeEdition(),state,videoState,creatorState,verticalState,strategyKb,learnings:learnings().filter(x=>x.model===state.config.model),savedAt:new Date().toISOString()}}
+async function syncProjectSnapshot(silent=false){
+ if(!session){if(!silent)toast("请先进入客户空间，再保存项目快照");return}
+ try{
+  const data=await api("/api/project-state",{method:"POST",body:JSON.stringify({org_id:session.org_id,user_id:session.user_id,edition:activeEdition(),payload:projectSnapshotPayload()})});
+  workspaceState.snapshots=[{id:data.id,brand:state.config.brand,model:state.config.model,project:state.config.project,data_version:state.datasetVersion,created_at:data.createdAt},...(workspaceState.snapshots||[])].slice(0,8);
+  renderWorkspace();
+  if(!silent)toast("项目快照已保存到本地数据库");
+ }catch(e){if(!silent)toast(`快照保存失败：${e.message}`)}
+}
+function queueWorkspaceSnapshot(){if(!session)return;clearTimeout(workspaceSyncTimer);workspaceSyncTimer=setTimeout(()=>syncProjectSnapshot(true),1800)}
+function learnings(){if(session)return serverLearnings;try{return JSON.parse(localStorage.getItem(storageKey("mmnStrategyLearnings")))||[]}catch{return[]}}
+function saveLearnings(items){localStorage.setItem(storageKey("mmnStrategyLearnings"),JSON.stringify(items))}
+function similarLearnings(label,limit=3){return learnings().filter(x=>x.label===label||x.model===state.config.model).sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||"")).slice(0,limit)}
+function latestLearning(label){return learnings().filter(x=>x.model===state.config.model&&x.label===label).sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]}
+function modelOptions(){
+ const models=new Set([state.config.model]);
+ state.rows.forEach(r=>{if(r[0])models.add(r[0])});
+ (verticalState.items||[]).forEach(x=>{if(x.ownModel)models.add(x.ownModel);if(x.competitor)models.add(x.competitor)});
+ (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
+ return [...models].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+}
+function dataModelOptions(){
+ return [...new Set(state.rows.map(r=>r[0]).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+}
+function brandForModel(model){
+ const text=String(model||"").trim();
+ const rules=[
+  ["firefly","firefly"],["萤火虫","firefly"],
+  ["MG","MG"],
+  ["QQ冰淇淋","奇瑞"],["QQ3","奇瑞"],["QQ","奇瑞"],
+  ["RAV4","丰田"],
+  ["T-ROC","大众"],["探歌","大众"],
+  ["smart","smart"],["精灵","smart"],
+  ["沃尔沃","沃尔沃"],["Volvo","沃尔沃"],["EX90","沃尔沃"],["XC60","沃尔沃"],["XC90","沃尔沃"],["S90","沃尔沃"],
+  ["阿维塔","阿维塔"],["埃安","广汽埃安"],["AION","广汽埃安"],["艾瑞泽","奇瑞"],["瑞虎","奇瑞"],["风云","奇瑞"],
+  ["昂科威","别克"],["别克","别克"],["奥迪","奥迪"],["E5 Sportback","奥迪"],["E5","奥迪"],["宝马","宝马"],["i3","宝马"],["i5","宝马"],["iX3","宝马"],["奔驰","奔驰"],["本田","本田"],
+  ["智己","智己"],["小米","小米汽车"],["SU7","小米汽车"],["Model","特斯拉"],["蔚来","蔚来"],["ET","蔚来"],
+  ["ZEEKR","极氪"],["Zeekr","极氪"],["极氪","极氪"],["007","极氪"],["001","极氪"],["7X","极氪"],["8X","极氪"],["9X","极氪"],["理想","理想"],["L6","智己"],["LS","智己"],["问界","问界"],["比亚迪","比亚迪"],
+  ["秦","比亚迪"],["宋","比亚迪"],["唐","比亚迪"],["海鸥","比亚迪"],["海豚","比亚迪"],["海狮","比亚迪"],
+  ["银河","吉利银河"],["星愿","吉利"],["星瑞","吉利"],["领克","领克"],["零跑","零跑"],["小鹏","小鹏"],
+  ["传祺","广汽传祺"],["腾势","腾势"],["深蓝","深蓝"],["长安","长安"],["五菱","五菱"]
+ ];
+ const hit=rules.find(([k])=>text.toLowerCase().includes(k.toLowerCase()));
+ if(hit)return hit[1];
+ const cleaned=text.replace(/[A-Z0-9\\s].*$/,"").replace(/[\\-_/].*$/,"").trim();
+ return cleaned&&knownBrandNames.includes(cleaned)?cleaned:"待确认品牌";
+}
+function modelNameUnderBrand(brand,model){
+ const id=modelIdentityFor(model);
+ const b=String(brand||"").trim(),m=String(model||"").trim();
+ const aliases={
+  沃尔沃:["沃尔沃","Volvo"],
+  智己:["智己"],
+  奥迪:["奥迪","Audi"],
+  宝马:["宝马","BMW"],
+  奔驰:["奔驰","Mercedes-Benz","Mercedes"],
+  蔚来:["蔚来","NIO"],
+  小鹏:["小鹏"],
+  理想:["理想"],
+  问界:["问界"],
+  特斯拉:["特斯拉","Tesla"],
+  小米汽车:["小米"],
+  极氪:["极氪","ZEEKR","Zeekr"],
+  阿维塔:["阿维塔"],
+  奇瑞:["奇瑞"],
+  MG:["MG"],
+  丰田:["丰田","Toyota"],
+  大众:["大众","Volkswagen"],
+  smart:["smart"],
+  firefly:["firefly","萤火虫"],
+  待确认品牌:[],
+  比亚迪:["比亚迪"],
+  广汽埃安:["广汽埃安","埃安","AION"],
+  广汽传祺:["广汽传祺","传祺"],
+  吉利银河:["吉利银河","银河"]
+ };
+ const names=aliases[b]||[b];
+ let out=String(id?.display_model_name||id?.displayModelName||m).trim();
+ names.filter(Boolean).forEach(alias=>{out=out.replace(new RegExp(`^${alias}\\s*`,"i"),"")});
+ return out.trim()||m;
+}
+function brandModelGroups(models){
+ const groups={};
+ models.forEach(model=>{
+  const brand=brandForDisplay(model),id=modelIdentityFor(model);
+  const key=id?.canonical_key||id?.canonicalKey||`${brand}|${model}`;
+  const list=(groups[brand]||(groups[brand]=new Map()));
+  if(!list.has(key)||String(model).length>String(list.get(key)).length)list.set(key,model);
+ });
+ return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
+}
+function applyModelSelection(model){
+ const models=modelOptions();
+ if(!models.includes(model))return;
+ state.config.model=model;
+ state.config.brand=brandForModel(model);
+ const verticalComps=[...new Set((verticalState.items||[]).filter(x=>x.ownModel===model).sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999)).map(x=>x.competitor).filter(Boolean))];
+ const rowComps=[...new Set(state.rows.filter(r=>r[0]!==model).map(r=>r[0]).filter(Boolean))];
+ const comps=(verticalComps.length?verticalComps:rowComps.length?rowComps:models.filter(x=>x!==model)).slice(0,6);
+ state.config.competitor=comps.join(" / ");
+ state.config.project=`${model}认知诊断｜6车竞品评价`;
+}
+function score(r){const [sat,risk]=emotions[r[5]]||[0,0],iw=identityWeights[r[6]]||.85,pw=state.platforms[r[2]]||1,intw=intentWeights[r[7]]||.5,n=+r[8]||0,impact=+r[9]||3;return{positive:sat>0?n*sat*iw*pw*intw:0,negative:risk>0?n*risk*impact*pw*intw:0}}
+function analysis(){
+ const modelRows=state.rows.filter(r=>r[0]===state.config.model);
+ const own=modelRows;
+ const configuredComps=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+ const comp=own.length
+  ?state.rows.filter(r=>r[0]!==state.config.model&&(!configuredComps.length||configuredComps.includes(r[0])||r[1]==="竞品"))
+  :[];
+ const total=(arr,i)=>arr.reduce((s,r)=>s+(+r[i]||0),0), ownComments=total(own,8),compComments=total(comp,8);
+ let pos=0,neg=0,intent=0,target=0;own.forEach(r=>{const s=score(r);pos+=s.positive;neg+=s.negative;intent+=(+r[8]||0)*(intentWeights[r[7]]||.5);if(r[6]===state.config.targetIdentity)target+=+r[8]||0});
+ const scopedRows=own.length?[...own,...comp]:[];
+ const labels=[...new Set(scopedRows.map(r=>r[4]).filter(Boolean))].map(label=>{
+  const o=own.filter(r=>r[4]===label),c=comp.filter(r=>r[4]===label),sumScore=a=>a.reduce((z,r)=>{const s=score(r);z.p+=s.positive;z.n+=s.negative;return z},{p:0,n:0});
+  const os=sumScore(o),cs=sumScore(c),oShare=ownComments?total(o,8)/ownComments:0,cShare=compComments?total(c,8)/compComments:0,gap=cShare-oShare;
+  const impact=o.length?total(o,9)/o.length:3,growth=o.length?total(o,10)/o.length:1,competition=o.length?total(o,11)/o.length:3,white=Math.max(gap,0)*impact*growth/Math.max(competition,.1)*100;
+  let diagnosis=os.n>=state.config.riskThreshold?"优先修复":white>=1?"抢占空位":os.p>os.n?"持续放大":"补充样本";
+  let priority=diagnosis==="优先修复"?os.n/100:white*4*3.8;
+  return{label,category:(o[0]||c[0]||[])[3]||"",op:os.p,on:os.n,cp:cs.p,cn:cs.n,oShare,cShare,gap,impact,growth,competition,white,diagnosis,priority}
+ }).sort((a,b)=>b.priority-a.priority);
+ return{own,comp,pos,neg,nsr:pos+neg?pos/(pos+neg):0,ips:ownComments?target/ownComments:0,intent:ownComments?intent/ownComments:0,ownComments,labels};
+}
+function actionFor(x){
+ const type=x.diagnosis==="优先修复"?"风险修复":x.diagnosis==="抢占空位"?"认知抢位":x.diagnosis==="持续放大"?"资产放大":"数据补充";
+ const proposition=type==="风险修复"?`消除用户对“${x.label}”的购买疑虑`:type==="认知抢位"?`建立“${x.label}是本品差异化优势”的认知`:type==="资产放大"?`把“${x.label}”从口碑变成可复述卖点`:`补充“${x.label}”有效样本`;
+ const evidence=type==="风险修复"?"官方证据 + 第三方实测 + 车主答疑":type==="认知抢位"?"竞品对比 + 场景实验 + KOC矩阵":"技术解析 + 真实车主证词";
+ const platform=["价格","品牌信任"].includes(x.label)?"微博 + 汽车之家":["智能驾驶","底盘滤震","操控稳定"].includes(x.label)?"抖音 + 懂车帝":"小红书 + 抖音";
+ return{type,proposition,evidence,platform};
+}
+const knowhowLibrary={
+  价格:{why:"价格争议本质不是贵不贵，而是用户还没有把配置、权益、保值、使用成本合并成一笔账。",crowd:"价格敏感用户 / 高意向犹豫人群",message:"把价格从单点数字改写成“总拥有成本 + 权益确定性 + 同价位配置差”。",proof:"权益清单、同级配置对比、金融方案、车主真实用车成本",creator:"官方产品经理定规则，垂媒做横评，真实车主讲账本",risk:"避免硬怼用户嫌贵，先承认门槛，再证明值。"},
+  用车成本:{why:"用车成本会直接影响家庭决策和长周期持有信心。",crowd:"家庭用户 / 价格敏感用户",message:"把能耗、补能、保养、保险拆成真实场景账。",proof:"城市通勤能耗、长途补能记录、保养保险账单",creator:"车主日记 + 垂媒长测 + 门店顾问答疑",risk:"不要只给官方 CLTC，用真实路线和极端天气补证据。"},
+  安全:{why:"安全负面是高影响、低容忍问题，一旦进入购车决策，会压过外观和智能化好感。",crowd:"家庭用户 / 目标核心人群",message:"从“我说安全”切到“看得见、测得出、有人背书的安全”。",proof:"碰撞结构、主动安全触发、极端工况测试、第三方评价",creator:"工程师解释底层逻辑，第三方做实测，家庭用户讲安心感",risk:"不要空喊安全，必须有可验证画面和测试条件。"},
+  质量:{why:"质量怀疑会放大新品牌或新车型的不确定感，影响下订和推荐。",crowd:"目标核心人群 / 增量人群",message:"把抽象质量变成制造标准、品控流程、长期耐久和售后承诺。",proof:"工厂品控、耐久测试、交付质检、售后响应 SLA",creator:"工厂探访 + 长测车主 + 售后负责人",risk:"不要只解释个案，要给系统性机制和改进闭环。"},
+  "动力与操控":{why:"动力操控是情绪资产，也容易被竞品用参数或圈速抢走话语权。",crowd:"性能用户 / 科技用户",message:"把参数翻译成日常可感知的稳、准、快、舒服。",proof:"麋鹿测试、制动距离、山路/高架/雨天场景、竞品同场对比",creator:"专业测评人拉开差距，车主补充日常体感",risk:"避免只拼极限成绩，要回到用户每天开车的价值。"},
+  "辅助/自动驾驶":{why:"智驾是高关注赛道，但用户更关心可用边界和接管焦虑。",crowd:"科技用户 / 高意向人群",message:"少讲概念，多讲“哪些路能用、什么时候好用、边界在哪里”。",proof:"城区/高速实录、接管次数、复杂路口通过率、OTA计划",creator:"工程师说明边界，KOC做连续通勤实测",risk:"不要过度承诺无人驾驶，边界透明反而增加信任。"},
+  智能座舱:{why:"座舱好感通常来自第一眼体验，但需要持续内容把新鲜感变成使用黏性。",crowd:"科技用户 / 增量人群",message:"用高频任务展示座舱效率：导航、语音、娱乐、家庭协作。",proof:"功能录屏、任务挑战、用户场景脚本",creator:"数码博主 + 家庭用户 + 门店体验官",risk:"避免堆功能名，必须用“一个场景解决一个麻烦”。"},
+  外观:{why:"外观是破圈入口，但只靠审美容易短热，必须连接身份和场景。",crowd:"增量人群 / 年轻用户",message:"把设计语言转成身份标签、城市生活方式和社交表达。",proof:"设计师解读、街拍、改色案例、真实用户照片",creator:"设计师 + 生活方式达人 + 摄影师",risk:"不要自嗨式审美，要让用户参与二创。"},
+  内饰:{why:"内饰决定坐进去的高级感，也是静态体验转化的重要触点。",crowd:"家庭用户 / 增量人群",message:"把材质、收纳、交互和舒适打包成“每天坐进去都舒服”。",proof:"材质细节、夜间氛围、亲子/通勤场景、竞品静态对比",creator:"女性/家庭 KOC + 门店体验短视频",risk:"避免只拍豪华感，要拍耐脏、易用、顺手。"},
+  空间:{why:"空间不是尺寸竞赛，用户在意的是乘坐、储物、亲子、露营等具体任务。",crowd:"家庭用户",message:"用真实物品和真实乘员证明空间效率。",proof:"儿童座椅、后备箱装载、二排腿部/头部、长途乘坐",creator:"家庭车主 + 亲子达人 + 门店场景演示",risk:"不要只报轴距，要展示“能不能装、坐得累不累”。"},
+  舒适性:{why:"舒适性连接家庭购买和高级感，是试驾最容易感知的转化点。",crowd:"家庭用户 / 目标核心人群",message:"把滤震、静谧、座椅、空调变成可比较的乘坐体验。",proof:"NVH测试、烂路滤震、水杯实验、长途乘坐反馈",creator:"车主长测 + 专业测评 + 家庭乘客视角",risk:"不要只讲配置，要把体感做成可看见的实验。"},
+  用户服务:{why:"服务影响下订后的确定感，尤其对新势力和新车型会放大信任问题。",crowd:"目标核心人群 / 高意向人群",message:"把服务承诺从口号变成流程、时效、责任人和案例。",proof:"交付流程、售后响应时效、用户案例、服务网点覆盖",creator:"交付专家 + 真实车主 + 区域门店",risk:"不要只晒好评，要展示问题如何被解决。"},
+  总体口碑:{why:"总体口碑是所有具体问题叠加后的信任温度，会影响搜索、到店和推荐。",crowd:"目标核心人群 / 高意向人群",message:"先处理高风险负面，再用真实车主和第三方评价重建信任。",proof:"口碑样本复盘、车主证词、第三方横评、问题闭环",creator:"品牌负责人定调，车主和媒体补信任",risk:"不要用一条大广告解决口碑，要用连续证据修复。"}
+};
+function knowhowFor(x){
+ const base=knowhowLibrary[x.label]||{why:`“${x.label}”正在影响用户对车型价值的判断。`,crowd:"目标核心人群 / 高意向人群",message:`把“${x.label}”从产品参数翻译成用户可感知的购买理由。`,proof:"场景实测、竞品对比、真实车主证词",creator:"产品专家 + KOC + 垂媒测评",risk:"避免只讲参数，必须给场景和证据。"};
+ const ac=actionFor(x);
+ const mode=x.diagnosis==="优先修复"?"先止血：先承认疑虑，再用证据拆解风险":x.diagnosis==="抢占空位"?"抢心智：在竞品更强的赛道里找到本品可占据的具体场景":x.diagnosis==="持续放大"?"做资产：把已有好评包装成用户能复述的卖点":"补样本：先拿到更多有效评价，再决定放大还是修复";
+ const kpi=x.diagnosis==="优先修复"?"负面评论占比下降、搜索联想改善、试驾转化恢复":x.diagnosis==="抢占空位"?"目标标签声量提升、竞品领先 Gap 收窄、收藏/询价提升":"正向内容复述率、自然转发、KOC 二创数量";
+ return{...base,...ac,mode,kpi};
+}
+function platformAdvice(platform){
+ const map={
+  抖音:"用强画面和强对比抓第一认知：实测、挑战、场景短剧、车主反应。",
+  微博:"处理争议和公共议题：口径统一、信息澄清、负责人回应、热搜话题承接。",
+  B站:"适合深度解释：长测、拆解、工程逻辑、横评复盘，建立理性信任。",
+  微信视频号:"适合熟人传播和门店转化：直播答疑、车主故事、本地试驾邀请。",
+  垂媒车主口碑:"适合影响高意向人群：真实车主口碑、车型论坛答疑、垂媒横评。",
+  今日头条:"适合扩大泛人群覆盖：标题清晰、利益点明确、争议点快速解释。",
+  其他:"承接长尾搜索和补充曝光：把核心证据沉淀成可检索内容。",
+  小红书:"适合生活方式和家庭场景：真实体验、女性/家庭视角、图文收藏。",
+  懂车帝:"适合参数和横评：榜单、测试、配置解释、购车决策对比。",
+  汽车之家:"适合口碑与询价：车主评价、配置表、价格权益、到店线索。"
+ };
+ return map[platform]||"根据平台用户心智选择内容形态：短视频抓注意，长内容建信任，社区内容做转化。";
+}
+function money(n){return `${n.toFixed(1)} 万`}
+function render(){
+ const a=analysis();
+ renderEditionChrome();
+ renderAccount();
+ document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=state.config.competitor;document.querySelector("#dash-samples").textContent=`${a.ownComments.toLocaleString()} 条`;
+ document.querySelector("#kpi-nsr").textContent=(a.nsr*100).toFixed(1)+"%";document.querySelector("#kpi-nsr-note").textContent=a.nsr>=.7?"口碑健康":"需要优先处理购买阻力";document.querySelector("#kpi-ips").textContent=(a.ips*100).toFixed(1)+"%";document.querySelector("#kpi-intent").textContent=a.intent.toFixed(2);document.querySelector("#kpi-risk").textContent=Math.round(a.neg).toLocaleString();document.querySelector("#kpi-risk-note").textContent=`阈值 ${state.config.riskThreshold.toLocaleString()}`;
+ renderDashboard(a);renderData();renderCognition(a);renderVertical();renderVideos();renderActions(a);renderKnowhow(a);renderFounderDistill();renderStrategyKb();renderLearning(a);renderArchitecture();renderWorkspace();renderConfig();
+}
+function renderEditionChrome(){
+ const cfg=currentEdition();
+ document.body.dataset.edition=edition;
+ document.title=cfg.title;
+ document.querySelectorAll("[data-edition]").forEach(b=>b.classList.toggle("active",b.dataset.edition===edition));
+ const eyebrow=document.querySelector("#edition-eyebrow");if(eyebrow)eyebrow.textContent=cfg.eyebrow;
+ const sideTitle=document.querySelector("#side-run-title");if(sideTitle)sideTitle.textContent=cfg.sideTitle;
+ const sideDesc=document.querySelector("#side-run-desc");if(sideDesc)sideDesc.textContent=cfg.sideDesc;
+ const logo=document.querySelector(".brand-logo");if(logo&&logo.getAttribute("src")!==cfg.logo){logo.src=cfg.logo;logo.alt=edition==="china"?"MMN 艾姆恩多模态营销引擎":"MMN Multi-Marketing Network";}
+ renderSalesMarquee();
+}
+function renderSalesMarquee(){
+ const wrap=document.querySelector("#sales-marquee"),label=document.querySelector(".sales-marquee-label"),track=document.querySelector("#sales-marquee-track");
+ if(!wrap||!track)return;
+ label.textContent=edition==="china"?"国内销量快讯":"Global Watch";
+ const liveItems=salesMarquee.edition===edition&&salesMarquee.items?.length?salesMarquee.items:null;
+ const baseItems=edition==="china"
+  ?(liveItems||[{text:"懂车帝销量榜接入中..."}])
+  :(liveItems||currentEdition().ticker||[{text:"Global market data sources pending"}]);
+ const suffix=edition==="china"?(salesMarquee.status==="live"?"实时页":"接入状态"):(salesMarquee.status==="local"?"Thailand data":"Global sources");
+ const texts=baseItems.map(x=>x.text||`${x.label||"销量榜"} ${x.month||""}`).filter(Boolean);
+ const repeated=edition==="china"
+  ?[...texts, ...texts, `${suffix}：${salesMarquee.note||"等待数据源刷新"}`]
+  :[...texts, ...texts, `${suffix}：${salesMarquee.edition===edition&&salesMarquee.note?salesMarquee.note:"Thailand / ASEAN / TikTok / YouTube data pipeline"} `];
+ track.innerHTML=repeated.map(t=>`<span>${t}</span>`).join("");
+}
+async function loadSalesMarquee(){
+ try{
+  const targetEdition=edition;
+  const data=await api(targetEdition==="global"?"/api/global-sales-marquee":"/api/sales-marquee");
+  salesMarquee={edition:targetEdition,status:data.status||"limited",items:data.items||[],note:data.note||""};
+ }catch(e){
+  salesMarquee={edition,status:"limited",items:[{text:edition==="global"?"泰国汽车市场数据接入受限：请检查月度更新日志":"懂车帝销量榜接入受限：请稍后刷新或接入正式数据接口"}],note:e.message};
+ }
+ renderSalesMarquee();
+}
+function renderAccount(){
+ const btn=document.querySelector("#account-button");if(!btn)return;
+ btn.textContent=session?`客户空间：${session.org} / ${session.name}`:"客户空间：未登录";
+ btn.classList.toggle("primary",!!session);
+}
+function renderModelSwitcher(){
+ const models=modelOptions(),wrap=document.querySelector("#dash-model");
+ const groups=brandModelGroups(models);
+ if(!dashBrandOpen||!groups.some(g=>g.brand===dashBrandOpen))dashBrandOpen=brandForDisplay(state.config.model);
+ const activeGroup=groups.find(g=>g.brand===dashBrandOpen)||groups[0]||{brand:"",models:[]};
+ const activeModels=activeGroup.models;
+ wrap.innerHTML=`<div class="dash-model-selects"><select id="dash-brand-select" aria-label="选择品牌">${groups.map(g=>`<option value="${escapeAttr(g.brand)}" ${g.brand===dashBrandOpen?"selected":""}>${g.brand}</option>`).join("")}</select><select id="dash-model-select" aria-label="选择车型">${activeModels.map(m=>`<option value="${escapeAttr(m)}" ${m===state.config.model?"selected":""}>${m}</option>`).join("")}</select></div>`;
+ const brandSelect=wrap.querySelector("#dash-brand-select"),modelSelect=wrap.querySelector("#dash-model-select");
+ brandSelect.onchange=()=>{dashBrandOpen=brandSelect.value;renderModelSwitcher()};
+ modelSelect.onchange=()=>{applyModelSelection(modelSelect.value);dashBrandOpen=brandForDisplay(modelSelect.value);save();render();toast(`已切换为 ${modelSelect.value}`)};
+}
+function renderDashboard(a){
+ const top=[...a.labels].sort((x,y)=>Math.max(y.op,y.on)-Math.max(x.op,x.on)).slice(0,6),max=Math.max(...top.flatMap(x=>[x.op,x.on]),1);
+ document.querySelector("#asset-chart").innerHTML=top.length?top.map(x=>`<div class="bar-row"><b>${x.label}</b><div class="tracks"><i class="pos" style="width:${x.op/max*100}%"></i><i class="neg" style="width:${x.on/max*100}%"></i></div><span class="bar-value">${Math.round(x.op-x.on).toLocaleString()}</span></div>`).join(""):`<div class="empty-state">暂无 ${state.config.model} 的认知资产数据，请先导入该车型声量数据。</div>`;
+ const selected=a.labels.filter(x=>x.priority>0).slice(0,4);document.querySelector("#top-actions").innerHTML=selected.map(x=>{const ac=actionFor(x);return`<div class="action-card ${ac.type==="风险修复"?"risk":""}"><div><b>${ac.type} · ${x.label}</b><p>${ac.proposition}</p></div><span class="score">${x.priority.toFixed(1)}</span></div>`}).join("")||"<p>暂无可执行建议，请补充数据。</p>";
+ renderModelJudgmentWorkbench();
+ renderDashboardData(a);
+ renderDashboardCognition(a);
+ renderOpportunityMap(a);
+}
+function renderModelJudgmentWorkbench(){
+ const box=document.querySelector("#model-judgment-result");if(!box)return;
+ const items=modelJudgmentsFor(state.config.model).slice(0,5);
+ box.innerHTML=items.length?`<div class="model-judgment-list">${items.map(item=>`<article class="model-judgment-card"><div><span>${item.dimension||"综合判断"} · ${item.brand_name||state.config.brand}</span><b>${item.model_name||state.config.model}</b></div><p>${item.viewpoint||item.source_text||""}</p><dl><dt>归因</dt><dd>${item.attribution||"待补充"}</dd><dt>策略动作</dt><dd>${item.strategy_implication||"待补充"}</dd><dt>还缺证据</dt><dd>${item.evidence_needed||"待补充"}</dd></dl><small>${(item.tags||[]).slice(0,8).map(x=>`#${x}`).join(" ")}｜${(item.created_at||item.createdAt||"").slice(0,10)}</small></article>`).join("")}</div>`:`<p class="empty">还没有沉淀到 ${state.config.model} 的车型判断。你可以直接输入一句判断，MMN会自动拆成车型资产。</p>`;
+}
+function renderDashboardData(a){
+ const rows=a.own.slice(0,8),platforms=[...new Set(a.own.map(r=>r[2]).filter(Boolean))];
+ document.querySelector("#dashboard-data-note").textContent=a.own.length?(state.sourceNote||"已按当前车型筛选"):`${state.config.model} 暂无数据`;
+ document.querySelector("#dashboard-data-summary").innerHTML=[
+  ["车型数",a.own.length?1:0],
+  ["平台数",platforms.length],
+  ["当前车型样本",a.ownComments.toLocaleString()],
+  ["本品样本",a.ownComments.toLocaleString()]
+ ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
+ document.querySelector("#dashboard-data-table").innerHTML=`<thead><tr><th>车型</th><th>平台</th><th>赛道</th><th>标签</th><th>情绪</th><th>样本</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${(+r[8]||0).toLocaleString()}</td></tr>`).join(""):`<tr><td colspan="6" class="empty-cell">暂无 ${state.config.model} 的声量数据，请导入该车型 Excel / CSV，或切换到已有数据的车型。</td></tr>`}</tbody>`;
+}
+function renderDashboardCognition(a){
+ const rows=a.labels.slice(0,8);
+ document.querySelector("#dashboard-cognition-table").innerHTML=`<thead><tr><th>认知标签</th><th>诊断</th><th>本品负向</th><th>Gap</th><th>优先级</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td><b>${x.label}</b><small>${x.category}</small></td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.priority.toFixed(1)}</td></tr>`).join(""):`<tr><td colspan="5" class="empty-cell">暂无 ${state.config.model} 的认知诊断数据，导入该车型声量后会自动计算。</td></tr>`}</tbody>`;
+}
+function renderOpportunityMap(a){
+ const all=a.labels.filter(x=>x.op+x.on+x.cp+x.cn>0),filtered=mapFilter==="all"?all:all.filter(x=>x.diagnosis===mapFilter),ranked=[...filtered].sort((x,y)=>bigness(y)-bigness(x)),shown=ranked.slice(0,mapLimit),maxGap=Math.max(...all.map(x=>Math.abs(x.gap)),.01);
+ document.querySelectorAll("#map-filters button").forEach(b=>b.classList.toggle("active",b.dataset.filter===mapFilter));
+ document.querySelector("#map-limit").value=String(mapLimit);
+ document.querySelector("#map-summary").textContent=`当前筛选 ${filtered.length} 个标签，地图显示 Top ${shown.length}；完整结果见下方列表。`;
+ document.querySelector("#opportunity-map").innerHTML=shown.length?layoutBubbles(shown.map(x=>{const left=50+(x.gap/maxGap)*42,bottom=Math.min(88,Math.max(9,x.impact/5*84)),cls=x.on>=state.config.riskThreshold?"risk":x.gap>0?"chance":"asset";return{...x,left,bottom,cls,w:Math.max(54,x.label.length*13+22),h:27}})).map(b=>`<span class="bubble ${b.cls}" style="left:${b.x}%;bottom:${b.y}%" title="${b.label}｜${b.diagnosis}｜Gap ${(b.gap*100).toFixed(1)}%｜优先级 ${b.priority.toFixed(1)}"><i style="width:${Math.hypot(b.x-b.left,b.y-b.bottom)*3.2}px;transform:rotate(${Math.atan2(b.bottom-b.y,b.left-b.x)}rad)"></i>${b.label}</span>`).join(""):`<div class="map-empty">当前筛选下暂无可展示标签</div>`;
+ document.querySelector("#opportunity-table").innerHTML=`<thead><tr><th>认知标签</th><th>赛道</th><th>诊断</th><th>本品负向</th><th>认知 Gap</th><th>Impact</th><th>优先级</th></tr></thead><tbody>${ranked.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.priority.toFixed(1)}</td></tr>`).join("")}</tbody>`;
+}
+function bigness(x){return (x.priority||0)*1000+(x.on||0)+Math.max(x.op||0,x.cp||0)}
+function layoutBubbles(items){
+ const placed=[],vw=860,vh=310,pad=5,overlap=(a,b)=>!(a.x+a.w/2+pad<b.x-b.w/2||a.x-a.w/2-pad>b.x+b.w/2||a.y+a.h/2+pad<b.y-b.h/2||a.y-a.h/2-pad>b.y+b.h/2);
+ return items.sort((a,b)=>b.priority-a.priority).map(it=>{const baseX=it.left/100*vw,baseY=(100-it.bottom)/100*vh,candidates=[];for(let r=0;r<=120;r+=14){for(let deg=0;deg<360;deg+=30){const rad=deg*Math.PI/180,x=Math.min(vw-it.w/2,Math.max(it.w/2,baseX+Math.cos(rad)*r)),y=Math.min(vh-it.h/2,Math.max(it.h/2,baseY+Math.sin(rad)*r));candidates.push({x,y,dist:Math.hypot(x-baseX,y-baseY)})}}candidates.sort((a,b)=>a.dist-b.dist);let pick=candidates.find(c=>!placed.some(p=>overlap({...c,w:it.w,h:it.h},p)))||candidates[0];const b={...it,x:pick.x/vw*100,y:100-pick.y/vh*100,_x:pick.x,_y:pick.y,w:it.w,h:it.h};placed.push({x:pick.x,y:pick.y,w:it.w,h:it.h});return b}).sort((a,b)=>a.left-b.left);
+}
+function dataRowsForView(){
+ return state.rows.map((r,i)=>({r,i})).filter(x=>(dataBrandFilter==="all"||brandForDisplay(x.r[0])===dataBrandFilter)&&(dataModelFilter==="all"||x.r[0]===dataModelFilter)&&(dataTrafficFilter==="all"||trafficType(x.r)===dataTrafficFilter)&&x.r.join(" ").toLowerCase().includes(dataSearch.toLowerCase()));
+}
+function isContentPlatform(platform){return ["抖音","小红书"].includes(String(platform||"").trim())}
+function trafficType(r){
+ if(!isContentPlatform(r[2]))return"其他平台";
+ const explicit=String(r[12]||"").trim();
+ if(/商业|投放|广告|合作|报备|达人|kol|KOL|官方|品牌|蒲公英|巨量|dou\+|DOU\+/i.test(explicit))return"商业化声量";
+ if(/自然|自来水|用户|车主|口碑|ugc|UGC|真实|体验/i.test(explicit))return"自然声量";
+ const text=r.join(" ");
+ if(/信息流|广告|投放|商业化|达人合作|KOL|kol|报备|品牌号|官方|挑战赛|硬广|软广|蒲公英|巨量|dou\+|DOU\+/i.test(text))return"商业化声量";
+ if(/车主|真实|提车|用车|口碑|吐槽|长测|测评|试驾|路人|自来水|UGC|ugc|用户证词|真实口碑/i.test(text))return"自然声量";
+ return"未识别";
+}
+function aggregateRows(rows,idx){
+ const m={};rows.forEach(({r})=>{const k=r[idx]||"未识别";if(!m[k])m[k]={key:k,count:0,positive:0,negative:0};const s=score(r);m[k].count+=+r[8]||0;m[k].positive+=s.positive;m[k].negative+=s.negative});return Object.values(m).sort((a,b)=>b.count-a.count);
+}
+function aggregateTraffic(rows){
+ const m={};rows.filter(x=>isContentPlatform(x.r[2])).forEach(({r})=>{const k=`${r[2]} · ${trafficType(r)}`;if(!m[k])m[k]={key:k,count:0};m[k].count+=+r[8]||0});return Object.values(m).sort((a,b)=>b.count-a.count);
+}
+function renderDataBars(sel,data,mode="count",drill=""){
+ const max=Math.max(...data.map(x=>x[mode]||0),1);
+ document.querySelector(sel).innerHTML=data.slice(0,8).map(x=>`<button type="button" class="data-bar" data-drill="${drill}" data-key="${escapeAttr(x.key)}" title="点击查看${x.key}拆解"><b>${x.key}</b><div><i class="${mode==="negative"?"neg":""}" style="width:${(x[mode]||0)/max*100}%"></i></div><span>${Math.round(x[mode]||0).toLocaleString()}</span></button>`).join("")||"<p class='empty'>暂无数据</p>";
+ document.querySelectorAll(`${sel} [data-drill]`).forEach(b=>b.onclick=()=>openDataDrill(b.dataset.drill,b.dataset.key));
+}
+function emotionMeaning(name){
+ return {
+  兴奋:"强正向情绪，代表用户被卖点、体验或内容强烈打动，适合放大为核心传播资产。",
+  惊喜:"超预期正向反馈，通常来自配置、价格、体验反差或内容创意，可转化成破圈素材。",
+  期待:"潜在购买兴趣，用户还在等待价格、权益、交付、实测或口碑证据，需要持续转化。",
+  信任:"稳定正向信号，说明证据链有效，可沉淀为销售话术和长期口碑资产。",
+  认可:"理性正向评价，说明用户接受某个产品点或品牌动作，适合做垂媒/社区解释型内容。",
+  自豪:"身份认同型正向情绪，适合做车主故事、社群传播和用户共创。",
+  怀疑:"低强度疑虑，用户还没被证据说服，需要补第三方验证、真实车主和透明解释。",
+  焦虑:"购买阻力正在形成，常见于价格、权益、补能、质量和交付，需要优先释疑。",
+  失望:"明确负向反馈，说明用户预期落空，需要定位触发点并用产品改进或证据修复。",
+  愤怒:"高风险负向情绪，可能扩散成公关问题，需要快速响应、统一口径和闭环机制。",
+  后悔:"强购买后负向，影响口碑推荐和复购，需要售后、车主沟通和问题闭环。",
+  嘲讽:"社交化负向表达，容易二创扩散，需要避免硬刚，用事实证据和轻量化回应降温。"
+ }[name]||"该标签代表一类用户情绪，需要结合平台、赛道、认知标签和样本明细判断下一步动作。";
+}
+function rowsForDrill(type,key){
+ const base=dataRowsForView();
+ const idx={platform:2,category:3,emotion:5,label:4}[type];
+ if(type==="traffic")return base.filter(x=>`${x.r[2]} · ${trafficType(x.r)}`===key);
+ if(idx!==undefined)return base.filter(x=>String(x.r[idx]||"未识别")===key);
+ return base;
+}
+function topBreakdown(rows,idx,limit=5){
+ return aggregateRows(rows,idx).slice(0,limit);
+}
+function drillPlan(type,key,rows){
+ const total=rows.reduce((s,x)=>s+(+x.r[8]||0),0),scores=rows.reduce((m,x)=>{const s=score(x.r);m.p+=s.positive;m.n+=s.negative;return m},{p:0,n:0});
+ const topLabel=topBreakdown(rows,4,1)[0]?.key||key,topPlatform=topBreakdown(rows,2,1)[0]?.key||"核心平台",topCategory=topBreakdown(rows,3,1)[0]?.key||"核心赛道";
+ const isBad=scores.n>scores.p||["失望","焦虑","怀疑","愤怒","后悔","嘲讽"].includes(key);
+ const direction=isBad?"先修复，再转化":"先放大，再转化";
+ const action=isBad?`围绕“${topLabel}”建立证据链：第三方实测、车主真实反馈、官方解释三层内容同步上。`:`把“${topLabel}”包装成可复述卖点：短视频强画面、垂媒理性解释、车主证词共同放大。`;
+ return{total,scores,lines:[
+  `判断：${key} 当前主要集中在 ${topPlatform} / ${topCategory}，有效样本 ${total.toLocaleString()}。`,
+  `策略：${direction}。${action}`,
+  `下一步：把该拆解结果进入“行动与预算”，优先制作 ${topPlatform} 内容包，并跟踪该情绪占比和负向风险变化。`
+ ]};
+}
+function qwenContext(type,key,rows,plan){
+ const rag=ragSearch({query:key,rows,limit:5});
+ return {
+  project: state.config.project,
+  brand: state.config.brand,
+  model: state.config.model,
+  competitor: state.config.competitor,
+  drillType: type,
+  drillKey: key,
+  summary: {
+   samples: plan.total,
+   positiveScore: Math.round(plan.scores.p),
+   negativeScore: Math.round(plan.scores.n)
+  },
+  breakdown: {
+   models: topBreakdown(rows,0),
+   platforms: topBreakdown(rows,2),
+   categories: topBreakdown(rows,3),
+   labels: topBreakdown(rows,4),
+   emotions: topBreakdown(rows,5)
+  },
+  wordCloud: wordCloudForRows(rows),
+  knowhow: plan.lines,
+  learning: rows.length ? similarLearnings(topBreakdown(rows,4,1)[0]?.key||key,3) : [],
+  ragReferences: rag
+ };
+}
+function wordCloudForRows(rows){
+ const dict=[
+  ["产品卖点",["智驾","智能驾驶","座舱","空间","舒适","底盘","操控","续航","补能","安全","质量","内饰","外观","动力"]],
+  ["价格权益",["价格","权益","优惠","补贴","金融","定价","性价比","贵","值"]],
+  ["使用场景",["家庭","通勤","长途","露营","亲子","城市","高速","二排","后备箱"]],
+  ["信任风险",["怀疑","焦虑","失望","愤怒","后悔","吐槽","质量","安全","故障","投诉","品牌信任"]],
+  ["内容表达",["抖音","小红书","达人","KOL","测评","试驾","长测","车主","口碑","官方","投放"]],
+  ["竞品对比",["竞品","对比","PK","理想","小米","蔚来","极氪","特斯拉","问界"]]
+ ];
+ const m={};
+ rows.forEach(({r})=>{
+  const text=r.join(" ");
+  dict.forEach(([group,words])=>words.forEach(w=>{if(text.includes(w)){const key=`${group} / ${w}`;m[key]=(m[key]||0)+(+r[8]||1)}}));
+ });
+ return Object.entries(m).map(([key,count])=>({key,count})).sort((a,b)=>b.count-a.count).slice(0,18);
+}
+function drillKnowhowHtml(type,key,rows){
+ const topLabel=topBreakdown(rows,4,1)[0]?.key||key,topCategory=topBreakdown(rows,3,1)[0]?.key||"",scores=rows.reduce((m,x)=>{const s=score(x.r);m.p+=s.positive;m.n+=s.negative;return m},{p:0,n:0});
+ const diagnosis=scores.n>scores.p?"优先修复":"持续放大",k=knowhowFor({label:topLabel,category:topCategory,diagnosis,priority:0}),learned=latestLearning(topLabel)||similarLearnings(topLabel,1)[0],kb=ragSearch({query:`${key} ${topLabel} ${topCategory}`,rows,limit:3});
+ return `<div class="drill-grid drill-knowledge">
+  <article><h3>Know-how 建议</h3><dl><dt>核心判断</dt><dd>${k.why}</dd><dt>参考打法</dt><dd>${k.message}</dd><dt>证据链</dt><dd>${learned?.evidence||k.proof}</dd><dt>平台动作</dt><dd>${learned?.platform||k.platform}</dd><dt>KPI</dt><dd>${learned?.kpi||k.kpi}</dd></dl></article>
+  <article><h3>Learning / RAG引用依据</h3>${learned?`<div class="learned-tip"><b>已学习案例</b><span>${learned.conclusion||"已保存人工判断"}</span><em>${learned.recommendation||""}</em></div>`:`<p class="empty">当前还没有针对“${topLabel}”的人工学习案例。可以在“人工结论学习”里补充判断，之后这里会自动引用。</p>`}${kb.length?`<div class="kb-tip"><b>RAG召回知识</b>${kb.map(item=>`<span><strong>${item.title}</strong>｜${item.body}<em>依据：${item.reason}｜分数 ${item.score}</em></span>`).join("")}</div>`:`<p class="empty">RAG知识库暂无匹配片段。</p>`}</article>
+ </div>`;
+}
+function drillWordCloudHtml(rows){
+ const words=wordCloudForRows(rows);
+ return `<article class="drill-wordcloud"><h3>词云分类</h3><div>${words.length?words.map((x,i)=>`<span style="--s:${Math.max(12,22-i)}px">${x.key}<em>${Math.round(x.count).toLocaleString()}</em></span>`).join(""):`<p class="empty">当前导入数据缺少原始评论、标题、字幕或关键词，只能基于赛道/标签做弱分类。建议补充原文或词云字段。</p>`}</div><small>建议补充：原始评论、内容标题、字幕全文、话题标签、搜索词、作者类型、互动量、商业化/自然声量标记。</small></article>`;
+}
+function openDataDrill(type,key){
+ const rows=rowsForDrill(type,key),dialog=document.querySelector("#data-drill-dialog"),body=document.querySelector("#data-drill-body");
+ const labels={platform:"平台",category:"赛道",emotion:"情绪",label:"认知标签",traffic:"声量性质"},plan=drillPlan(type,key,rows);
+ currentDrillContext=qwenContext(type,key,rows,plan);
+ document.querySelector("#data-drill-title").textContent=`${labels[type]||"声量"}拆解｜${key}`;
+ const summary=[["样本量",plan.total.toLocaleString()],["正向分",Math.round(plan.scores.p).toLocaleString()],["负向风险",Math.round(plan.scores.n).toLocaleString()],["涉及车型",new Set(rows.map(x=>x.r[0])).size.toLocaleString()]];
+ const detailRows=rows.slice().sort((a,b)=>(+b.r[8]||0)-(+a.r[8]||0)).slice(0,12);
+ body.innerHTML=`${type==="emotion"?`<div class="drill-meaning"><b>${key}是什么</b><p>${emotionMeaning(key)}</p></div>`:""}
+ <div class="trend-summary">${summary.map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b><small>${key}</small></div>`).join("")}</div>
+ <div class="drill-grid">
+  <article><h3>按车型拆</h3>${drillMiniBars(topBreakdown(rows,0))}</article>
+  <article><h3>按平台拆</h3>${drillMiniBars(topBreakdown(rows,2))}</article>
+  <article><h3>按赛道拆</h3>${drillMiniBars(topBreakdown(rows,3))}</article>
+  <article><h3>按认知标签拆</h3>${drillMiniBars(topBreakdown(rows,4))}</article>
+ </div>
+ ${drillWordCloudHtml(rows)}
+ ${drillKnowhowHtml(type,key,rows)}
+ <article class="drill-plan"><div class="drill-plan-head"><h3>归总后的下一步营销规划</h3><div class="multi-model-actions"><button type="button" class="primary" data-strategy-engine="fusion" id="qwen-strategy">MMN策略</button></div></div>${plan.lines.map(x=>`<p>${x}</p>`).join("")}<div id="qwen-strategy-result" class="qwen-result"></div></article>
+ <div class="table-wrap mini"><table><thead><tr><th>车型</th><th>平台</th><th>赛道</th><th>标签</th><th>情绪</th><th>声量类型</th><th>样本</th></tr></thead><tbody>${detailRows.map(({r})=>`<tr><td><b>${r[0]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${trafficType(r)}</td><td>${(+r[8]||0).toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`;
+ document.querySelectorAll("[data-strategy-engine]").forEach(b=>b.onclick=()=>generateModelStrategy(b.dataset.strategyEngine,b));
+ dialog.showModal();
+}
+async function generateModelStrategy(engine,btn){
+ const result=document.querySelector("#qwen-strategy-result");
+ if(!result||!currentDrillContext)return;
+ const oldText=btn.textContent;
+ btn.disabled=true;btn.textContent="生成中…";
+ const label={qwen:"MMN策略",openai:"MMN策略",fusion:"MMN策略"}[engine]||"MMN策略";
+ const endpoint={qwen:"/api/ai/qwen-strategy",openai:"/api/ai/openai-strategy",fusion:"/api/ai/fusion-strategy"}[engine]||"/api/ai/fusion-strategy";
+ result.innerHTML=`<h4>${label}生成中</h4><p>正在分析当前拆解、词云、Know-how、Learning 和 RAG 引用。通常需要 10-45 秒。</p>`;
+ result.scrollIntoView({block:"nearest",behavior:"smooth"});
+ try{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+  const res=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({context:currentDrillContext}),signal:controller.signal});
+  clearTimeout(timer);
+  const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
+  if(!res.ok||!data.ok)throw new Error(data.error||`${label}生成失败`);
+  const parts=data.parts?`<details class="model-parts"><summary>查看多模型原始意见</summary>${Object.entries(data.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${k}</b>${String(v).split(/\n+/).filter(Boolean).map(x=>`<p>${x}</p>`).join("")}</section>`).join("")}${data.errors&&Object.keys(data.errors).length?`<section><b>缺席/错误</b>${Object.entries(data.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+  result.innerHTML=`<h4>${label}建议</h4>${String(data.text||"").split(/\n+/).filter(Boolean).map(x=>`<p>${x}</p>`).join("")}${parts}`;
+ }catch(e){
+  const msg=e.name==="AbortError"?"生成超过 90 秒，已自动停止。建议缩小筛选范围，或稍后重试。":e.message;
+  result.innerHTML=`<h4>${label}暂未生成</h4><p>${msg}</p><p>请检查MMN多模态能力配置、网络连通性和额度。本土规则引擎会作为策略兜底。</p>`;
+ }finally{btn.disabled=false;btn.textContent=oldText}
+}
+function drillMiniBars(data){
+ const max=Math.max(...data.map(x=>x.count),1);
+ return `<div class="drill-bars">${data.map(x=>`<div><b>${x.key}</b><span><i style="width:${x.count/max*100}%"></i></span><em>${Math.round(x.count).toLocaleString()}</em></div>`).join("")||"<p class='empty'>暂无数据</p>"}</div>`;
+}
+function renderData(){
+ document.querySelector("#data-source-note").textContent=`${state.sourceNote||"当前数据已载入。"} 每行代表一组“车型 × 平台 × 认知标签 × 情绪 × 用户身份”的聚合数据，修改后自动重新计算。`;
+ const models=dataModelOptions();if(dataModelFilter!=="all"&&!models.includes(dataModelFilter))dataModelFilter="all";
+ ensureModelIdentities(models);
+ const groups=brandModelGroups(models);
+ if(dataBrandFilter!=="all"&&!groups.some(g=>g.brand===dataBrandFilter)){dataBrandFilter="all";dataModelFilter="all"}
+ document.querySelector("#data-model-filter").innerHTML=`<button class="${dataBrandFilter==="all"&&dataModelFilter==="all"?"active":""}" data-data-brand="all" data-data-model="all">全部品牌 / 全部车型</button>${groups.map(g=>`<details class="brand-model-group" ${dataBrandFilter===g.brand||g.models.includes(dataModelFilter)?"open":""}><summary><button type="button" class="${dataBrandFilter===g.brand&&dataModelFilter==="all"?"active":""}" data-data-brand="${escapeAttr(g.brand)}" data-data-model="all">${g.brand}<small>${g.models.length}款</small></button></summary><div>${g.models.map(m=>`<button title="${escapeAttr(canonicalModelLabel(m))}" class="${m===dataModelFilter?"active":""}" data-data-brand="${escapeAttr(g.brand)}" data-data-model="${escapeAttr(m)}">${canonicalModelLabel(m)}</button>`).join("")}</div></details>`).join("")}`;
+ document.querySelectorAll("[data-data-model]").forEach(b=>b.onclick=e=>{e.preventDefault();dataBrandFilter=b.dataset.dataBrand||"all";dataModelFilter=b.dataset.dataModel||"all";renderData()});
+ document.querySelector("#data-traffic-filter").innerHTML=[["all","全部声量"],["商业化声量","商业化声量"],["自然声量","自然声量"],["未识别","未识别"]].map(([value,label])=>`<button class="${value===dataTrafficFilter?"active":""}" data-traffic-type="${value}">${label}</button>`).join("");
+ document.querySelectorAll("[data-traffic-type]").forEach(b=>b.onclick=()=>{dataTrafficFilter=b.dataset.trafficType;renderData()});
+ const rows=dataRowsForView(),total=rows.reduce((s,x)=>s+(+x.r[8]||0),0),scores=rows.reduce((m,x)=>{const s=score(x.r);m.p+=s.positive;m.n+=s.negative;return m},{p:0,n:0}),platforms=new Set(rows.map(x=>x.r[2]).filter(Boolean));
+ document.querySelector("#data-model-samples").textContent=total.toLocaleString();
+ document.querySelector("#data-positive-score").textContent=Math.round(scores.p).toLocaleString();
+ document.querySelector("#data-negative-score").textContent=Math.round(scores.n).toLocaleString();
+ document.querySelector("#data-platform-count").textContent=platforms.size.toLocaleString();
+ renderDataBars("#data-traffic-chart",aggregateTraffic(rows),"count","traffic");
+ document.querySelector("#data-traffic-rule").innerHTML=[
+  ["商业化声量","投放、广告、达人合作、KOL、报备、官方、品牌号、蒲公英、巨量等线索。"],
+  ["自然声量","车主、真实体验、提车、用车、口碑、吐槽、测评、试驾、自来水、UGC 等线索。"],
+  ["未识别","导入数据没有声量类型字段，且文本线索不足；建议在模板中补充“声量类型”。"]
+ ].map(x=>`<div><b>${x[0]}</b><span>${x[1]}</span></div>`).join("");
+ renderDataBars("#data-platform-chart",aggregateRows(rows,2),"count","platform");
+ renderDataBars("#data-category-chart",aggregateRows(rows,3),"count","category");
+ renderDataBars("#data-emotion-chart",aggregateRows(rows,5),"count","emotion");
+ renderDataBars("#data-label-chart",aggregateRows(rows,4),"count","label");
+ const shownHeaders=[...headers,"声量类型","关键词/原文"];
+ document.querySelector("#data-table").innerHTML=`<thead><tr>${shownHeaders.map(h=>`<th>${h}</th>`).join("")}<th>正向分</th><th>负向分</th><th>操作</th></tr></thead><tbody>${rows.map(({r,i})=>{const s=score(r),shown=[...r.slice(0,12).map((v,idx)=>idx===1?(r[0]===state.config.model?"本品":"竞品"):v),trafficType(r),r[13]||""];return`<tr>${shown.map(v=>`<td>${typeof v==="number"?v.toLocaleString():v}</td>`).join("")}<td class="positive">${Math.round(s.positive).toLocaleString()}</td><td class="negative">${Math.round(s.negative).toLocaleString()}</td><td><button class="ghost delete-row" data-i="${i}">删除</button></td></tr>`}).join("")}</tbody>`;
+ document.querySelectorAll(".delete-row").forEach(b=>b.onclick=()=>{state.rows.splice(+b.dataset.i,1);save();render();toast("数据已删除")});
+}
+function renderCognition(a){document.querySelector("#cognition-table").innerHTML=`<thead><tr><th>认知标签</th><th>一级赛道</th><th>本品正向</th><th>本品负向</th><th>竞品正向</th><th>本品占有率</th><th>竞品占有率</th><th>认知 Gap</th><th>Impact</th><th>White Space</th><th>诊断</th></tr></thead><tbody>${a.labels.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td class="positive">${Math.round(x.op).toLocaleString()}</td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${Math.round(x.cp).toLocaleString()}</td><td>${(x.oShare*100).toFixed(1)}%</td><td>${(x.cShare*100).toFixed(1)}%</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.white.toFixed(1)}</td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td></tr>`).join("")}</tbody>`}
+function renderVertical(){
+ const allItems=verticalState.items||[],allSources=verticalState.sources||[];
+ const platformOptions=["all",...[...new Set(allItems.map(x=>x.platform).filter(Boolean))].sort()];
+ const selectedPlatform=platformOptions.includes(verticalState.selectedPlatform)?verticalState.selectedPlatform:"all";
+ verticalState.selectedPlatform=selectedPlatform;
+ const platformItems=selectedPlatform==="all"?allItems:allItems.filter(x=>x.platform===selectedPlatform);
+ const availableSources=[...new Set(platformItems.map(x=>x.source).filter(Boolean))];
+ const sourceOptions=["all",...availableSources];
+ const selectedSource=sourceOptions.includes(verticalState.selectedSource)?verticalState.selectedSource:"all";
+ verticalState.selectedSource=selectedSource;
+ const scopedItems=selectedSource==="all"?platformItems:platformItems.filter(x=>x.source===selectedSource);
+ const models=[...new Set(scopedItems.map(x=>x.ownModel).filter(Boolean))].sort();
+ if(models.length&&!models.includes(verticalState.selectedModel))verticalState.selectedModel=models[0];
+ if(!models.length)verticalState.selectedModel="";
+ const model=verticalState.selectedModel||models[0]||"";
+ const modelItems=scopedItems.filter(x=>x.ownModel===model);
+ const competitors=[...new Set(modelItems.map(x=>x.competitor).filter(Boolean))].sort();
+ if(competitors.length&&!competitors.includes(verticalState.selectedCompetitor))verticalState.selectedCompetitor=competitors[0];
+ if(!competitors.length)verticalState.selectedCompetitor="";
+ const comp=verticalState.selectedCompetitor||competitors[0]||"";
+ const modelPeriods=uniquePeriods(modelItems),latest=modelPeriods[modelPeriods.length-1]||"—",activePeriod=verticalState.selectedPeriod&&verticalState.selectedPeriod!=="latest"&&modelPeriods.includes(verticalState.selectedPeriod)?verticalState.selectedPeriod:latest,latestRows=modelItems.filter(x=>x.period===activePeriod).sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999));
+ verticalState.selectedPeriod=activePeriod||"latest";
+ const filtered=modelItems.filter(x=>[x.platform,x.period,x.ownModel,x.competitor,x.source].join(" ").toLowerCase().includes(verticalSearch.toLowerCase()));
+ const sourceLabel=selectedPlatform==="all"?"全部来源":selectedPlatform,fileLabel=selectedSource==="all"?"全部文件":shortSourceName(selectedSource);
+ const asset=verticalState.assetSummary;
+ const assetCopy=asset?`车型资产库：${asset.brandCount||0} 个品牌、${asset.modelCount||0} 个车型、${asset.relationCount||0} 条正反向关系、${asset.periodCount||0} 个周期。`:"";
+ document.querySelector("#vertical-source-note").textContent=allItems.length?`已导入 ${allSources.length||availableSources.length} 份垂媒排名文件。${assetCopy} 当前口径：${sourceLabel} / ${fileLabel} / ${model||"未选择本品"}。`:"支持汽车之家、懂车帝正反向排名 Excel。导入后会沉淀车型、品牌、周期和正反向关系，形成长期车型数据资产。";
+ const learningBox=document.querySelector("#vertical-ai-learning");
+ if(learningBox)learningBox.innerHTML=modelItems.length?`<div class="ai-learning-bar"><div><b>MMN智能体学习</b><span>把 ${model} 在 ${sourceLabel} / ${activePeriod||"当前周期"} 的正反向关系交给MMN营销引擎学习，并写入RAG知识库。</span></div><button type="button" class="primary" id="vertical-ai-learn">MMN学习正反向</button></div><div id="vertical-ai-learning-result"></div>`:"";
+ document.querySelector("#vertical-model-count").textContent=models.length.toLocaleString();
+ document.querySelector("#vertical-pair-count").textContent=new Set(modelItems.map(x=>`${x.ownModel}|${x.competitor}`)).size.toLocaleString();
+ document.querySelector("#vertical-period-count").textContent=modelPeriods.length.toLocaleString();
+ document.querySelector("#vertical-latest-period").textContent=`${sourceLabel}｜${fileLabel}｜${activePeriod||"—"}`;
+ const platformSelect=document.querySelector("#vertical-platform"),sourceSelect=document.querySelector("#vertical-source-file"),modelSelect=document.querySelector("#vertical-model"),compSelect=document.querySelector("#vertical-competitor");
+ platformSelect.innerHTML=platformOptions.map(p=>`<option value="${p}" ${p===selectedPlatform?"selected":""}>${p==="all"?"全部来源":p}</option>`).join("");
+ sourceSelect.innerHTML=sourceOptions.map(s=>`<option value="${escapeAttr(s)}" ${s===selectedSource?"selected":""}>${s==="all"?"全部文件":shortSourceName(s)}</option>`).join("");
+ modelSelect.innerHTML=models.map(m=>`<option ${m===model?"selected":""}>${m}</option>`).join("");
+ compSelect.innerHTML=competitors.map(c=>`<option ${c===comp?"selected":""}>${c}</option>`).join("");
+ platformSelect.onchange=e=>{verticalState.selectedPlatform=e.target.value;verticalState.selectedSource="all";verticalState.selectedModel="";verticalState.selectedCompetitor="";verticalState.selectedPeriod="latest";saveVerticalState();renderVertical()};
+ sourceSelect.onchange=e=>{verticalState.selectedSource=e.target.value;verticalState.selectedModel="";verticalState.selectedCompetitor="";verticalState.selectedPeriod="latest";saveVerticalState();renderVertical()};
+ modelSelect.onchange=e=>{verticalState.selectedModel=e.target.value;verticalState.selectedCompetitor="";verticalState.selectedPeriod="latest";saveVerticalState();renderVertical()};
+ compSelect.onchange=e=>{verticalState.selectedCompetitor=e.target.value;saveVerticalState();renderVertical()};
+ const latestComp=latestRows.find(x=>x.competitor===comp),bestPos=latestRows[0],bestNeg=[...latestRows].sort((a,b)=>(a.negativeRank||999)-(b.negativeRank||999))[0];
+ document.querySelector("#vertical-rank-board").innerHTML=modelItems.length?[
+  ["当前选择",`${model||"—"} vs ${comp||"—"}`,latestComp?`${latestComp.platform}｜${activePeriod}｜正向第 ${latestComp.positiveRank||"—"}｜反向第 ${latestComp.negativeRank||"—"}`:"当前本品所选周期暂无该竞品"],
+  ["正向第一",bestPos?.competitor||"—",bestPos?`${bestPos.platform}｜正向第 ${bestPos.positiveRank}｜反向第 ${bestPos.negativeRank||"—"}`:"—"],
+  ["反向第一",bestNeg?.competitor||"—",bestNeg?`${bestNeg.platform}｜正向第 ${bestNeg.positiveRank||"—"}｜反向第 ${bestNeg.negativeRank}`:"—"]
+ ].map(x=>`<div class="rank-card"><span>${x[0]}</span><b>${x[1]}</b><small>${x[2]}</small></div>`).join(""):"<p class='empty'>请先导入垂媒排名 Excel。</p>";
+ renderVerticalTrend(modelItems.filter(x=>x.competitor===comp),modelPeriods);
+ renderPeriodPicker(modelPeriods,activePeriod);
+ const matrix=competitors.map(c=>buildCompetitionMatrixRow(modelItems,c,activePeriod)).filter(x=>x.latest);
+ document.querySelector("#vertical-ranking-table").innerHTML=`<thead><tr><th>竞品车型</th><th><button class="th-period" id="period-toggle" title="选择数据抓取周期">${activePeriod===latest?"最新周期":"所选周期"}</button></th><th>正向排名</th><th>正向变化</th><th>反向排名</th><th>反向变化</th><th>趋势</th><th>对比占比</th><th>状态</th></tr></thead><tbody>${matrix.sort((a,b)=>(a.latest.positiveRank||999)-(b.latest.positiveRank||999)).map(x=>`<tr><td><b>${x.competitor}</b><small>${x.latest.platform}</small></td><td>${x.latest.period}</td><td>${x.latest.positiveRank||"—"}</td><td>${rankDelta(x.posDelta)}</td><td>${x.latest.negativeRank||"—"}</td><td>${rankDelta(x.negDelta)}</td><td><button class="trend-open" data-competitor="${escapeAttr(x.competitor)}" title="查看完整周期趋势">${miniTrend(x.rows)}</button></td><td>${formatShare(x.latest.share)}</td><td><span class="tag ${rankStatus(x.latest)==="高关注高对比"?"risk":rankStatus(x.latest)==="正向关注强"?"asset":""}">${rankStatus(x.latest)}</span></td></tr>`).join("")}</tbody>`;
+ document.querySelector("#period-toggle").onclick=()=>{verticalPeriodPickerOpen=!verticalPeriodPickerOpen;renderVertical()};
+ document.querySelectorAll(".trend-open").forEach(b=>b.onclick=()=>openTrendDialog(modelItems,b.dataset.competitor,model,modelPeriods));
+ const learnButton=document.querySelector("#vertical-ai-learn");
+ if(learnButton)learnButton.onclick=()=>runVerticalAiLearning({model,platform:selectedPlatform==="all"?(latestRows[0]?.platform||sourceLabel):selectedPlatform,period:activePeriod,source:selectedSource==="all"?(latestRows[0]?.source||""):selectedSource,rows:latestRows});
+ document.querySelector("#vertical-table").innerHTML=`<thead><tr><th>来源</th><th>文件</th><th>周期</th><th>本品车型</th><th>竞品车型</th><th>正向排名</th><th>反向排名</th><th>对比占比</th></tr></thead><tbody>${filtered.sort((a,b)=>sortVerticalItem(a,b)||(a.positiveRank||999)-(b.positiveRank||999)).map(x=>`<tr><td>${x.platform}</td><td>${shortSourceName(x.source)}</td><td>${x.period}</td><td><b>${x.ownModel}</b></td><td>${x.competitor}</td><td>${x.positiveRank||"—"}</td><td>${x.negativeRank||"—"}</td><td>${formatShare(x.share)}</td></tr>`).join("")}</tbody>`;
+}
+async function runVerticalAiLearning(context){
+ const box=document.querySelector("#vertical-ai-learning-result");
+ if(!context?.rows?.length){toast("当前车型没有可学习的正反向数据");return}
+ if(box)box.innerHTML="<p>MMN正在学习这组正反向竞争关系…</p>";
+ try{
+  const data=await api("/api/ai/vertical-rank-learning",{method:"POST",body:JSON.stringify({context:{...context,rows:context.rows.slice(0,30).map(x=>({competitor:x.competitor,positiveRank:x.positiveRank,negativeRank:x.negativeRank,share:x.share,status:rankStatus(x)}))}})});
+  if(data.knowledgeItem)mergeStrategyKnowledge([data.knowledgeItem]);
+  if(box)box.innerHTML=`<article class="rag-card"><span>MMN学习完成｜${context.platform}｜${context.period}</span><b>${context.model} 正反向竞争格局学习</b><p>${data.text}</p><small>已写入RAG知识库，可被巡检和MMN策略召回。</small></article>`;
+  renderStrategyKb();
+  toast("MMN已学习正反向排名，并写入RAG知识库");
+ }catch(err){
+  if(box)box.innerHTML=`<p class="empty">MMN学习失败：${err.message}</p>`;
+  toast(`MMN学习失败：${err.message}`);
+ }
+}
+function shortSourceName(s){return String(s||"").replace(/\.xlsx$/i,"").replace(/[-_]?更新到\d+/,"")}
+function formatShare(v){const n=Number(v);if(!Number.isFinite(n)||n<=0)return"—";return `${(n>1?n:n*100).toFixed(1)}%`}
+function escapeAttr(s){return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function renderPeriodPicker(periods,activePeriod){
+ const el=document.querySelector("#vertical-period-picker");if(!el)return;
+ el.classList.toggle("open",verticalPeriodPickerOpen);
+ el.innerHTML=`<div><b>数据抓取周期</b><span>选择一个周期查看当期竞争格局，变化值对比上一周期</span></div><div class="period-chips">${periods.map(p=>`<button class="${p===activePeriod?"active":""}" data-period="${p}">${p}</button>`).join("")}</div>`;
+ el.querySelectorAll("[data-period]").forEach(b=>b.onclick=()=>{verticalState.selectedPeriod=b.dataset.period;verticalPeriodPickerOpen=false;saveVerticalState();renderVertical()});
+}
+function buildCompetitionMatrixRow(items,competitor,latestPeriod){
+ const rows=items.filter(x=>x.competitor===competitor).sort(sortVerticalItem);
+ const latest=rows.find(x=>x.period===latestPeriod)||rows[rows.length-1],idx=rows.findIndex(x=>x===latest),prev=idx>0?rows[idx-1]:null;
+ return{competitor,rows,latest,posDelta:prev&&latest?.positiveRank&&prev.positiveRank?prev.positiveRank-latest.positiveRank:null,negDelta:prev&&latest?.negativeRank&&prev.negativeRank?prev.negativeRank-latest.negativeRank:null};
+}
+function rankDelta(v){
+ if(v===null||v===undefined)return"<span class='delta flat'>—</span>";
+ if(v>0)return`<span class="delta up">↑${v}</span>`;
+ if(v<0)return`<span class="delta down">↓${Math.abs(v)}</span>`;
+ return"<span class='delta flat'>持平</span>";
+}
+function miniTrend(rows){
+ const data=[...rows].sort(sortVerticalItem).slice(-6),maxRank=Math.max(10,...data.flatMap(x=>[x.positiveRank||0,x.negativeRank||0])),w=120,h=34,pad=4;
+ if(!data.length)return"—";
+ const pts=key=>data.map((x,i)=>{const vx=i/Math.max(1,data.length-1),rank=x[key]||maxRank,y=pad+(rank-1)/(maxRank-1)*(h-pad*2);return`${pad+vx*(w-pad*2)},${y}`}).join(" ");
+ return`<svg class="mini-trend" viewBox="0 0 ${w} ${h}"><polyline class="pos-line" points="${pts("positiveRank")}"></polyline><polyline class="neg-line" points="${pts("negativeRank")}"></polyline></svg>`;
+}
+function openTrendDialog(modelItems,competitor,ownModel,allPeriods=[]){
+ const rows=modelItems.filter(x=>x.competitor===competitor).sort(sortVerticalItem);
+ if(!rows.length)return;
+ const dialog=document.querySelector("#trend-dialog"),body=document.querySelector("#trend-dialog-body");
+ document.querySelector("#trend-dialog-title").textContent=`${ownModel} vs ${competitor}｜竞争趋势详情`;
+ const latest=rows[rows.length-1],first=rows[0],posChange=first?.positiveRank&&latest?.positiveRank?first.positiveRank-latest.positiveRank:null,negChange=first?.negativeRank&&latest?.negativeRank?first.negativeRank-latest.negativeRank:null;
+ const periods=(allPeriods&&allPeriods.length?allPeriods:uniquePeriods(rows)),byPeriod=new Map(rows.map(x=>[x.period,x]));
+ body.innerHTML=`<div class="trend-summary"><div><span>数据来源</span><b>${latest.platform}</b><small>${shortSourceName(latest.source)}</small></div><div><span>周期范围</span><b>${periods[0]} → ${periods[periods.length-1]}</b><small>${rows.length}/${periods.length} 个周期有排名</small></div><div><span>正向变化</span><b>${plainRankDelta(posChange)}</b><small>排名越小越靠前</small></div><div><span>反向变化</span><b>${plainRankDelta(negChange)}</b><small>排名越小越强</small></div></div><div class="trend-large">${largeTrend(rows,periods)}</div><div class="table-wrap mini"><table><thead><tr><th>周期</th><th>正向排名</th><th>正向变化</th><th>反向排名</th><th>反向变化</th><th>对比占比</th><th>状态</th></tr></thead><tbody>${periods.map((p,i)=>{const x=byPeriod.get(p),prev=[...periods.slice(0,i)].reverse().map(pp=>byPeriod.get(pp)).find(Boolean),pos=x&&prev&&x.positiveRank&&prev.positiveRank?prev.positiveRank-x.positiveRank:null,neg=x&&prev&&x.negativeRank&&prev.negativeRank?prev.negativeRank-x.negativeRank:null;return x?`<tr><td><b>${x.period}</b></td><td>${x.positiveRank||"—"}</td><td>${rankDelta(pos)}</td><td>${x.negativeRank||"—"}</td><td>${rankDelta(neg)}</td><td>${formatShare(x.share)}</td><td><span class="tag ${rankStatus(x)==="高关注高对比"?"risk":rankStatus(x)==="正向关注强"?"asset":""}">${rankStatus(x)}</span></td></tr>`:`<tr><td><b>${p}</b></td><td colspan="6"><span class="empty">该周期未进入当前排名表 / 原始表无该竞品记录</span></td></tr>`}).join("")}</tbody></table></div>`;
+ dialog.showModal();
+}
+function plainRankDelta(v){if(v===null||v===undefined)return"—";if(v>0)return`上升 ${v} 位`;if(v<0)return`下降 ${Math.abs(v)} 位`;return"持平"}
+function largeTrend(rows,allPeriods=[]){
+ const data=[...rows].sort(sortVerticalItem),periods=(allPeriods&&allPeriods.length?allPeriods:uniquePeriods(data)),byPeriod=new Map(data.map(x=>[x.period,x])),maxRank=Math.max(10,...data.flatMap(x=>[x.positiveRank||0,x.negativeRank||0])),w=760,h=280,pad=42,den=Math.max(1,periods.length-1);
+ const pts=key=>periods.map((p,i)=>{const x=byPeriod.get(p);if(!x||!x[key])return null;const rank=x[key],y=pad+(rank-1)/(maxRank-1)*(h-pad*2);return{x:pad+i/den*(w-pad*2),y,rank,period:p}});
+ const line=arr=>arr.filter(Boolean).map(p=>`${p.x},${p.y}`).join(" "),pos=pts("positiveRank"),neg=pts("negativeRank"),present=new Set(data.map(x=>x.period));
+ return`<svg viewBox="0 0 ${w} ${h}">${[1,Math.ceil(maxRank/2),maxRank].map(r=>`<line x1="${pad}" y1="${pad+(r-1)/(maxRank-1)*(h-pad*2)}" x2="${w-pad}" y2="${pad+(r-1)/(maxRank-1)*(h-pad*2)}"></line><text x="10" y="${pad+(r-1)/(maxRank-1)*(h-pad*2)+4}">${r}</text>`).join("")}<polyline class="pos-line" points="${line(pos)}"></polyline><polyline class="neg-line" points="${line(neg)}"></polyline>${pos.filter(Boolean).map(p=>`<circle class="pos-dot" cx="${p.x}" cy="${p.y}" r="5"></circle><text class="point-label" x="${p.x}" y="${p.y-9}" text-anchor="middle">${p.rank}</text>`).join("")}${neg.filter(Boolean).map(p=>`<circle class="neg-dot" cx="${p.x}" cy="${p.y}" r="5"></circle><text class="point-label" x="${p.x}" y="${p.y+18}" text-anchor="middle">${p.rank}</text>`).join("")}${periods.map((p,i)=>`<text class="x-label ${present.has(p)?"":"missing"}" x="${pad+i/den*(w-pad*2)}" y="${h-10}" text-anchor="middle">${p}</text>`).join("")}</svg><div class="trend-legend"><span><i class="green"></i>正向排名</span><span><i class="red"></i>反向排名</span></div>`;
+}
+function rankStatus(x){
+ const p=x.positiveRank||999,n=x.negativeRank||999;
+ if(p<=3&&n<=3)return"高关注高对比";
+ if(p<=3)return"正向关注强";
+ if(n<=3)return"反向被比强";
+ return"常规竞品";
+}
+function uniquePeriods(items){const m=new Map();items.forEach(x=>{if(!x.period)return;const cur=m.get(x.period);if(!cur||String(x.periodOrder||x.period)>String(cur.order||cur.period))m.set(x.period,{period:x.period,order:x.periodOrder||x.period})});return [...m.values()].sort((a,b)=>String(a.order).localeCompare(String(b.order),"zh-CN",{numeric:true})).map(x=>x.period)}
+function sortVerticalItem(a,b){return String(a.periodOrder||a.period||"").localeCompare(String(b.periodOrder||b.period||""), "zh-CN", {numeric:true})}
+function sortPeriod(a,b){return String(a||"").localeCompare(String(b||""), "zh-CN", {numeric:true})}
+function renderVerticalTrend(rows,allPeriods=[]){
+ const el=document.querySelector("#vertical-trend-chart");
+ if(!rows.length){el.innerHTML="<p class='empty'>选择一个竞品后展示时间轴趋势。</p>";return}
+ const data=[...rows].sort(sortVerticalItem),periods=(allPeriods&&allPeriods.length?allPeriods:uniquePeriods(data));
+ const byPeriod=new Map(data.map(x=>[x.period,x]));
+ const maxRank=Math.max(10,...data.flatMap(x=>[x.positiveRank||0,x.negativeRank||0])),w=520,h=230,pad=34,den=Math.max(1,periods.length-1);
+ const point=(x,i,key)=>{if(!x||!x[key])return null;const rank=x[key],y=pad+(rank-1)/(maxRank-1)*(h-pad*2);return{x:pad+i/den*(w-pad*2),y,rank,period:periods[i]}};
+ const pts=key=>periods.map((p,i)=>point(byPeriod.get(p),i,key));
+ const line=arr=>arr.filter(Boolean).map(p=>`${p.x},${p.y}`).join(" ");
+ const pos=pts("positiveRank"),neg=pts("negativeRank"),presentPeriods=new Set(data.map(x=>x.period));
+ const missing=periods.length-data.length;
+ el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="正反向排名趋势">${[1,Math.ceil(maxRank/2),maxRank].map(r=>`<line x1="${pad}" y1="${pad+(r-1)/(maxRank-1)*(h-pad*2)}" x2="${w-pad}" y2="${pad+(r-1)/(maxRank-1)*(h-pad*2)}"></line><text x="6" y="${pad+(r-1)/(maxRank-1)*(h-pad*2)+4}">${r}</text>`).join("")}<polyline class="pos-line" points="${line(pos)}"></polyline><polyline class="neg-line" points="${line(neg)}"></polyline>${pos.filter(Boolean).map(p=>`<circle class="pos-dot" cx="${p.x}" cy="${p.y}" r="4"><title>${p.period} 正向第${p.rank}</title></circle>`).join("")}${neg.filter(Boolean).map(p=>`<circle class="neg-dot" cx="${p.x}" cy="${p.y}" r="4"><title>${p.period} 反向第${p.rank}</title></circle>`).join("")}${periods.map((p,i)=>`<text class="x-label ${presentPeriods.has(p)?"":"missing"}" x="${pad+i/den*(w-pad*2)}" y="${h-8}" text-anchor="middle">${p}</text>`).join("")}</svg><div class="trend-legend"><span><i class="green"></i>正向排名</span><span><i class="red"></i>反向排名</span>${missing>0?`<em>${missing} 个周期该竞品未进入当前排名表</em>`:""}</div>`;
+}
+function renderVideos(){
+ videoState=normalizeVideoState(videoState);
+ if(edition==="global"&&contentAssetView!=="assets")contentAssetView="assets";
+ renderContentSubnav();
+ renderSocialPluginPanel();
+ renderAssetConfig();
+ renderUploadMatrix();
+ const all=allVideoItems(),catAgg=aggregateVideos(all,"category"),hotLine=all.length?[...all].sort((a,b)=>(b.engagement||0)-(a.engagement||0))[Math.max(0,Math.floor(all.length*.2)-1)]?.engagement||0:0;
+ const items=all.filter(x=>[x.title,x.assetModel,x.model,x.platform,x.author,x.category,x.assetRole].join(" ").toLowerCase().includes(videoSearch.toLowerCase()));
+ const importedSlots=assetPlatforms.flatMap(p=>assetSlots.map(s=>videoState.files?.[p.key]?.[s.key]).filter(Boolean));
+ document.querySelector("#video-source-note").textContent=importedSlots.length?`已上传 ${importedSlots.length} 份内容采集文件，共 ${all.length} 条内容。每个槽位可单独替换，系统按标题自动分类。`:"按平台和车型分别上传采集 Excel：抖音最多 4 份，小红书最多 4 份。系统会自动分类并合并成看板。";
+ document.querySelector("#video-total").textContent=all.length.toLocaleString();
+ document.querySelector("#video-cats").textContent=catAgg.length.toLocaleString();
+ document.querySelector("#video-top-cat").textContent=catAgg[0]?.key||"—";
+ document.querySelector("#video-hot").textContent=all.filter(x=>(x.engagement||0)>=hotLine&&hotLine>0).length.toLocaleString();
+ renderPlatformBoard("douyin","#douyin-category-chart","#douyin-board-note");
+ renderPlatformBoard("xiaohongshu","#xhs-category-chart","#xhs-board-note");
+ renderModelBoard(all);
+ document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产角色</th><th>车型</th><th>标题</th><th>作者</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${x.author||""}</td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
+ renderCreatorLibrary();
+}
+function renderSocialPluginPanel(){
+ const panel=document.querySelector("#social-plugin-panel");
+ if(!panel)return;
+ panel.hidden=edition!=="china";
+ if(panel.hidden)return;
+ const status=document.querySelector("#social-plugin-status"),dy=document.querySelector("#douyin-plugin-note"),xhs=document.querySelector("#xhs-plugin-note");
+ if(!socialPluginStatus){status.textContent="等待检测";dy.textContent="等待插件状态";xhs.textContent="等待插件状态";return}
+ status.textContent=socialPluginStatus.installed?"已识别Chrome采集插件":"未识别插件";
+ const d=socialPluginStatus.platforms?.douyin||{},x=socialPluginStatus.platforms?.xiaohongshu||{};
+ dy.textContent=d.latestFile?`最新导出：${d.latestFile}｜共 ${d.count} 份`:`未发现导出文件｜目录：${d.folder||"未配置"}`;
+ xhs.textContent=x.latestFile?`最新导出：${x.latestFile}｜共 ${x.count} 份`:`未发现导出文件｜目录：${x.folder||"未配置"}`;
+}
+async function loadSocialPluginStatus(){
+ try{const data=await api("/api/social-plugin/status");socialPluginStatus=data.plugin;renderSocialPluginPanel()}
+ catch(e){socialPluginStatus={installed:false,platforms:{},note:e.message};renderSocialPluginPanel()}
+}
+async function openSocialPlugin(platform){
+ try{const data=await api("/api/social-plugin/open",{method:"POST",body:JSON.stringify({platform})});toast(data.message||"已打开采集页面")}
+ catch(e){toast(`打开采集页失败：${e.message}`)}
+}
+function mergePluginCreators(platform,creators=[]){
+ if(!creators.length)return 0;
+ creatorState=normalizeCreatorState(creatorState);
+ const list=creatorState.creators?.[platform]||[];
+ const map=new Map(list.map(x=>[x.uid||x.id||x.name,x]));
+ creators.forEach(x=>{
+  const key=x.uid||x.id||x.name;
+  if(!key)return;
+  const old=map.get(key)||{};
+  map.set(key,{...old,...x,id:old.id||x.id||`plugin_${platform}_${key}`,importedAt:new Date().toISOString()});
+ });
+ creatorState.creators[platform]=[...map.values()];
+ return creators.length;
+}
+async function syncSocialPluginExport(platform){
+ try{
+  toast(`正在同步${assetPlatformName(platform)}插件导出到独立达人库…`);
+  const data=await api("/api/social-plugin/import-latest",{method:"POST",body:JSON.stringify({platform})});
+  const creatorCount=mergePluginCreators(platform,data.dataset.creators||[]);
+  saveCreatorState();
+  await loadSocialPluginStatus();
+  renderVideos();
+  toast(`已同步到${assetPlatformName(platform)}独立达人库：沉淀 ${creatorCount} 位达人；未写入车型内容库`);
+ }catch(e){toast(`同步失败：${e.message}`)}
+}
+function renderContentSubnav(){
+ const subnav=document.querySelector("#content-subnav"),assetView=document.querySelector("#content-asset-view"),creatorView=document.querySelector("#creator-library-view");
+ if(!subnav||!assetView||!creatorView)return;
+ const isChina=edition==="china";
+ subnav.hidden=!isChina;
+ if(!isChina)contentAssetView="assets";
+ assetView.hidden=contentAssetView!=="assets";
+ creatorView.hidden=contentAssetView==="assets";
+ subnav.querySelectorAll("[data-content-view]").forEach(b=>b.classList.toggle("active",b.dataset.contentView===contentAssetView));
+}
+function creatorPlatformKey(){
+ return contentAssetView==="xhsCreators"?"xiaohongshu":"douyin";
+}
+function creatorTypeName(type){return{review:"评测型",lifestyle:"生活方式",owner:"车主/KOC"}[type]||type}
+function creatorInfluenceTier(platform,fans){
+ fans=+fans||0;
+ if(platform!=="douyin"||!fans)return{role:"待补充",tier:"待补充",label:"粉丝待补充"};
+ if(fans<100000)return{role:"KOC",tier:"KOC",label:"KOC"};
+ if(fans<200000)return{role:"KOL",tier:"踝部",label:"KOL · 踝部"};
+ if(fans<500000)return{role:"KOL",tier:"膝部",label:"KOL · 膝部"};
+ if(fans<1000000)return{role:"KOL",tier:"腰部",label:"KOL · 腰部"};
+ if(fans<2000000)return{role:"KOL",tier:"肩部",label:"KOL · 肩部"};
+ return{role:"KOL",tier:"头部",label:"KOL · 头部"};
+}
+function creatorDisplayTier(platform,creator){
+ if(+creator.fans)return creatorInfluenceTier(platform,creator.fans);
+ if(+creator.estimatedFansValue){
+  const t=creatorInfluenceTier(platform,creator.estimatedFansValue);
+  return{role:t.role,tier:t.tier,label:`MMN补全 · ${t.label}`};
+ }
+ if(creator.estimatedInfluenceLabel)return{role:creator.estimatedInfluenceRole||"待核验",tier:creator.estimatedInfluenceTier||"待核验",label:creator.estimatedInfluenceLabel};
+ if(creator.influenceLabel&&creator.influenceLabel!=="粉丝待补充")return{role:creator.influenceRole||"待核验",tier:creator.influenceTier||"待核验",label:creator.influenceLabel};
+ return{role:"待核验",tier:"待核验",label:"MMN待分析"};
+}
+function splitCreatorField(value){return Array.isArray(value)?value.map(x=>String(x).trim()).filter(Boolean):String(value||"").split(/[,，、/|｜;；\n]+/).map(x=>x.trim()).filter(Boolean)}
+function creatorKey(x){return x?.uid||x?.id||x?.name}
+function findCreator(platform,id){return (creatorState.creators?.[platform]||[]).find(x=>(x.id===id||creatorKey(x)===id))}
+function updateCreator(platform,id,patch){
+ const list=creatorState.creators?.[platform]||[];
+ const idx=list.findIndex(x=>x.id===id||creatorKey(x)===id);
+ if(idx<0)return false;
+ const merged={...list[idx],...patch,updatedAt:new Date().toISOString()};
+ const tier=creatorDisplayTier(platform,merged);
+ list[idx]={...merged,influenceRole:tier.role,influenceTier:tier.tier,influenceLabel:tier.label};
+ creatorState.creators[platform]=list;
+ saveCreatorState();
+ return true;
+}
+function creatorFitScore(creator){
+ const a=analysis(),labels=a.labels.slice().sort((x,y)=>y.priority-x.priority).slice(0,6).map(x=>`${x.label} ${x.category}`).join(" ");
+ const text=[labels,state.config.model,state.config.brand,state.config.project].join(" ");
+ let score=50;
+ (creator.categories||[]).forEach(x=>{if(text.includes(x))score+=12});
+ (creator.strengths||[]).forEach(x=>{if(/真实|评测|场景|技术|疑虑|家庭|智能|安全|能耗/.test(x)&&text.match(/信任|怀疑|焦虑|智能|安全|能耗|家庭|底盘|价格/))score+=4});
+ score+=Math.min(14,(+creator.engagementRate||0));
+ score+=creator.type==="owner"&&a.labels.some(x=>x.diagnosis==="优先修复")?8:0;
+ score+=creator.type==="review"&&a.labels.some(x=>/智能|底盘|安全|价格/.test(x.category+x.label))?6:0;
+ return Math.max(0,Math.min(99,Math.round(score)));
+}
+function renderCreatorLibrary(){
+ const wrap=document.querySelector("#creator-library-view");
+ if(!wrap||wrap.hidden)return;
+ document.querySelectorAll("[data-creator-filter]").forEach(x=>x.classList.toggle("active",x.dataset.creatorFilter===creatorFilter));
+ const platform=creatorPlatformKey(),platformName=assetPlatformName(platform),creators=creatorState.creators?.[platform]||[],query=creatorSearch.trim().toLowerCase();
+ const enriched=creators.map(x=>{const tier=creatorDisplayTier(platform,x);return{...x,influenceRole:tier.role,influenceTier:tier.tier,influenceLabel:tier.label,fitScore:creatorFitScore(x)}}).filter(x=>(creatorFilter==="all"||x.type===creatorFilter)&&[x.name,x.city,x.type,x.influenceRole,x.influenceTier,x.influenceLabel,...(x.categories||[]),...(x.strengths||[])].join(" ").toLowerCase().includes(query)).sort((a,b)=>b.fitScore-a.fitScore);
+ const top=enriched.filter(x=>x.fitScore>=78);
+ const cats=new Set(enriched.flatMap(x=>x.categories||[]));
+ document.querySelector("#creator-library-title").textContent=`${platformName}达人库`;
+ document.querySelector("#creator-library-desc").textContent=`用于沉淀${platformName}达人能力标签、内容赛道、成本等级与历史表现，后续由MMN策略引擎按Campaign自动推荐。`;
+ document.querySelector("#creator-recommend-score").textContent=top.length.toLocaleString();
+ document.querySelector("#creator-total").textContent=enriched.length.toLocaleString();
+ document.querySelector("#creator-category-count").textContent=cats.size.toLocaleString();
+ document.querySelector("#creator-avg-fit").textContent=enriched.length?Math.round(enriched.reduce((s,x)=>s+x.fitScore,0)/enriched.length):"—";
+ document.querySelector("#creator-top-count").textContent=top.length.toLocaleString();
+ document.querySelector("#creator-card-grid").innerHTML=enriched.length?enriched.map(x=>{const id=x.id||creatorKey(x),city=x.city&&x.city!=="待补充"?x.city:(x.estimatedCity||"城市待核验"),fanText=+x.fans?formatShortNumber(x.fans):x.estimatedFansText?`MMN补全 ${x.estimatedFansText}`:"未采集";return`<article class="creator-card ${x.fitScore>=78?"recommended":""}"><div class="creator-head"><div><span>${x.influenceLabel} · ${city}</span><b>${x.name}</b></div><strong>${x.fitScore}</strong></div><div class="creator-meta"><span>粉丝 ${fanText}</span><span>${x.influenceLabel}</span><span>均播 ${formatShortNumber(x.avgViews,"待补充")}</span><span>互动率 ${x.engagementRate?`${x.engagementRate}%`:"待补充"}</span><span>成本 ${x.costLevel||"待评估"}</span></div><div class="creator-tags"><em class="tier">${x.influenceLabel}</em>${(x.categories||[]).map(t=>`<em>${t}</em>`).join("")}</div><p>${(x.summary||x.publicProfile||x.strengths?.join(" / ")||"等待补充达人能力判断")}</p><small>推荐场景：${(x.fitStages||[]).join("、")||"待MMN分析或手动补充"}｜风险提示：${x.risk||"需结合具体brief复核"}${x.confidence?`｜MMN置信度：${x.confidence}`:""}</small>${x.profileUrl?`<a class="creator-profile" href="${x.profileUrl}" target="_blank">打开主页</a>`:""}<div class="creator-actions"><button type="button" class="ghost" data-creator-edit="${id}">编辑</button><button type="button" class="primary" data-creator-ai="${id}">MMN分析标签</button></div></article>`}).join(""):`<p class="empty">当前筛选下暂无达人。可以调整类型或搜索条件。</p>`;
+ document.querySelectorAll("[data-creator-edit]").forEach(b=>b.onclick=()=>openCreatorEditor(platform,b.dataset.creatorEdit));
+ document.querySelectorAll("[data-creator-ai]").forEach(b=>b.onclick=()=>analyzeCreatorWithQwen(platform,b.dataset.creatorAi,b));
+ document.querySelector("#creator-planner-flow").innerHTML=["导入达人基础库","识别当前Campaign目标","匹配认知标签与平台赛道","计算达人适配分","生成达人组合与brief","复盘表现并回写学习库"].map((x,i)=>`<div><span>${String(i+1).padStart(2,"0")}</span><b>${x}</b></div>`).join("");
+}
+function formatShortNumber(n,empty="0"){
+ n=+n||0;
+ if(!n)return empty;
+ if(n>=10000)return`${(n/10000).toFixed(n>=100000?0:1)}万`;
+ return n.toLocaleString();
+}
+function openCreatorEditor(platform,id){
+ const creator=findCreator(platform,id);
+ if(!creator)return toast("未找到达人画像");
+ const dialog=document.querySelector("#creator-dialog"),form=document.querySelector("#creator-form");
+ form.elements.platform.value=platform;
+ form.elements.id.value=creator.id||creatorKey(creator);
+ form.elements.name.value=creator.name||"";
+ form.elements.type.value=creator.type||"review";
+ form.elements.city.value=creator.city||"";
+ form.elements.fans.value=+creator.fans||"";
+ form.elements.avgViews.value=+creator.avgViews||"";
+ form.elements.engagementRate.value=+creator.engagementRate||"";
+ form.elements.costLevel.value=creator.costLevel||"";
+ form.elements.profileUrl.value=creator.profileUrl||"";
+ form.elements.categories.value=(creator.categories||[]).join("，");
+ form.elements.strengths.value=(creator.strengths||[]).join("，");
+ form.elements.fitStages.value=(creator.fitStages||[]).join("，");
+ form.elements.risk.value=creator.risk||"";
+ document.querySelector("#creator-dialog-title").textContent=`编辑达人画像｜${creator.name||""}`;
+ dialog.showModal();
+}
+async function analyzeCreatorWithQwen(platform,id,button){
+ const creator=findCreator(platform,id);
+ if(!creator)return toast("未找到达人画像");
+ const old=button.textContent;
+ button.disabled=true;button.textContent="分析中…";
+ try{
+  const campaign={edition:activeEdition(),brand:state.config.brand,model:state.config.model,project:state.config.project,competitor:state.config.competitor,priorityLabels:analysis().labels.slice(0,6).map(x=>({label:x.label,category:x.category,diagnosis:x.diagnosis,priority:x.priority}))};
+  const data=await api("/api/ai/creator-tags",{method:"POST",body:JSON.stringify({creator,campaign})});
+  const t=data.tags||{};
+  const patch={
+   type:t.type||creator.type,
+   categories:splitCreatorField(t.categories||creator.categories),
+   strengths:splitCreatorField(t.strengths||creator.strengths),
+   fitStages:splitCreatorField(t.fitStages||creator.fitStages),
+   risk:t.risk||creator.risk,
+   costLevel:t.costLevel||creator.costLevel||"待评估",
+   summary:t.summary||creator.summary,
+   estimatedCity:t.estimatedCity||creator.estimatedCity||"",
+   estimatedInfluenceRole:t.estimatedInfluenceRole||creator.estimatedInfluenceRole||"",
+   estimatedInfluenceTier:t.estimatedInfluenceTier||creator.estimatedInfluenceTier||"",
+   estimatedInfluenceLabel:t.estimatedInfluenceLabel||creator.estimatedInfluenceLabel||"",
+   estimatedFansText:t.estimatedFansText||creator.estimatedFansText||"",
+   estimatedFansValue:+t.estimatedFansValue||+creator.estimatedFansValue||0,
+   publicProfile:t.publicProfile||creator.publicProfile||"",
+   confidence:t.confidence||creator.confidence||"",
+   aiTaggedAt:new Date().toISOString()
+  };
+  updateCreator(platform,id,patch);
+  renderCreatorLibrary();
+  toast(`MMN已完成 ${creator.name} 的达人标签分析`);
+ }catch(e){toast(`MMN分析失败：${e.message}`)}
+ finally{button.disabled=false;button.textContent=old}
+}
+function renderAssetConfig(){
+ const el=document.querySelector("#content-asset-config");if(!el)return;
+ el.innerHTML=assetSlots.map(s=>`<div class="field"><label>${s.label}车型</label><input data-asset-model="${s.field}" value="${videoState.config?.[s.field]||""}" placeholder="${s.key==="own"?"例如：智己LS8":"可留空"}"></div>`).join("");
+ document.querySelectorAll("[data-asset-model]").forEach(input=>input.onchange=input.oninput=()=>{videoState.config[input.dataset.assetModel]=input.value.trim();saveVideoState();renderUploadMatrix();renderModelBoard(allVideoItems())});
+}
+function renderUploadMatrix(){
+ const el=document.querySelector("#content-upload-matrix");if(!el)return;
+ el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频资产":"种草笔记资产"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],inputId=`asset-upload-${p.key}-${s.key}`;return`<div class="asset-slot ${file?"filled":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${file?`<small>${file.source} · ${file.count} 条</small>`:`<small>等待上传 Excel</small>`}</div><button type="button" class="${model?"primary":"ghost"} file-button" data-file-target="${inputId}" ${model?"":"disabled"}>${file?"替换":"上传"}</button><input id="${inputId}" class="asset-upload file-input-hidden" data-platform="${p.key}" data-slot="${s.key}" type="file" accept=".xlsx" ${model?"":"disabled"}></div>`}).join("")}</div></article>`).join("");
+ document.querySelectorAll(".asset-upload").forEach(input=>input.onchange=handleAssetUpload);
+}
+function renderPlatformBoard(platformKey,chartSel,noteSel){
+ const name=assetPlatformName(platformKey),items=allVideoItems().filter(x=>x.assetPlatform===platformKey||x.platform===name),agg=aggregateVideos(items,"category");
+ renderVideoBars(chartSel,agg);
+ const top=agg[0]?.key||"暂无数据";
+ document.querySelector(noteSel).textContent=items.length?`${items.length.toLocaleString()} 条｜Top：${top}`:"暂无数据";
+}
+function renderModelBoard(items){
+ const rows=assetSlots.map(s=>{const model=assetModel(s.key),its=items.filter(x=>x.assetSlot===s.key),dy=its.filter(x=>x.assetPlatform==="douyin").length,xhs=its.filter(x=>x.assetPlatform==="xiaohongshu").length,top=aggregateVideos(its,"category")[0]?.key||"—",eng=its.reduce((n,x)=>n+(+x.engagement||0),0);return{s,model,all:its.length,dy,xhs,top,eng}});
+ document.querySelector("#content-model-board").innerHTML=`<div class="table-wrap mini"><table><thead><tr><th>角色</th><th>车型</th><th>总内容</th><th>抖音</th><th>小红书</th><th>主分类</th><th>互动分</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="tag ${r.s.key==="own"?"asset":""}">${r.s.label}</span></td><td><b>${r.model||"未设置"}</b></td><td>${r.all.toLocaleString()}</td><td>${r.dy.toLocaleString()}</td><td>${r.xhs.toLocaleString()}</td><td>${r.top}</td><td>${Math.round(r.eng).toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`;
+}
+async function handleAssetUpload(e){
+ const file=e.target.files[0],platformKey=e.target.dataset.platform,slot=e.target.dataset.slot,model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
+ if(!file||!platformKey||!slot||!model)return;
+ toast(`正在导入${assetPlatformName(platformKey)} · ${role}内容…`);
+ try{
+  const res=await fetch(`/api/import-video-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});
+  const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
+  const items=json.dataset.items.map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:file.name}));
+  videoState.files[platformKey][slot]={source:file.name,count:items.length,uploadedAt:new Date().toISOString(),items};
+  saveVideoState();renderVideos();toast(`已导入 ${model} ${assetPlatformName(platformKey)} ${items.length} 条`);
+ }catch(err){toast(`内容资产导入失败：${err.message}`)}
+ finally{e.target.value=""}
+}
+function aggregateVideos(items,key){
+ const m={};items.forEach(x=>{const k=x[key]||"未识别";if(!m[k])m[k]={key:k,count:0,engagement:0};m[k].count++;m[k].engagement+=+x.engagement||0});return Object.values(m).sort((a,b)=>b.count-a.count);
+}
+function classifyKnowledge(text){
+ const t=String(text||"");
+ if(/抖音|小红书|标题|达人|种草|短视频|内容|爆款|互动|收藏|转发/.test(t))return"内容打法";
+ if(/懂车帝|汽车之家|垂媒|PK|对比|正向|反向|排名|竞品关系/.test(t))return"垂媒判断";
+ if(/报告|汇报|PPT|客户|结论|建议|话术|管理层/.test(t))return"报告话术";
+ if(/车型|本品|竞品|用户|价格|智驾|空间|安全|质量|口碑|认知/.test(t))return"车型洞察";
+ return"方法论";
+}
+function knowledgeTargets(type){
+ return{方法论:["决策驾驶舱","打法知识库","报告"],车型洞察:["决策驾驶舱","认知赛道诊断","打法知识库"],内容打法:["内容资产中心","打法知识库","报告"],垂媒判断:["垂媒竞争格局","报告"],报告话术:["报告","打法知识库"]}[type]||["打法知识库"];
+}
+function extractKeywords(text){
+ const dict=["上汽集团","上汽奥迪","上汽大众","智己","小米","理想","蔚来","极氪","特斯拉","问界","荣威","MG","别克","凯迪拉克","五菱","大通","奥迪","大众","价格","智驾","空间","安全","质量","口碑","底盘","舒适","内容","抖音","小红书","懂车帝","汽车之家","垂媒","报告","PPT","上市","竞品","用户","家庭","科技"];
+ return dict.filter(k=>String(text||"").includes(k)).slice(0,8);
+}
+function knowledgeHaystack(item){
+ const meta=item.metadata||{};
+ return [item.title,item.body,item.type,meta.domain,meta.module,meta.topic,meta.entity,...(item.keywords||[]),...(item.tags||[])].join(" ");
+}
+function knowledgeClusterKey(item){
+ const text=knowledgeHaystack(item);
+ const brands=["上汽集团","上汽奥迪","上汽大众","智己","别克","凯迪拉克","五菱","上汽大通","大通","荣威","MG","奥迪","大众","小米","理想","蔚来","极氪","特斯拉","问界","岚图","固特异"];
+ const brand=brands.find(b=>text.includes(b));
+ if(brand)return brand==="大通"?"上汽大通":brand;
+ if(/KOC|KOL|KOS|达人|脚本|内容|短视频|抖音|小红书/.test(text))return"内容与达人";
+ if(/RAG|NSR|Gap|数据|指标|Cockpit|引擎/.test(text))return"数据与RAG";
+ if(/底盘|电池|增程|轮胎|NVH|安全|音响|车身|技术/.test(text))return"汽车技术";
+ if(/MMN|BAS|营销方法论|品牌DNA|车型DNA|GTM|IPMS/.test(text))return"MMN方法论";
+ if(/合规|风险|测评规范|法务/.test(text))return"合规与风险";
+ return item.type||"其他知识";
+}
+function knowledgeClusterType(key){
+ return /上汽|智己|别克|凯迪拉克|五菱|荣威|MG|奥迪|大众|小米|理想|蔚来|极氪|特斯拉|问界|岚图|固特异/.test(key)?"品牌/车型":"能力模块";
+}
+function knowledgeClusters(){
+ const m={};
+ strategyKb.forEach(item=>{
+  const key=knowledgeClusterKey(item);
+  if(!m[key])m[key]={key,type:knowledgeClusterType(key),items:[],domains:{}};
+  m[key].items.push(item);
+  const domain=item.metadata?.domain||item.type||"未分类";
+  m[key].domains[domain]=(m[key].domains[domain]||0)+1;
+ });
+ return Object.values(m).sort((a,b)=>b.items.length-a.items.length);
+}
+function ragTagsFromRows(rows=[]){
+ const tags=new Set([state.config.model,state.config.brand]);
+ rows.forEach(({r})=>[r[0],r[2],r[3],r[4],r[5],trafficType(r)].forEach(x=>x&&tags.add(x)));
+ return [...tags].filter(Boolean);
+}
+function ragScore(item,terms,filters={}){
+ const meta=item.metadata||{};
+ const hay=[item.title,item.body,item.type,meta.domain,meta.module,meta.topic,meta.entity,meta.knowledge_type,...(meta.retrieval_queries||[]),...(item.keywords||[]),...(item.targets||[]),...(item.tags||[])].join(" ");
+ let score=0,reasons=[];
+ terms.filter(Boolean).forEach(t=>{if(hay.includes(t)){score+=3;reasons.push(t)}});
+ ["platform","emotion","category","stage"].forEach(k=>{const v=filters[k];if(v&&hay.includes(v)){score+=4;reasons.push(`${k}:${v}`)}});
+ if(item.targets?.includes("打法知识库"))score+=1;
+ return{score,reason:[...new Set(reasons)].join("、")||"语义/标签弱相关"};
+}
+function builtInRagCorpus(){
+ const knowhow=Object.entries(knowhowLibrary).map(([label,k])=>({id:`builtin_${label}`,type:"MMN内置Know-how",title:`${label}｜${k.crowd||"营销打法"}`,body:[k.why,k.message,k.proof,k.creator,k.risk].filter(Boolean).join(" "),keywords:extractKeywords(`${label} ${k.why} ${k.message} ${k.proof}`),tags:[label,k.crowd,k.message,k.proof].filter(Boolean),targets:["打法知识库","报告"],source:"builtin"}));
+ const learned=learnings().map((x,i)=>({id:x.id||`learning_${i}`,type:"人工Learning",title:`${x.model||"车型"}｜${x.label||"人工结论"}`,body:[x.conclusion,x.recommendation,x.evidence,x.platform,x.kpi,x.stage].filter(Boolean).join(" "),keywords:extractKeywords([x.model,x.label,x.conclusion,x.recommendation,x.platform].join(" ")),tags:[x.model,x.label,x.platform,x.stage].filter(Boolean),targets:["人工结论学习","报告"],source:"learning"}));
+ const judgments=(modelJudgments||[]).map((x,i)=>({id:x.knowledge_id||x.id||`model_judgment_${i}`,type:"车型判断资产",title:`${x.model_name||x.model||"车型"}｜${x.dimension||"综合判断"}`,body:[x.viewpoint,x.attribution,x.strategy_implication,x.evidence_needed].filter(Boolean).join(" "),keywords:[x.brand_name,x.model_name,x.dimension,...(x.tags||[])].filter(Boolean),tags:[x.brand_name,x.model_name,x.dimension,...(x.tags||[])].filter(Boolean),targets:["决策驾驶舱","RAG知识库管理","MMN策略"],source:"model_judgment",metadata:{entity:x.model_name||x.model,domain:"车型判断资产",module:x.dimension||"综合判断"}}));
+ return [...strategyKb.map(x=>({...x,source:x.source||"imported"})),...knowhow,...learned,...judgments];
+}
+function ragSearch({query="",rows=[],limit=6,filters={}}={}){
+ const terms=[...new Set([...extractKeywords(query),...String(query).split(/[\\s,，、/｜|]+/),...ragTagsFromRows(rows)])].filter(x=>x&&x.length>1);
+ return builtInRagCorpus().map(item=>{const s=ragScore(item,terms,filters);return{...item,score:s.score,reason:s.reason}}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,limit);
+}
+function summarizeKnowledgeText(text){
+ const cleaned=String(text||"").replace(/\r/g,"\n").split("\n").map(x=>x.trim()).filter(Boolean);
+ const chunks=cleaned.flatMap(line=>line.split(/(?<=[。！？；;])/)).map(x=>x.trim()).filter(x=>x.length>=12);
+ const candidates=chunks.filter(x=>/应该|需要|关键|核心|建议|判断|打法|证据|客户|用户|竞品|内容|报告|趋势|风险|机会|转化|认知/.test(x)).slice(0,24);
+ const source=candidates.length?candidates:chunks.slice(0,16);
+ return source.map((body,i)=>{const type=classifyKnowledge(body),keywords=extractKeywords(body);return{id:`kb_${Date.now()}_${i}_${Math.random().toString(16).slice(2,7)}`,type,title:keywords.length?`${type}｜${keywords.slice(0,3).join(" / ")}`:`${type}｜策略片段`,body:body.slice(0,220),keywords,tags:keywords,targets:knowledgeTargets(type),createdAt:new Date().toISOString()}}).filter(x=>x.body);
+}
+function relatedKnowledge(label,limit=2){
+ return ragSearch({query:label,limit});
+}
+function renderVideoBars(sel,data){
+ const max=Math.max(...data.map(x=>x.count),1);document.querySelector(sel).innerHTML=data.slice(0,10).map(x=>`<div class="video-bar"><b>${x.key}</b><div><i style="width:${x.count/max*100}%"></i></div><span>${x.count}</span></div>`).join("")||"<p class='empty'>暂无数据</p>";
+}
+function renderActions(a){const list=a.labels.filter(x=>x.priority>0).slice(0,10),sum=list.reduce((s,x)=>s+x.priority,0)||1;document.querySelector("#budget-total").textContent=money(+state.config.budget);document.querySelector("#action-list").innerHTML=list.map((x,i)=>{const ac=actionFor(x),budget=state.config.budget*x.priority/sum,learned=latestLearning(x.label);return`<div class="action-item"><div class="rank">${String(i+1).padStart(2,"0")}</div><div class="action-main"><h3>${x.label} · ${x.diagnosis}</h3><p>系统结果：本品负向 ${Math.round(x.on).toLocaleString()}，竞品占有率 ${(x.cShare*100).toFixed(1)}%，认知 Gap ${(x.gap*100).toFixed(1)}%。${learned?`<br><b>你的历史建议：</b>${learned.recommendation}`:""}</p></div><div class="action-meta"><b>参考框架</b><span>${ac.evidence}</span></div><div class="action-meta"><b>参考平台</b><span>${learned?.platform||ac.platform}</span></div><div class="money"><strong>${money(budget)}</strong><span class="tag">优先级 ${x.priority.toFixed(1)}</span></div></div>`}).join("")}
+function renderKnowhow(a){
+ const list=a.labels.filter(x=>x.priority>0).slice(0,6),risks=a.labels.filter(x=>x.diagnosis==="优先修复").slice(0,3),assets=a.labels.filter(x=>x.diagnosis==="持续放大").slice(0,3);
+ const main=list[0],kh=main?knowhowFor(main):null;
+ document.querySelector("#war-room").innerHTML=kh?`<div class="war-statement"><b>${state.config.model} 当前不是缺曝光，而是需要把“${main.label}”疑虑转化为可验证信任。</b><p>${kh.mode}。优先处理 ${risks.map(x=>x.label).join("、")||main.label}，再放大 ${assets.map(x=>x.label).join("、")||"已有正向资产"}。</p></div><div class="war-metrics"><span>主战场</span><strong>${main.category}</strong><span>优先打法</span><strong>${kh.type}</strong><span>成败指标</span><strong>${kh.kpi}</strong></div>`:"<p>暂无足够数据生成作战判断。</p>";
+ document.querySelector("#evidence-chain").innerHTML=list.slice(0,4).map(x=>{const k=knowhowFor(x);return`<div class="evidence-item"><span>${x.label}</span><b>${k.proof}</b><small>${k.risk}</small></div>`}).join("");
+ document.querySelector("#knowhow-cards").innerHTML=list.map((x,i)=>{const k=knowhowFor(x),learned=latestLearning(x.label),kb=relatedKnowledge(x.label,2);return`<article class="knowhow-card ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="抢占空位"?"chance":"asset"}"><div class="kh-head"><span>${String(i+1).padStart(2,"0")}</span><div><b>${x.label}</b><small>${x.diagnosis} · 优先级 ${x.priority.toFixed(1)}</small></div></div><p class="kh-why">${k.why}</p>${learned?`<div class="learned-tip"><b>已学习你的判断</b><span>${learned.conclusion}</span><em>${learned.recommendation}</em></div>`:""}${kb.length?`<div class="kb-tip"><b>策略知识库补充</b>${kb.map(item=>`<span>${item.body}</span>`).join("")}</div>`:""}<dl><dt>参考人群</dt><dd>${k.crowd}</dd><dt>参考打法</dt><dd>${k.message}</dd><dt>证据链</dt><dd>${learned?.evidence||k.proof}</dd><dt>谁来讲</dt><dd>${k.creator}</dd><dt>平台</dt><dd>${learned?.platform||k.platform}</dd><dt>KPI</dt><dd>${learned?.kpi||k.kpi}</dd></dl></article>`}).join("");
+ const platformScores=Object.entries(a.own.reduce((m,r)=>{m[r[2]]=(m[r[2]]||0)+(+r[8]||0);return m},{})).sort((a,b)=>b[1]-a[1]).slice(0,6);
+ document.querySelector("#platform-playbook").innerHTML=platformScores.map(([p,n])=>`<div class="platform-row"><b>${p}</b><p>${platformAdvice(p)}</p><span>${Math.round(n).toLocaleString()} 条样本</span></div>`).join("");
+ const c1=risks[0]?.label||list[0]?.label||"核心风险",c2=risks[1]?.label||list[1]?.label||"关键疑虑",c3=assets[0]?.label||list[2]?.label||"正向资产";
+ document.querySelector("#campaign-calendar").innerHTML=[
+  ["第1周","止血澄清",`围绕“${c1}”建立统一口径，发布官方解释、第三方实测和 FAQ。`],
+  ["第2周","证据扩散",`把“${c1}/${c2}”做成抖音短视频、垂媒横评、B站深度拆解三种证据形态。`],
+  ["第3周","场景转化",`组织车主/KOC用真实通勤、家庭、长途场景复现产品价值，承接试驾。`],
+  ["第4周","资产放大",`把“${c3}”包装成可复述卖点，形成话题挑战、门店物料和销售话术。`]
+	 ].map(x=>`<div class="time-item"><span>${x[0]}</span><b>${x[1]}</b><p>${x[2]}</p></div>`).join("");
+	}
+function renderFounderDistill(){
+ const list=document.querySelector("#founder-archive-list");if(!list)return;
+ const rows=founderRows();
+ const archive=founderState.archive||[];
+ const brands=["all",...[...new Set(archive.map(x=>x.brand).filter(Boolean))]];
+ const persons=["all",...[...new Set(archive.map(x=>x.person).filter(Boolean))]];
+ const topics=["all",...[...new Set(archive.flatMap(x=>[x.event_type||x.type,x.topic]).filter(Boolean))]];
+ const fill=(sel,items,label)=>{const el=document.querySelector(sel);if(!el)return;const val=el.value||"all";el.innerHTML=items.map(x=>`<option value="${escapeAttr(x)}">${x==="all"?label:x}</option>`).join("");el.value=items.includes(val)?val:"all"};
+ fill("#founder-brand-filter",brands,"全部品牌");
+ fill("#founder-person-filter",persons,"全部人物");
+ fill("#founder-topic-filter",topics,"全部事件");
+ const speaker=document.querySelector("#founder-speaker");
+ if(speaker){const current=speaker.value||founderState.selectedPerson||"";speaker.innerHTML=persons.filter(x=>x!=="all").map(x=>`<option value="${escapeAttr(x)}">${x}</option>`).join("");if([...speaker.options].some(o=>o.value===current))speaker.value=current}
+ document.querySelector("#founder-archive-count").textContent=`${rows.length} 条`;
+ list.innerHTML=rows.length?rows.map(x=>`<article class="founder-archive-card" data-founder-person="${escapeAttr(x.person)}"><div><span>${x.brand} · ${x.person}</span><b>${x.event_type||x.type||x.topic||"公开表达"}</b></div><p>${x.originalSummary||x.original_summary||x.content||""}</p><small>${x.published_at||x.date||""}｜${x.platform||"公开平台"}｜${x.sourceName||x.source_name||"公开来源"}</small><div>${(x.languageStyleTags||x.language_style_tags||x.tags||[]).slice(0,5).map(t=>`<em>${t}</em>`).join("")}</div></article>`).join(""):`<p class="empty">还没有归档数据。可以先导入公开表达样例，或手动运行一次周度抓取。</p>`;
+ list.querySelectorAll("[data-founder-person]").forEach(card=>card.onclick=()=>{founderState.selectedPerson=card.dataset.founderPerson;saveFounderState();renderFounderDistill()});
+ const activePerson=founderState.selectedPerson||persons.find(x=>x!=="all")||"";
+ const profile=founderProfile(activePerson);
+ const next=founderState.scheduler?.nextRunInSeconds;
+ document.querySelector("#founder-distill-source").textContent=activePerson?`${profile.brand} · ${profile.person}`:"选择人物后生成";
+ document.querySelector("#founder-profile").innerHTML=`<div class="founder-profile-head"><span>${profile.brand}</span><b>${profile.person}</b><small>${profile.role}</small></div><dl><dt>语言风格</dt><dd>${profile.style}</dd><dt>品牌叙事</dt><dd>${profile.narrative}</dd><dt>技术表达</dt><dd>${profile.tech}</dd><dt>用户沟通</dt><dd>${profile.user}</dd><dt>舆论攻防</dt><dd>${profile.defense}</dd><dt>Prompt模板</dt><dd>${profile.prompt}</dd></dl><p class="founder-schedule">自动任务：每周日 23:00 Asia/Shanghai${next?`｜下次约 ${Math.round(next/3600)} 小时后`:""}｜仅公开源，遵守 robots 与平台权限。</p>`;
+ if(speaker&&activePerson&&[...speaker.options].some(o=>o.value===activePerson))speaker.value=activePerson;
+ const output=document.querySelector("#founder-output");if(output&&!output.innerHTML&&founderState.lastOutput)output.innerHTML=founderState.lastOutput;
+}
+function renderStrategyKb(){
+ const count=document.querySelector("#strategy-kb-count");if(!count)return;
+ const byType=aggregateVideos(strategyKb.map(x=>({...x,category:x.type,engagement:1})),"category");
+ count.textContent=`${strategyKb.length} 条知识`;
+ document.querySelector("#strategy-kb-summary").innerHTML=strategyKb.length?byType.map(x=>`<div class="video-bar"><b>${x.key}</b><div><i style="width:${x.count/Math.max(...byType.map(y=>y.count),1)*100}%"></i></div><span>${x.count}</span></div>`).join(""):"<p class='empty'>还没有导入知识。你可以把策略对话、客户复盘或方法论文档粘贴到左侧，系统会先做本地归纳。</p>";
+ renderKnowledgeMap();
+ renderRagResults();
+}
+function renderKnowledgeMap(){
+ const map=document.querySelector("#strategy-kb-map"),list=document.querySelector("#strategy-kb-list");if(!map||!list)return;
+ const clusters=knowledgeClusters();
+ if(!clusters.length){map.innerHTML="";list.innerHTML="<p class='empty'>暂无知识地图。导入MMN训练包后，会按品牌、车型和能力模块生成下钻入口。</p>";return}
+ if(!selectedKnowledgeCluster||!clusters.some(x=>x.key===selectedKnowledgeCluster))selectedKnowledgeCluster=clusters[0].key;
+ const max=Math.max(...clusters.map(x=>x.items.length),1);
+ map.innerHTML=clusters.map(x=>`<button type="button" class="kb-cluster ${x.key===selectedKnowledgeCluster?"active":""}" data-kb-cluster="${x.key}"><span>${x.type}</span><b>${x.key}</b><em>${x.items.length} 条</em><i style="width:${Math.max(18,x.items.length/max*100)}%"></i></button>`).join("");
+ const cluster=clusters.find(x=>x.key===selectedKnowledgeCluster)||clusters[0];
+ const domainRows=Object.entries(cluster.domains).sort((a,b)=>b[1]-a[1]).slice(0,8);
+ const samples=cluster.items.slice(0,8);
+ list.innerHTML=`<div class="kb-cluster-detail"><div><span>${cluster.type}</span><h3>${cluster.key}</h3><p>已归入 ${cluster.items.length} 条知识。点击“巡检这个气泡”会把该品牌/模块带入RAG问题，进一步召回可引用依据。</p></div><button class="primary" data-kb-query="${cluster.key}">巡检这个气泡</button></div><div class="kb-domain-grid">${domainRows.map(([k,v])=>`<button type="button" data-kb-query="${cluster.key} ${k}"><b>${k}</b><span>${v} 条</span></button>`).join("")}</div><div class="kb-sample-list">${samples.map(x=>`<article class="kb-card compact"><div><span>${x.metadata?.doc_id||x.id||"local"}｜${x.type}</span><b>${x.title}</b></div><p>${x.body}</p><small>来源：${x.source||"imported"}｜关键词：${(x.keywords||[]).slice(0,8).join("、")||"—"}</small></article>`).join("")}</div>`;
+ document.querySelectorAll("[data-kb-cluster]").forEach(b=>b.onclick=()=>{selectedKnowledgeCluster=b.dataset.kbCluster;renderKnowledgeMap();pulseFocus(`[data-kb-cluster="${CSS.escape(selectedKnowledgeCluster)}"]`);pulseFocus(".kb-cluster-detail")});
+ document.querySelectorAll("[data-kb-query]").forEach(b=>b.onclick=()=>{pulseFocus(b);document.querySelector("#rag-query").value=b.dataset.kbQuery;ragResultsExpanded=false;renderRagResults();pulseFocus("#rag-results-toggle");document.querySelector("#rag-results").scrollIntoView({behavior:"smooth",block:"start"})});
+}
+function renderRagResults(){
+ const box=document.querySelector("#rag-results");if(!box)return;
+ const query=document.querySelector("#rag-query")?.value||`${state.config.model} ${state.config.brand} ${state.config.project}`;
+ const filters={platform:document.querySelector("#rag-platform")?.value||"",emotion:document.querySelector("#rag-emotion")?.value||"",category:document.querySelector("#rag-category")?.value||"",stage:document.querySelector("#rag-stage")?.value||""};
+ const results=ragSearch({query,limit:8,filters});
+ const detail=results.length&&ragResultsExpanded?`<div class="rag-detail-list">${results.map((x,i)=>`<article class="rag-card"><span>${String(i+1).padStart(2,"0")}｜${x.type}｜${x.metadata?.doc_id||x.id||"local"}｜分数 ${x.score}</span><b>${x.title}</b><p>${x.body}</p><small>引用依据：${x.reason}｜来源：${x.source||"imported"}｜关键词：${(x.keywords||[]).join("、")||"—"}｜赋能：${(x.targets||[]).join("、")}</small></article>`).join("")}</div>`:results.length?"":`<p class="empty">没有找到匹配知识。可以换一个问法，或导入方法论、历史项目复盘、人工结论、平台打法文本。</p>`;
+ box.innerHTML=`<button type="button" class="rag-summary-pill ${ragResultsExpanded?"open":""}" id="rag-results-toggle"><b>策略准备完成：召回 ${results.length} 条相关依据</b><span>${ragResultsExpanded?"收起引用依据":"点击展开引用依据"} · 查询：${query||"当前项目上下文"}</span></button>${detail}`;
+ document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();pulseFocus("#rag-results-toggle");if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
+}
+function strategyProjectContext(){
+ return{edition:activeEdition(),brand:state.config.brand,model:state.config.model,project:state.config.project,competitor:state.config.competitor,targetIdentity:state.config.targetIdentity};
+}
+async function submitModelJudgment(e){
+ e.preventDefault();
+ const form=e.target,textarea=form.elements.judgment,btn=document.querySelector("#model-judgment-submit"),text=textarea.value.trim();
+ if(!text){toast("先输入一句车型判断");return}
+ const old=btn.textContent;btn.disabled=true;btn.textContent="MMN学习中…";
+ try{
+  const data=await api("/api/ai/model-judgment",{method:"POST",body:JSON.stringify({edition:activeEdition(),text,project:strategyProjectContext()})});
+  if(data.item)upsertModelJudgment(data.item);
+  if(data.knowledgeItem)mergeStrategyKnowledge([data.knowledgeItem]);
+  const modelName=data.item?.model_name||state.config.model;
+  if(modelName&&modelName!==state.config.model){applyModelSelection(modelName)}
+  textarea.value="";
+  save();render();
+  toast(data.model==="qwen"?"MMN已完成车型判断并写入资产库":"MMN已用本地规则先入库，Qwen暂未完成兜底");
+ }catch(err){
+  toast(`车型判断学习失败：${err.message}`);
+ }finally{
+  btn.disabled=false;btn.textContent=old;
+ }
+}
+function markdownish(text){
+ return String(text||"").trim().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
+}
+function loadStrategyAnswerCache(){try{return JSON.parse(localStorage.getItem(storageKey("mmnStrategyAnswerCache")))||{items:{},order:[]}}catch{return{items:{},order:[]}}}
+function saveStrategyAnswerCache(cache){localStorage.setItem(storageKey("mmnStrategyAnswerCache"),JSON.stringify(cache))}
+function strategyCacheKey(mode,query,references=[]){
+ const refKeys=references.map(x=>x.id||x.metadata?.doc_id||x.title||"").slice(0,8).join("|");
+ return [mode,activeEdition(),state.config.model,state.config.project,query,refKeys].join("::");
+}
+function getCachedStrategy(mode,query,references){
+ const cache=loadStrategyAnswerCache(),key=strategyCacheKey(mode,query,references);
+ return cache.items[key]||null;
+}
+function setCachedStrategy(mode,query,references,data){
+ const cache=loadStrategyAnswerCache(),key=strategyCacheKey(mode,query,references);
+ cache.items[key]={...data,cachedAt:new Date().toISOString()};
+ cache.order=[key,...(cache.order||[]).filter(x=>x!==key)].slice(0,24);
+ Object.keys(cache.items).forEach(k=>{if(!cache.order.includes(k))delete cache.items[k]});
+ saveStrategyAnswerCache(cache);
+}
+function renderMmnStrategyBubble({query,references,data,cached=false}){
+ const box=document.querySelector("#rag-results");if(!box)return;
+ const modelCopy=data.model==="qwen"?`${data.modelLabel||"MMN策略"} · ${data.qwen?.model||"千问"}`:"本地RAG兜底生成";
+ const cachedCopy=cached?" · 已缓存":"";
+ box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${query.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${data.modelLabel||"MMN智能策略"}</b><span>RAG巡检 + ${modelCopy}${cachedCopy}</span></div><div class="mmn-ai-content">${markdownish(data.text)}</div><button type="button" class="rag-summary-pill" id="rag-results-toggle"><b>查看引用依据：${references.length} 条</b><span>点击展开本次策略引用了哪些知识</span></button><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
+ document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
+}
+function immediateStrategyDraft(query,references,mode){
+ const titles=references.slice(0,3).map(x=>x.title).filter(Boolean).join("、")||"当前知识库";
+ const model=state.config.model||"当前车型";
+ return{
+  ok:true,
+  model:"local-rag",
+  mode,
+  modelLabel:mode==="deep"?"MMN深度策略":"MMN快速策略",
+  text:[
+   `结论先说：${model}现在先不要等模型长推理，先基于已召回依据形成可执行初稿。`,
+   `归因分析：当前问题与这些依据相关：${titles}。先把用户最难理解、最容易产生犹豫的点拆成证据，再决定投放和内容节奏。`,
+   "策略结论：先做证据解释，再做平台扩散，最后承接销售转化。不要先追求大曝光。",
+   "马上怎么做：1. 把问题拆成3条可验证证据；2. 选择最适合的平台表达方式；3. 找真实车主或垂媒补第三方视角；4. 把有效说法写回MMN学习库。",
+   "系统正在继续调用模型生成更完整版本，完成后会自动刷新。"
+  ].join("\\n\\n")
+ };
+}
+async function runMmnSmartStrategy(mode="fast"){
+ const box=document.querySelector("#rag-results");if(!box)return;
+ const query=(document.querySelector("#rag-query")?.value||"").trim()||`${state.config.model} 下一步营销策略怎么打`;
+ const filters={platform:document.querySelector("#rag-platform")?.value||"",emotion:document.querySelector("#rag-emotion")?.value||"",category:document.querySelector("#rag-category")?.value||"",stage:document.querySelector("#rag-stage")?.value||""};
+ const references=ragSearch({query,limit:8,filters});
+ const cached=getCachedStrategy(mode,query,references);
+ if(cached){renderMmnStrategyBubble({query,references,data:cached,cached:true});return}
+ const label=mode==="deep"?"MMN深度策略":"MMN快速策略";
+ renderMmnStrategyBubble({query,references,data:immediateStrategyDraft(query,references,mode)});
+ toast(`${label}已先给出RAG初稿，模型完成后会自动刷新`);
+ try{
+  const data=await api("/api/ai/rag-strategy",{method:"POST",body:JSON.stringify({question:query,project:strategyProjectContext(),references,mode})});
+  setCachedStrategy(mode,query,references,data);
+  renderMmnStrategyBubble({query,references,data});
+ }catch(err){
+  box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${query.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div><article class="mmn-ai-bubble"><b>${label}生成失败</b><p>${err.message}</p><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
+	 toast(`${label}失败：${err.message}`);
+	 }
+	}
+async function seedFounderArchive(){
+ try{
+  toast("正在导入公开表达样例…");
+  const data=await api("/api/founder-archives/seed",{method:"POST",body:JSON.stringify({edition:activeEdition()})});
+  await loadFounderArchives();
+  toast(`已导入 ${data.count||0} 条创始人蒸馏样例`);
+ }catch(err){toast(`导入失败：${err.message}`)}
+}
+async function runFounderWeeklyCrawl(){
+ const btn=document.querySelector("#run-founder-distill"),old=btn?.textContent;
+ if(btn){btn.disabled=true;btn.textContent="周度抓取中…"}
+ try{
+  const data=await api("/api/founder-archives/run-weekly",{method:"POST",body:JSON.stringify({edition:activeEdition()})});
+  await loadFounderArchives();
+  toast(`周度抓取完成：归档 ${data.items?.length||0} 条`);
+ }catch(err){toast(`周度抓取失败：${err.message}`)}
+ finally{if(btn){btn.disabled=false;btn.textContent=old}}
+}
+async function generateFounderTalk(){
+ const person=document.querySelector("#founder-speaker")?.value||founderState.selectedPerson;
+ const scene=document.querySelector("#founder-scene")?.value||"发布会";
+ const brief=document.querySelector("#founder-brief")?.value.trim()||"围绕当前品牌传播重点生成高管IP话术";
+ const box=document.querySelector("#founder-output");
+ if(!person){toast("请先选择一位创始人/高管");return}
+ box.innerHTML=`<div class="mmn-ai-bubble"><b>MMN正在生成高管IP话术…</b><p>Qwen负责主控生成，DeepSeek负责策略推理与质检。</p></div>`;
+ try{
+  const data=await api("/api/ai/founder-talk",{method:"POST",body:JSON.stringify({edition:activeEdition(),person,scene,brief})});
+  const html=`<div class="mmn-strategy-chat"><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${person} · ${scene}话术</b><span>Qwen主控执行 + DeepSeek策略质检</span></div><div class="mmn-ai-content">${markdownish(data.draft)}</div><div class="founder-review"><b>DeepSeek质检</b>${markdownish(data.review)}</div><div class="mmn-engine-signature">该话术由MMN营销引擎输出，基于公开表达风格蒸馏，不代表本人原话</div></article></div>`;
+  box.innerHTML=html;
+  founderState.lastOutput=html;saveFounderState();
+  const profile=founderProfile(person);mergeStrategyKnowledge([founderKnowledgeItem(profile,`${data.draft}\n\n${data.review}`)]);
+  toast("高管IP话术已生成并写入策略知识库");
+ }catch(err){
+  box.innerHTML=`<div class="mmn-ai-bubble"><b>生成失败</b><p>${err.message}</p></div>`;
+  toast(`生成失败：${err.message}`);
+ }
+}
+function renderLearning(a){
+ const form=document.querySelector("#learning-form");if(!form)return;
+ const labels=a.labels.slice(0,12);
+ form.elements.model.value=state.config.model;
+ const current=form.elements.label.value;
+ form.elements.label.innerHTML=labels.map(x=>`<option ${x.label===current?"selected":""}>${x.label}</option>`).join("");
+ const selected=form.elements.label.value||labels[0]?.label,similar=similarLearnings(selected,4),history=learnings();
+ document.querySelector("#similar-learnings").innerHTML=similar.length?similar.map(x=>`<div class="learn-item"><b>${x.model}｜${x.label}</b><p>${x.conclusion}</p><small>${x.recommendation}</small></div>`).join(""):"<p class='empty'>还没有相似案例。你保存第一条后，系统就开始学习。</p>";
+ document.querySelector("#learning-history").innerHTML=history.length?history.slice().reverse().map(x=>`<div class="history-item"><span>${(x.savedAt||x.saved_at||"").slice(0,10)}</span><b>${x.model}｜${x.label}</b><p>${x.conclusion}</p><small>${x.recommendation}</small></div>`).join(""):`<p class='empty'>暂无学习记录。${session?"当前企业空间知识库为空。":"未登录时记录只保存在本机浏览器；登录客户空间后会保存到服务端企业知识库。"}</p>`;
+ form.elements.label.onchange=()=>renderLearning(a);
+}
+function renderArchitecture(){
+ const root=document.querySelector("#architecture-flow");if(!root)return;
+ const arch=currentEdition().architecture;
+ document.querySelector("#architecture-eyebrow").textContent=arch.eyebrow;
+ document.querySelector("#architecture-title").textContent=arch.title;
+ document.querySelector("#architecture-version-button").textContent=arch.button;
+ document.querySelector("#architecture-mode").textContent=arch.mode;
+ document.querySelector("#architecture-headline").textContent=arch.headline;
+ document.querySelector("#architecture-desc").textContent=arch.desc;
+ document.querySelector("#architecture-status").innerHTML=arch.status.map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
+ root.innerHTML=arch.flow.map((x,i)=>`<div class="flow-step"><span>${String(i+1).padStart(2,"0")}</span><b>${x}</b></div>`).join("");
+ document.querySelector("#architecture-data-title").textContent=edition==="china"?"国内版数据接入优先级":"出海版数据接入预留";
+ document.querySelector("#architecture-data-note").textContent=edition==="china"?"可逐步自动化":"按区域逐步接入";
+ document.querySelector("#architecture-data-list").innerHTML=arch.data.map(x=>`<div class="architecture-item"><span>${x[2]}</span><b>${x[0]}</b><p>${x[1]}</p></div>`).join("");
+ document.querySelector("#architecture-ai-title").textContent=edition==="china"?"MMN策略生成与学习闭环":"全球模型与多语言策略闭环";
+ document.querySelector("#architecture-ai-note").textContent=edition==="china"?"模型隐藏在路由后":"可走OpenAI或企业网关";
+ document.querySelector("#architecture-ai-list").innerHTML=arch.ai.map(x=>`<div class="architecture-item"><span>${x[2]}</span><b>${x[0]}</b><p>${x[1]}</p></div>`).join("");
+ document.querySelector("#architecture-roadmap-title").textContent=edition==="china"?"国内版下一步建设顺序":"出海版同步建设顺序";
+ document.querySelector("#architecture-roadmap").innerHTML=arch.roadmap.map(x=>`<div class="roadmap-step"><span>${x[0]}</span><b>${x[1]}</b><p>${x[2]}</p></div>`).join("");
+}
+function renderWorkspace(){
+ const el=document.querySelector("#workspace-tree");if(!el)return;
+ const h=workspaceState.hierarchy||defaultWorkspaceState().hierarchy,cfg=currentEdition(),k=cfg.knowledge.map((x,i)=>({...x,items:i===1?(workspaceState.knowledge?.[1]?.items||x.items):i===2?learnings().length:x.items})),snapshots=workspaceState.snapshots||[];
+ const r=edition==="china"?[
+  {provider:cfg.routerTitle,role:cfg.routerRole,status:"当前优先"},
+  {provider:`Qwen主控执行模型 / ${aiStatus?.qwen?.model||"qwen-plus"}`,role:aiStatus?.qwen?.configured?"负责RAG检索、知识库调用、结构化输出和常规营销方案生成。":"待配置 DASHSCOPE_API_KEY，配置后作为MMN主控执行模型。",status:aiStatus?.qwen?.configured?"主控已启用":"待配置"},
+  {provider:`DeepSeek策略推理与质检 / ${aiStatus?.deepseek?.model||"deepseek-chat"}`,role:aiStatus?.deepseek?.configured?"负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析；当Qwen不确定时参与交叉确认。":"待配置 DEEPSEEK_API_KEY，配置后作为MMN策略质检模型。",status:aiStatus?.deepseek?.configured?"质检已启用":"待配置"},
+  {provider:"本土化RAG",role:"召回MMN母库、客户私有知识库、项目学习库，为策略生成提供可追溯依据。",status:"已接入原型"},
+  {provider:"客户私有模型 / 专属云",role:"面向集团客户私有化部署，隔离客户数据和项目学习库。",status:"架构预留"},
+  {provider:"本土规则引擎",role:"本地评分、拆解、融合评审底线，无模型也可运行。",status:"已启用"}
+ ]:[
+  {provider:cfg.routerTitle,role:cfg.routerRole,status:"同步开发"},
+  {provider:`OpenAI / ${aiStatus?.openai?.model||"gpt-5.5"}`,role:aiStatus?.openai?.configured?"已接入本地后端；额度可用后参与出海策略生成":"待配置 OPENAI_API_KEY 或可控网关",status:aiStatus?.openai?.configured?"已配置":"待配置"},
+  {provider:"TikTok / YouTube / Instagram / Reddit",role:"海外社媒、视频、社区和媒体声量数据源预留。",status:"数据源预留"},
+  {provider:"多语言RAG / 翻译层",role:"支持英文、东南亚语种、中东/欧洲市场资料的召回和策略归纳。",status:"预留"},
+  {provider:aiStatus?.rules?.model||"MMN规则引擎",role:"跨市场基础分类、规则评分和合规检查底线。",status:"已启用"}
+ ];
+ document.querySelector("#workspace-org").textContent=session?session.org:"未登录";
+ document.querySelector("#workspace-scope").textContent=cfg.scopeSuffix;
+ document.querySelector("#workspace-version").textContent=state.datasetVersion||"demo";
+ document.querySelector("#workspace-snapshots-count").textContent=snapshots.length.toLocaleString();
+ document.querySelector("#workspace-updated").textContent=workspaceState.updatedAt?`更新于 ${workspaceState.updatedAt.slice(0,19).replace("T"," ")}`:"等待登录同步";
+ el.innerHTML=`<div class="tree-root"><b>${edition==="global"?"Global Market Space":h.group||session?.org||"客户集团"}</b><span>${edition==="global"?"区域管理员可见国家、品牌、车型和出海项目；国家市场可进一步隔离。":"集团管理员可见全部品牌、车型和项目"}</span></div>${edition==="global"?`<div class="tree-brand"><div><b>海外区域</b><span>区域空间 / 国家市场</span></div><div class="tree-model"><b>东南亚 / 欧洲 / 中东</b><small>TikTok、YouTube、Instagram、Reddit 数据源预留</small></div><div class="tree-model"><b>海外上市项目</b><small>跨语言RAG / 本地法规 / 海外KOC素材学习</small></div></div>`:(h.brands||[]).map(b=>`<div class="tree-brand"><div><b>${b.name}</b><span>${b.role||"品牌空间"}</span></div>${(b.models||[]).map(m=>`<div class="tree-model"><b>${m.name}</b><small>${(m.projects||[]).join(" / ")||"待创建项目"}</small></div>`).join("")}</div>`).join("")||"<p class='empty'>登录客户空间后展示集团、品牌、车型和项目层级。</p>"}`;
+ document.querySelector("#knowledge-tiers").innerHTML=k.map(x=>`<div class="tier-card"><span>${x.storage}</span><b>${x.tier}</b><p>${x.scope}</p><strong>${(+x.items||0).toLocaleString()} 条</strong></div>`).join("");
+ document.querySelector("#model-router").innerHTML=r.map(x=>`<div class="router-row"><span>${x.status}</span><b>${x.provider}</b><p>${x.role}</p></div>`).join("");
+ document.querySelector("#snapshot-list").innerHTML=snapshots.length?snapshots.map(x=>`<div class="snapshot-item"><span>${(x.created_at||"").slice(0,19).replace("T"," ")}</span><b>${x.project||"未命名项目"}</b><p>${x.brand||"—"} / ${x.model||"—"} / ${x.data_version||"—"}</p></div>`).join(""):`<p class="empty">${session?"还没有数据库快照。点击“保存项目快照”会把当前项目写入 SQLite。":"当前仍是本机临时模式；进入客户空间后可保存数据库快照。"}</p>`;
+}
+function field(name,label,value,type="text",options=[]){return`<div class="field"><label>${label}</label>${options.length?`<select data-config="${name}">${options.map(o=>`<option ${o===value?"selected":""}>${o}</option>`).join("")}</select>`:`<input data-config="${name}" type="${type}" value="${value}">`}</div>`}
+function renderConfig(){
+ document.querySelector("#project-form").innerHTML=field("project","项目名称",state.config.project)+field("brand","本品品牌",state.config.brand)+field("model","本品车型",state.config.model,"text",modelOptions())+field("competitor","核心竞品",state.config.competitor)+field("targetIdentity","目标身份",state.config.targetIdentity,"text",Object.keys(identityWeights))+field("budget","营销预算（万元）",state.config.budget,"number");
+ document.querySelector("#threshold-form").innerHTML=field("priorityThreshold","行动优先级阈值",state.config.priorityThreshold,"number")+field("riskThreshold","风险预警阈值",state.config.riskThreshold,"number");
+ document.querySelectorAll("[data-config]").forEach(el=>{const update=()=>{state.config[el.dataset.config]=el.type==="number"?+el.value:el.value;if(el.dataset.config==="model")applyModelSelection(el.value);save()};el.oninput=update;el.onchange=()=>{update();if(el.dataset.config==="model")render();toast(el.dataset.config==="model"?`已切换为 ${el.value}`:"项目参数已保存")}});
+ document.querySelector("#platform-weights").innerHTML=Object.entries(state.platforms).map(([k,v])=>`<div class="weight-item"><b>${k}</b><input type="number" step=".05" value="${v}" data-platform="${k}"></div>`).join("");
+ document.querySelectorAll("[data-platform]").forEach(el=>el.onchange=()=>{state.platforms[el.dataset.platform]=+el.value;save();render();toast("平台权重已更新")});
+}
+function showPage(id){render();document.querySelectorAll(".page").forEach(p=>p.classList.toggle("active",p.id===id));document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===id));document.querySelector("#page-title").textContent=pageNames[id]}
+function toast(text){const t=document.querySelector("#toast");t.textContent=text;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1700)}
+function pulseFocus(target){
+ const el=typeof target==="string"?document.querySelector(target):target;
+ if(!el)return;
+ el.classList.remove("focus-pulse");
+ void el.offsetWidth;
+ el.classList.add("focus-pulse");
+ setTimeout(()=>el.classList.remove("focus-pulse"),1150);
+}
+if(location.protocol==="file:"){const warn=document.createElement("div");warn.style.cssText="position:fixed;left:244px;right:0;top:0;z-index:9999;background:#bf4a4a;color:#fff;padding:12px 24px;font-weight:800;box-shadow:0 10px 30px rgba(0,0,0,.18)";warn.textContent="当前是本地 file:// 打开方式，导入文件会失败。请使用 http://127.0.0.1:8765/ 打开客户演示版。";document.body.appendChild(warn)}
+document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>showPage(b.dataset.page));
+document.querySelectorAll("[data-edition]").forEach(b=>b.onclick=()=>setEdition(b.dataset.edition));
+document.querySelectorAll("[data-page-jump]").forEach(b=>b.onclick=()=>showPage(b.dataset.pageJump));
+document.addEventListener("click",e=>{const btn=e.target.closest("[data-file-target]");if(!btn||btn.disabled)return;const input=document.getElementById(btn.dataset.fileTarget);if(input&&!input.disabled)input.click()});
+document.querySelectorAll("#map-filters button").forEach(b=>b.onclick=()=>{mapFilter=b.dataset.filter;render()});
+document.querySelector("#map-limit").onchange=e=>{mapLimit=+e.target.value;render()};
+document.querySelector("#data-search").oninput=e=>{dataSearch=e.target.value;renderData()};
+document.querySelector("#vertical-search").oninput=e=>{verticalSearch=e.target.value;renderVertical()};
+document.querySelector("#video-search").oninput=e=>{videoSearch=e.target.value;renderVideos()};
+const founderSearchInput=document.querySelector("#founder-search");if(founderSearchInput)founderSearchInput.oninput=e=>{founderSearch=e.target.value;renderFounderDistill()};
+["#founder-brand-filter","#founder-person-filter","#founder-topic-filter"].forEach(sel=>{const el=document.querySelector(sel);if(el)el.onchange=e=>{const key=sel.includes("brand")?"brand":sel.includes("person")?"person":"topic";founderFilters[key]=e.target.value;renderFounderDistill()}});
+const founderSeedButton=document.querySelector("#founder-seed");if(founderSeedButton)founderSeedButton.onclick=seedFounderArchive;
+const founderRunButton=document.querySelector("#run-founder-distill");if(founderRunButton)founderRunButton.onclick=runFounderWeeklyCrawl;
+const founderGenerateButton=document.querySelector("#founder-generate");if(founderGenerateButton)founderGenerateButton.onclick=generateFounderTalk;
+const founderSpeaker=document.querySelector("#founder-speaker");if(founderSpeaker)founderSpeaker.onchange=e=>{founderState.selectedPerson=e.target.value;saveFounderState();renderFounderDistill()};
+document.querySelectorAll("[data-content-view]").forEach(b=>b.onclick=()=>{contentAssetView=b.dataset.contentView;creatorFilter="all";creatorSearch="";const input=document.querySelector("#creator-search");if(input)input.value="";renderVideos()});
+document.querySelectorAll("[data-creator-filter]").forEach(b=>b.onclick=()=>{creatorFilter=b.dataset.creatorFilter;document.querySelectorAll("[data-creator-filter]").forEach(x=>x.classList.toggle("active",x.dataset.creatorFilter===creatorFilter));renderCreatorLibrary()});
+const creatorSearchInput=document.querySelector("#creator-search");if(creatorSearchInput)creatorSearchInput.oninput=e=>{creatorSearch=e.target.value;renderCreatorLibrary()};
+document.querySelectorAll("[data-plugin-open]").forEach(b=>b.onclick=()=>openSocialPlugin(b.dataset.pluginOpen));
+document.querySelectorAll("[data-plugin-sync]").forEach(b=>b.onclick=()=>syncSocialPluginExport(b.dataset.pluginSync));
+const creatorForm=document.querySelector("#creator-form");
+if(creatorForm)creatorForm.onsubmit=e=>{
+ e.preventDefault();
+ const f=e.target,platform=f.elements.platform.value,id=f.elements.id.value;
+ const patch={
+  name:f.elements.name.value.trim(),
+  type:f.elements.type.value,
+  city:f.elements.city.value.trim()||"待补充",
+  fans:+f.elements.fans.value||0,
+  avgViews:+f.elements.avgViews.value||0,
+  engagementRate:+f.elements.engagementRate.value||0,
+  costLevel:f.elements.costLevel.value.trim()||"待评估",
+  profileUrl:f.elements.profileUrl.value.trim(),
+  categories:splitCreatorField(f.elements.categories.value),
+  strengths:splitCreatorField(f.elements.strengths.value),
+  fitStages:splitCreatorField(f.elements.fitStages.value),
+  risk:f.elements.risk.value.trim()
+ };
+ if(updateCreator(platform,id,patch)){document.querySelector("#creator-dialog").close();renderCreatorLibrary();toast("达人画像已保存")}
+ else toast("保存失败：未找到达人");
+};
+const resetDemoButton=document.querySelector("#reset-demo");if(resetDemoButton)resetDemoButton.onclick=()=>{if(confirm(`确认恢复${currentEdition().label}演示数据？当前本地修改将被覆盖。`)){state=defaultStateForEdition();save();render();toast(`已恢复${currentEdition().label}导入数据`)}};
+const modelJudgmentForm=document.querySelector("#model-judgment-form");if(modelJudgmentForm)modelJudgmentForm.onsubmit=submitModelJudgment;
+const accountButton=document.querySelector("#account-button");if(accountButton)accountButton.onclick=()=>document.querySelector("#login-dialog").showModal();
+document.querySelector("#login-submit").onclick=async e=>{e.preventDefault();const f=document.querySelector("#login-form");try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({org:f.elements.org.value,name:f.elements.name.value,email:f.elements.email.value})});saveSession(data.session);document.querySelector("#login-dialog").close();await Promise.all([loadServerLearnings(),loadWorkspace()]);toast(`已进入 ${data.session.org}`)}catch(err){toast(`登录失败：${err.message}`)}};
+document.querySelector("#trend-dialog-close").onclick=()=>document.querySelector("#trend-dialog").close();
+document.querySelector("#data-drill-close").onclick=()=>document.querySelector("#data-drill-dialog").close();
+document.querySelector("#sync-project-state").onclick=()=>syncProjectSnapshot(false);
+const extendedHeaders=[...headers,"声量类型","关键词/原文"];
+const platformFieldOptions=[...new Set([...Object.keys(defaultState.platforms),...Object.keys(defaultGlobalState.platforms)])];
+const fieldDefs=[["model","车型","text"],["type","类型","select",["本品","竞品"]],["platform","平台","select",platformFieldOptions],["category","一级赛道","text"],["label","认知标签","text"],["emotion","情绪","select",Object.keys(emotions)],["identity","用户身份","select",Object.keys(identityWeights)],["intent","购买意向","select",Object.keys(intentWeights)],["comments","有效评论","number"],["impact","Impact 1-5","number"],["growth","Growth","number"],["competition","Competition","number"],["trafficType","声量类型","select",["未识别","商业化声量","自然声量"]],["keywords","关键词/原文","text"]];
+document.querySelector("#row-fields").innerHTML=fieldDefs.map(([n,l,t,o])=>`<div class="field"><label>${l}</label>${t==="select"?`<select name="${n}">${o.map(x=>`<option>${x}</option>`).join("")}</select>`:`<input name="${n}" type="${t}" ${t==="number"?'value="1" step=".1"':""} required>`}</div>`).join("");
+document.querySelector("#add-row").onclick=()=>document.querySelector("#row-dialog").showModal();
+document.querySelector("#save-row").onclick=e=>{e.preventDefault();const f=new FormData(document.querySelector("#row-form")),vals=fieldDefs.map(([n,,t])=>t==="number"?+f.get(n):f.get(n));state.rows.push(vals);save();document.querySelector("#row-dialog").close();render();toast("新数据已加入并完成计算")};
+function download(name,text,type="text/plain"){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
+document.querySelector("#download-template").onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
+document.querySelector("#dashboard-template").onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
+document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入 Excel…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`Excel 导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#clear-vertical-data").onclick=()=>{if(confirm("确认清空当前垂媒看板数据？已沉淀的车型资产库不会删除。")){verticalState={sources:[],items:[],assetSummary:verticalState.assetSummary||null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};verticalSearch="";verticalPeriodPickerOpen=false;document.querySelector("#vertical-search").value="";saveVerticalState();renderVertical();toast("当前看板已清空，车型资产库已保留")}};
+document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已上传的抖音/小红书文件会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
+document.querySelector("#csv-file").onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const lines=reader.result.trim().split(/\r?\n/).slice(1);const parsed=lines.map(line=>line.split(",").map(x=>x.trim())).filter(r=>r.length>=12).map(r=>r.map((v,i)=>i>=8&&i<=11?+v:v));if(parsed.length){state.rows.push(...parsed);save();render();toast(`已导入 ${parsed.length} 行数据`)}else toast("未识别到有效数据")};reader.readAsText(file,"utf-8")};
+document.querySelector("#learning-form").onsubmit=async e=>{e.preventDefault();const f=e.target,item={edition:activeEdition(),model:state.config.model,label:f.elements.label.value,conclusion:f.elements.conclusion.value.trim(),recommendation:f.elements.recommendation.value.trim(),evidence:f.elements.evidence.value.trim(),platform:f.elements.platform.value.trim(),kpi:f.elements.kpi.value.trim(),stage:f.elements.stage.value,savedAt:new Date().toISOString()};if(!item.conclusion&&!item.recommendation){toast("请先填写结论或建议");return}try{if(session){const data=await api("/api/learnings",{method:"POST",body:JSON.stringify({...item,org_id:session.org_id,user_id:session.user_id})});serverLearnings.unshift({...data.item,savedAt:data.item.saved_at});}else{const items=learnings();items.push(item);saveLearnings(items)}f.elements.conclusion.value="";f.elements.recommendation.value="";f.elements.evidence.value="";f.elements.platform.value="";f.elements.kpi.value="";render();toast(session?"已保存到当前版本企业知识库":"已保存到当前版本本机学习库")}catch(err){toast(`保存失败：${err.message}`)}};
+document.querySelector("#clear-learning").onclick=async()=>{if(confirm(session?"确认清空当前企业空间、当前版本的学习记录？":"确认清空本机当前版本学习记录？")){try{if(session){await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`,{method:"DELETE"});serverLearnings=[]}else saveLearnings([]);render();toast("当前版本学习记录已清空")}catch(err){toast(`清空失败：${err.message}`)}}};
+document.querySelector("#strategy-kb-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入RAG材料…");try{const res=await fetch(`/api/import-rag-file?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");mergeStrategyKnowledge(json.dataset.items||[]);render();showPage("strategykb");toast(`已导入 ${json.dataset.count} 条RAG知识`)}catch(err){toast(`RAG材料导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#import-rag-seed").onclick=async()=>{toast("正在导入MMN训练包v1…");try{const data=await api("/api/import-rag-seed",{method:"POST",body:"{}"});mergeStrategyKnowledge(data.dataset.items||[]);render();showPage("strategykb");document.querySelector("#rag-query").value="智己LS8 最大传播问题 下一阶段怎么打";renderRagResults();toast(`MMN训练包已导入 ${data.dataset.count} 条知识`)}catch(err){toast(`训练包导入失败：${err.message}`)}};
+document.querySelector("#import-strategy-kb").onclick=()=>{const input=document.querySelector("#strategy-kb-input"),text=input.value.trim();if(!text){toast("请先粘贴策略对话，或上传RAG材料");return}const items=summarizeKnowledgeText(text);if(!items.length){toast("暂未提取到可用策略知识，请补充更完整的对话内容");return}mergeStrategyKnowledge(items);input.value="";render();showPage("strategykb");toast(`已归纳 ${items.length} 条策略知识`)};
+document.querySelector("#clear-strategy-kb").onclick=()=>{if(confirm("确认清空策略知识库？")){strategyKb=[];saveStrategyKb();renderStrategyKb();render();toast("策略知识库已清空")}};
+document.querySelector("#run-rag-search").onclick=()=>{ragResultsExpanded=false;runMmnSmartStrategy("fast")};
+document.querySelector("#run-rag-deep-strategy").onclick=()=>{ragResultsExpanded=false;runMmnSmartStrategy("deep")};
+["#rag-query","#rag-platform","#rag-emotion","#rag-category","#rag-stage"].forEach(sel=>{const el=document.querySelector(sel);if(el)el.oninput=el.onchange=()=>{ragResultsExpanded=false;renderRagResults()}});
+function reportPayload(){
+ const a=analysis(),list=a.labels.filter(x=>x.priority>0).slice(0,10),risks=a.labels.filter(x=>x.diagnosis==="优先修复").slice(0,3),assets=a.labels.filter(x=>x.diagnosis==="持续放大").slice(0,3),manual=learnings().filter(x=>x.model===state.config.model);
+ const calendar=[
+  {week:"第1周",theme:"止血澄清",task:`围绕“${risks[0]?.label||list[0]?.label||"核心风险"}”建立统一口径，发布官方解释、第三方实测和 FAQ。`},
+  {week:"第2周",theme:"证据扩散",task:"把高风险问题做成短视频、垂媒横评、B站深度拆解三种证据形态。"},
+  {week:"第3周",theme:"场景转化",task:"组织车主/KOC用真实通勤、家庭、长途场景复现产品价值，承接试驾。"},
+  {week:"第4周",theme:"资产放大",task:`把“${assets[0]?.label||list[2]?.label||"正向资产"}”包装成可复述卖点，形成话题、门店物料和销售话术。`}
+ ];
+ return{title:state.config.project,model:state.config.model,competitor:state.config.competitor,account:session?`${session.org} / ${session.email}`:"本机临时模式",metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString()},manual,diagnostics:list.map(x=>({label:x.label,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),knowhow:list.slice(0,6).map(x=>{const k=knowhowFor(x),learned=latestLearning(x.label);return{label:x.label,message:learned?.recommendation||k.message,evidence:learned?.evidence||k.proof,kpi:learned?.kpi||k.kpi}}),strategyKnowledge:strategyKb.slice(-8),calendar};
+}
+const exportPptxButton=document.querySelector("#export-pptx");if(exportPptxButton)exportPptxButton.onclick=async()=>{try{toast("正在生成 PPT…");const res=await fetch("/api/export-pptx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(reportPayload())});if(!res.ok){const err=await res.json().catch(()=>({error:"PPT 生成失败"}));throw new Error(err.error)}const blob=await res.blob();const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.config.project}_策略报告.pptx`;a.click();URL.revokeObjectURL(a.href);toast("PPT 已导出")}catch(err){toast(`PPT 导出失败：${err.message}`)}};
+const exportGammaButton=document.querySelector("#export-gamma");if(exportGammaButton)exportGammaButton.onclick=()=>{const p=reportPayload();const text=[`# Gamma 提案生成大纲｜${p.title}`,``,`请基于以下内容生成一份中文汽车营销策略汇报 PPT。`,`风格：专业、简洁、有咨询感，适合给汽车品牌营销负责人/管理层汇报。`,`页数建议：8页，16:9。`,``,`## 1. 封面`,`标题：${p.title}`,`副标题：分析对象 ${p.model}｜竞品 ${p.competitor}`,``,`## 2. 核心数据结果`,`- NSR：${p.metrics.nsr}` ,`- IPS：${p.metrics.ips}`,`- 购买意向指数：${p.metrics.intent}`,`- 购买阻力风险：${p.metrics.risk}`,``,`## 3. 认知诊断排序`,...p.diagnostics.slice(0,8).map((x,i)=>`${i+1}. ${x.label}｜${x.diagnosis}｜负向 ${x.negative}｜Gap ${x.gap}｜优先级 ${x.priority}`),``,`## 4. 人工结论与建议`,...(p.manual.length?p.manual.map((x,i)=>`${i+1}. ${x.label}\n- 结论：${x.conclusion||"未填写"}\n- 建议：${x.recommendation||"未填写"}\n- 证据：${x.evidence||"未填写"}\n- 平台：${x.platform||"未填写"}\n- KPI：${x.kpi||"未填写"}`):["尚未填写人工结论，请在页面中补充后再生成正式提案。"]),``,`## 5. 参考 Know-how`,...p.knowhow.map((x,i)=>`${i+1}. ${x.label}：${x.message}；证据链：${x.evidence}；KPI：${x.kpi}`),``,`## 6. 策略知识库补充`,...(p.strategyKnowledge?.length?p.strategyKnowledge.map((x,i)=>`${i+1}. ${x.type}：${x.body}`):["暂无导入的 ChatGPT 策略知识。"]),``,`## 7. 30天行动节奏`,...p.calendar.map(x=>`- ${x.week}｜${x.theme}：${x.task}`),``,`## 8. 风险与下一步`,`强调：数据结果由系统计算，最终结论和建议以人工填写为准；企业知识库会持续学习人工判断。`,``,`## 9. 结尾页`,`输出：下一步需要确认的策略动作、内容证据、责任分工和复盘指标。`].join("\\n");download(`${p.title}_Gamma大纲.md`,text,"text/markdown");toast("Gamma 大纲已导出")};
+const exportReportButton=document.querySelector("#export-report");if(exportReportButton)exportReportButton.onclick=()=>{
+ const a=analysis(),list=a.labels.filter(x=>x.priority>0).slice(0,10),sum=list.reduce((s,x)=>s+x.priority,0)||1,risks=a.labels.filter(x=>x.diagnosis==="优先修复").slice(0,3),assets=a.labels.filter(x=>x.diagnosis==="持续放大").slice(0,3);
+ const main=list[0],mainKh=main?knowhowFor(main):null;
+ const calendar=[
+  ["第1周","止血澄清",`围绕“${risks[0]?.label||main?.label||"核心风险"}”建立统一口径，发布官方解释、第三方实测和 FAQ。`],
+  ["第2周","证据扩散",`把高风险问题做成短视频、垂媒横评、B站深度拆解三种证据形态。`],
+  ["第3周","场景转化",`组织车主/KOC用真实通勤、家庭、长途场景复现产品价值，承接试驾。`],
+  ["第4周","资产放大",`把“${assets[0]?.label||list[2]?.label||"正向资产"}”包装成可复述卖点，形成话题、门店物料和销售话术。`]
+ ];
+ const manual=learnings().filter(x=>x.model===state.config.model);
+ const report=[`# ${state.config.project}｜营销策略报告`,``,`版本：${currentEdition().label}`,`分析对象：${state.config.model}  ｜ 核心竞品：${state.config.competitor}`,session?`客户空间：${session.org} ｜ 账号：${session.email}`:"客户空间：未登录，本机临时模式",``,`## 数据结果`,`- 口碑健康 NSR：${(a.nsr*100).toFixed(1)}%`,`- 目标人群穿透 IPS：${(a.ips*100).toFixed(1)}%`,`- 购买意向指数：${a.intent.toFixed(2)}`,`- 购买阻力风险分：${Math.round(a.neg).toLocaleString()}`,``,`## 人工结论与建议`,...(manual.length?manual.map((x,i)=>`${i+1}. **${x.label}**\n   - 结论：${x.conclusion||"未填写"}\n   - 建议：${x.recommendation||"未填写"}\n   - 证据：${x.evidence||"未填写"}\n   - 平台：${x.platform||"未填写"}\n   - KPI：${x.kpi||"未填写"}`):["尚未填写人工结论。"]),``,`## 系统诊断参考`,...list.map((x,i)=>{const ac=actionFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}｜${x.diagnosis}**：本品负向 ${Math.round(x.on).toLocaleString()}，认知 Gap ${(x.gap*100).toFixed(1)}%；参考证据：${learned?.evidence||ac.evidence}；参考平台：${learned?.platform||ac.platform}；建议预算参考：${money(state.config.budget*x.priority/sum)}。`}),``,`## 参考 Know-how`,...list.slice(0,6).map((x,i)=>{const k=knowhowFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}**：${learned?.conclusion||k.why}\n   - 参考打法：${learned?.recommendation||k.message}\n   - 证据链：${learned?.evidence||k.proof}\n   - KPI：${learned?.kpi||k.kpi}`}),``,`## 30天排期参考`,...calendar.map(x=>`- **${x[0]}｜${x[1]}**：${x[2]}`),``,session?`> 数据结果由系统计算；结论和建议以人工填写内容为准；学习案例来自 ${session.org} 企业知识库。`:`> 数据结果由系统计算；结论和建议以人工填写内容为准；当前为本机临时学习模式。`].join("\n");
+ download(`${state.config.project}_策略报告.md`,report,"text/markdown");toast("策略报告已导出");
+};
+render();
+loadAiStatus();
+loadSalesMarquee();
+loadFounderArchives();
+loadSocialPluginStatus();
+if(session){loadServerLearnings();loadWorkspace()}else renderWorkspace();
