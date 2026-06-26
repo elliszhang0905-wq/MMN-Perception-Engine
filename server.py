@@ -26,9 +26,13 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
-PORT = 8765
-DATA_DIR = ROOT / "data"
-DB_PATH = DATA_DIR / "commercial_demo.db"
+APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
+PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
+PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
+AUTO_OPEN_BROWSER = os.getenv("MMN_AUTO_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
+DESKTOP_BRIDGE_ENABLED = os.getenv("MMN_DESKTOP_BRIDGE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+DATA_DIR = Path(os.getenv("MMN_DATA_DIR", str(ROOT / "data"))).expanduser().resolve()
+DB_PATH = Path(os.getenv("MMN_DB_PATH", str(DATA_DIR / "commercial_demo.db"))).expanduser().resolve()
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 QWEN_DEFAULT_MODEL = "qwen-plus"
@@ -53,11 +57,11 @@ MMN_STRATEGY_MODEL = {
 DONGCHEDI_SALES_BASE = "https://www.dongchedi.com"
 SALES_CACHE = {"expires": "", "payload": None}
 GLOBAL_SALES_CACHE = {"expires": "", "payload": None}
-THAILAND_DB_PATH = ROOT.parent / "thailand-auto-market-data" / "data" / "sqlite" / "thailand_auto_market.db"
-SOCIAL_PLUGIN_ID = "dbichmdlbjdeplpkhcejgkakobjbjalc"
+THAILAND_DB_PATH = Path(os.getenv("THAILAND_DB_PATH", str(ROOT.parent / "thailand-auto-market-data" / "data" / "sqlite" / "thailand_auto_market.db"))).expanduser().resolve()
+SOCIAL_PLUGIN_ID = os.getenv("SOCIAL_PLUGIN_ID", "dbichmdlbjdeplpkhcejgkakobjbjalc")
 SOCIAL_PLUGIN_EXPORT_DIRS = {
-    "douyin": Path.home() / "Downloads" / "社媒助手" / "抖音",
-    "xiaohongshu": Path.home() / "Downloads" / "社媒助手" / "小红书"
+    "douyin": Path(os.getenv("SOCIAL_PLUGIN_DOUYIN_DIR", str(Path.home() / "Downloads" / "社媒助手" / "抖音"))).expanduser(),
+    "xiaohongshu": Path(os.getenv("SOCIAL_PLUGIN_XHS_DIR", str(Path.home() / "Downloads" / "社媒助手" / "小红书"))).expanduser()
 }
 SOCIAL_PLUGIN_URLS = {
     "douyin": "https://www.douyin.com/search/%E6%B1%BD%E8%BD%A6%E8%AF%84%E6%B5%8B",
@@ -65,8 +69,9 @@ SOCIAL_PLUGIN_URLS = {
 }
 NODE_CANDIDATES = [
     os.getenv("NODE_BINARY"),
-    "/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
-    shutil.which("node")
+    shutil.which("node"),
+    "/usr/local/bin/node",
+    "/usr/bin/node"
 ]
 
 def db():
@@ -334,11 +339,15 @@ def infer_brand_from_model(model):
         ("领克", "领克"),
         ("ZEEKR", "极氪"),
         ("Zeekr", "极氪"),
+        ("Zeeker", "极氪"),
         ("极氪", "极氪"),
+        ("009", "极氪"),
         ("001", "极氪"),
+        ("007", "极氪"),
         ("7X", "极氪"),
         ("8X", "极氪"),
         ("9X", "极氪"),
+        ("MIX", "极氪"),
         ("智己", "智己"),
         ("小米", "小米汽车"),
         ("理想", "理想"),
@@ -409,6 +418,55 @@ def corrected_brand_name(brand, model):
     b = str(brand or "").strip()
     return b if valid_brand_name(b, model) else infer_brand_from_model(model)
 
+def local_standard_model_identity(raw_name):
+    raw = re.sub(r"\s+", " ", str(raw_name or "").strip())
+    compact = re.sub(r"\s+", "", raw)
+    if not raw:
+        return None
+    zeekr = re.match(r"^(?:ZEEKR|Zeekr|Zeeker|极氪)\s*(001|007|009|7X|8X|9X|MIX|X)(.*)$", raw, re.I)
+    if not zeekr:
+        zeekr = re.match(r"^(001|007|009|7X|8X|9X)(.*)$", raw, re.I)
+    if zeekr:
+        code = str(zeekr.group(1)).upper()
+        suffix = re.sub(r"\s+", " ", str(zeekr.group(2) or "").strip())
+        family = f"极氪{code}"
+        energy = "PHEV" if re.search(r"PHEV|插混", raw, re.I) else "EREV" if re.search(r"增程|EREV", raw, re.I) else "HEV" if re.search(r"HEV|混动", raw, re.I) else "ICE" if re.search(r"燃油|ICE", raw, re.I) else "UNKNOWN"
+        return {
+            "brandName": "极氪",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": suffix,
+            "canonicalKey": "|".join(["极氪", family, energy, suffix])
+        }
+    avatr = re.match(r"^阿维塔(06|07|11|12|15)(.*)$", compact)
+    if avatr:
+        family = f"阿维塔{avatr.group(1)}"
+        suffix = avatr.group(2) or ""
+        return {
+            "brandName": "阿维塔",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": "UNKNOWN",
+            "variantName": suffix,
+            "canonicalKey": "|".join(["阿维塔", family, "UNKNOWN", suffix])
+        }
+    volvo = re.match(r"^(?:Volvo|沃尔沃)\s*(EX90|EX30|XC60|XC90|S90)(.*)$", raw, re.I)
+    if volvo:
+        code = str(volvo.group(1)).upper()
+        family = f"沃尔沃{code}"
+        suffix = re.sub(r"\s+", " ", str(volvo.group(2) or "").strip())
+        energy = "BEV" if code.startswith("EX") else "UNKNOWN"
+        return {
+            "brandName": "沃尔沃",
+            "normalizedName": family,
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": suffix,
+            "canonicalKey": "|".join(["沃尔沃", family, energy, suffix])
+        }
+    return None
+
 def social_platform(value):
     return "xiaohongshu" if value in ("xiaohongshu", "xhs", "小红书") else "douyin"
 
@@ -418,6 +476,8 @@ def latest_social_export(platform):
     return files[0] if files else None
 
 def social_plugin_manifest():
+    if not DESKTOP_BRIDGE_ENABLED:
+        return None
     base = Path.home() / "Library" / "Application Support" / "Google" / "Chrome" / "Default" / "Extensions" / SOCIAL_PLUGIN_ID
     versions = sorted([p for p in base.glob("*") if (p / "manifest.json").exists()], reverse=True) if base.exists() else []
     if not versions:
@@ -1223,8 +1283,8 @@ def model_identity_prompt(models):
             "你是MMN汽车车型资产库的品牌归属与车型标准化助手。只返回JSON，不要Markdown。"
             "返回根对象必须是：{\"items\":[...]}。"
             "你要把每个原始车型名归纳为：rawName, normalizedName, brandName, modelFamily, energyType, variantName, canonicalKey, confidence, reason。"
-            "品牌名必须是汽车品牌，不是车型。很多中国汽车品牌使用“品牌名+数字/字母”命名车型，例如：阿维塔06的brandName必须是阿维塔，modelFamily/normalizedName必须是阿维塔06；沃尔沃EX90的brandName必须是沃尔沃，modelFamily/normalizedName必须是沃尔沃EX90；蔚来ET5T的brandName必须是蔚来，modelFamily/normalizedName必须是蔚来ET5T；ZEEKR 001的brandName必须是极氪，modelFamily/normalizedName必须是ZEEKR 001。"
-            "不要把阿维塔06、阿维塔07、艾瑞泽8、奥迪E5、宝马i3、沃尔沃EX90、蔚来ET5T、ZEEKR 001、ZEEKR 7X这类完整车型名写进brandName。"
+            "品牌名必须是汽车品牌，不是车型。很多中国汽车品牌使用“品牌名+数字/字母”命名车型，例如：阿维塔06的brandName必须是阿维塔，modelFamily/normalizedName必须是阿维塔06；沃尔沃EX90的brandName必须是沃尔沃，modelFamily/normalizedName必须是沃尔沃EX90；蔚来ET5T的brandName必须是蔚来，modelFamily/normalizedName必须是蔚来ET5T；ZEEKR 001、Zeekr 009、Zeeker 009、极氪009的brandName都必须是极氪，modelFamily统一为极氪001或极氪009。"
+            "不要把阿维塔06、阿维塔07、艾瑞泽8、奥迪E5、宝马i3、沃尔沃EX90、蔚来ET5T、ZEEKR 001、ZEEKR 7X、Zeeker 009这类完整车型名写进brandName。"
             "energyType只能是：BEV、EREV、PHEV、HEV、ICE、UNKNOWN。"
             "注意：纯电、增程、插混/PHEV、燃油版本不能盲目排重；例如同一车型家族下不同能源版本要保留不同canonicalKey。"
             "canonicalKey格式建议：品牌|车型家族|能源类型|关键版本；无法确认能源时用UNKNOWN，但不要编造。"
@@ -1235,6 +1295,14 @@ def model_identity_prompt(models):
 
 def rule_model_identity(raw_name):
     name = str(raw_name or "").strip()
+    standard = local_standard_model_identity(name)
+    if standard:
+        return {
+            "rawName": name,
+            **standard,
+            "confidence": "high",
+            "reason": "MMN车型资产规则已标准化品牌与车型"
+        }
     brand = infer_brand_from_model(name)
     energy = "UNKNOWN"
     if re.search(r"纯电|EV|BEV|e-tron|ID\\.|i3|i5|iX|E5|E7X|E8|E9", name, re.I):
@@ -1269,7 +1337,7 @@ def display_model_name_under_brand(brand, model):
         "奔驰": ["奔驰", "Mercedes-Benz", "Mercedes"],
         "蔚来": ["蔚来", "NIO"],
         "智己": ["智己"],
-        "极氪": ["极氪"],
+        "极氪": ["极氪", "ZEEKR", "Zeekr", "Zeeker"],
         "小米汽车": ["小米"],
         "特斯拉": ["特斯拉", "Tesla"],
         "奇瑞": ["奇瑞"],
@@ -1292,16 +1360,17 @@ def normalize_model_identity_records(records, edition="china", source="model_ide
             raw = str(rec.get("rawName") or rec.get("raw_name") or rec.get("normalizedName") or "").strip()
             if not raw:
                 continue
-            normalized = str(rec.get("normalizedName") or raw).strip()
-            brand = corrected_brand_name(rec.get("brandName"), raw)
+            standard = local_standard_model_identity(raw) or local_standard_model_identity(rec.get("normalizedName") or raw)
+            normalized = str((standard or {}).get("normalizedName") or rec.get("normalizedName") or raw).strip()
+            brand = corrected_brand_name((standard or {}).get("brandName") or rec.get("brandName"), raw)
             if not brand:
                 brand = corrected_brand_name("", normalized)
-            family = str(rec.get("modelFamily") or normalized).strip()
-            energy = str(rec.get("energyType") or "UNKNOWN").strip().upper()
+            family = str((standard or {}).get("modelFamily") or rec.get("modelFamily") or normalized).strip()
+            energy = str((standard or {}).get("energyType") or rec.get("energyType") or "UNKNOWN").strip().upper()
             if energy not in {"BEV", "EREV", "PHEV", "HEV", "ICE", "UNKNOWN"}:
                 energy = "UNKNOWN"
-            variant = str(rec.get("variantName") or "").strip()
-            canonical = str(rec.get("canonicalKey") or "|".join([brand or "UNKNOWN", family, energy, variant])).strip()
+            variant = str((standard or {}).get("variantName") or rec.get("variantName") or "").strip()
+            canonical = str((standard or {}).get("canonicalKey") or rec.get("canonicalKey") or "|".join([brand or "UNKNOWN", family, energy, variant])).strip()
             item_id = stable_id("model-identity", edition, raw, canonical)
             payload = {
                 "id": item_id,
@@ -3144,6 +3213,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/social-plugin/open":
             try:
+                if not DESKTOP_BRIDGE_ENABLED:
+                    raise ValueError("当前部署未启用桌面采集插件桥。请在本机客户端使用该功能，服务器端通过手动导入或任务管道接入数据。")
                 body = self.read_json()
                 platform = social_platform(body.get("platform"))
                 url = body.get("url") or SOCIAL_PLUGIN_URLS[platform]
@@ -3462,10 +3533,11 @@ class Server(socketserver.TCPServer):
 if __name__ == "__main__":
     init_db()
     schedule_founder_weekly_crawl()
-    with Server(("127.0.0.1", PORT), Handler) as server:
-        print(f"中国汽车营销引擎已启动：http://127.0.0.1:{PORT}")
-        print("关闭此窗口即可停止系统。")
-        Timer(0.7, lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")).start()
+    with Server((APP_HOST, PORT), Handler) as server:
+        print(f"中国汽车营销引擎已启动：{PUBLIC_BASE_URL}")
+        print("按 Ctrl+C 即可停止系统。")
+        if AUTO_OPEN_BROWSER:
+            Timer(0.7, lambda: webbrowser.open(PUBLIC_BASE_URL)).start()
         try:
             server.serve_forever()
         except KeyboardInterrupt:

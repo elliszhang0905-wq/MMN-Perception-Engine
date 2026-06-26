@@ -1,7 +1,6 @@
 #!/bin/zsh
 cd "$(dirname "$0")"
-if [ -x "/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3" ]; then
-  "/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3" server.py
-else
-  python3 server.py
-fi
+export MMN_HOST="${MMN_HOST:-localhost}"
+export MMN_PORT="${MMN_PORT:-8765}"
+export MMN_AUTO_OPEN_BROWSER="${MMN_AUTO_OPEN_BROWSER:-true}"
+python3 server.py

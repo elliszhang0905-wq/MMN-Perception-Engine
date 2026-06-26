@@ -1,6 +1,6 @@
 const { chromium } = require("playwright");
 
-const baseUrl = process.env.MMN_URL || "http://127.0.0.1:8765/";
+const baseUrl = process.env.MMN_URL || "http://localhost:8765/";
 const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 async function main() {
@@ -45,6 +45,21 @@ async function main() {
   const cognitionRows = await page.locator("#dashboard-cognition-table tbody tr").count().catch(() => 0);
   add("dashboard data panel renders", dataTableRows > 0, String(dataTableRows));
   add("dashboard cognition panel renders", cognitionRows > 0, String(cognitionRows));
+
+  const identityCheck = await page.evaluate(() => {
+    const groups = brandModelGroups(["极氪009", "Zeekr 009", "ZEEKR 009", "Zeeker 009", "阿维塔06", "沃尔沃EX90"]);
+    const byBrand = Object.fromEntries(groups.map(group => [group.brand, group.models.map(model => canonicalModelLabel(model))]));
+    return {
+      byBrand,
+      zeekrCount: byBrand["极氪"]?.length || 0,
+      zeekrLabel: byBrand["极氪"]?.[0] || "",
+      avatrBrand: brandForDisplay("阿维塔06"),
+      volvoBrand: brandForDisplay("沃尔沃EX90"),
+      hasPendingBrand: Object.keys(byBrand).includes("待确认品牌")
+    };
+  });
+  add("vehicle identity assigns pending brands", identityCheck.avatrBrand === "阿维塔" && identityCheck.volvoBrand === "沃尔沃" && !identityCheck.hasPendingBrand, JSON.stringify(identityCheck));
+  add("vehicle identity deduplicates Zeekr aliases", identityCheck.zeekrCount === 1 && identityCheck.zeekrLabel.includes("极氪009"), JSON.stringify(identityCheck));
 
   await page.locator('#nav button[data-page="data"]').click();
   add("data center opens", await page.locator("#data.page.active").count() === 1);

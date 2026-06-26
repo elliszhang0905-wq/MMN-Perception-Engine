@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-PROJECT_DIR="/Users/ellis/Documents/MMN汽车营销引擎/china-auto-marketing-engine"
-PYTHON_BIN="/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+PROJECT_DIR="${MMN_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
 if [ ! -x "$PYTHON_BIN" ]; then
   PYTHON_BIN="$(command -v python3)"
 fi

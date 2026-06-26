@@ -308,6 +308,32 @@ function loadModelIdentities(){try{return JSON.parse(localStorage.getItem(storag
 function saveModelIdentities(){localStorage.setItem(storageKey("mmnModelIdentities"),JSON.stringify(modelIdentities))}
 function modelIdentityFor(model){return modelIdentities.items?.[model]||null}
 const knownBrandNames=["沃尔沃","阿维塔","广汽埃安","奇瑞","别克","奥迪","宝马","奔驰","本田","智己","小米汽车","特斯拉","蔚来","极氪","理想","问界","比亚迪","吉利","吉利银河","领克","零跑","小鹏","广汽传祺","腾势","深蓝","长安","长安启源","五菱","丰田","大众","日产","MG","smart","firefly","待确认品牌"];
+function cleanModelText(model){return String(model||"").trim().replace(/\s+/g," ")}
+function localStandardIdentity(model){
+ const raw=cleanModelText(model),compact=raw.replace(/\s+/g,"");
+ const zeekr=raw.match(/^(?:ZEEKR|Zeekr|Zeeker|极氪)\s*([0-9]{3}|[0-9]X|MIX|X)(.*)$/i)||raw.match(/^(?:ZEEKR|Zeekr|Zeeker|极氪)?\s*(001|007|009|7X|8X|9X)(.*)$/i);
+ if(zeekr){
+  const code=String(zeekr[1]||"").toUpperCase(),suffix=cleanModelText(zeekr[2]||"");
+  const family=`极氪${code}`;
+  return{brand_name:"极氪",normalized_name:suffix?`${family} ${suffix}`:family,model_family:family,energy_type:/PHEV|插混/i.test(raw)?"PHEV":/增程|EREV/i.test(raw)?"EREV":/HEV|混动/i.test(raw)?"HEV":/燃油|ICE/i.test(raw)?"ICE":"UNKNOWN",variant_name:suffix,canonical_key:`极氪|${family}|UNKNOWN|${suffix}`};
+ }
+ const avatr=compact.match(/^阿维塔(06|07|11|12|15)(.*)$/);
+ if(avatr){const family=`阿维塔${avatr[1]}`;return{brand_name:"阿维塔",normalized_name:family+(avatr[2]?` ${avatr[2]}`:""),model_family:family,energy_type:"UNKNOWN",variant_name:avatr[2]||"",canonical_key:`阿维塔|${family}|UNKNOWN|${avatr[2]||""}`}}
+ const volvo=raw.match(/^(?:Volvo|沃尔沃)\s*(EX90|EX30|XC60|XC90|S90)(.*)$/i);
+ if(volvo){const family=`沃尔沃${String(volvo[1]).toUpperCase()}`;return{brand_name:"沃尔沃",normalized_name:family,model_family:family,energy_type:/EX/i.test(volvo[1])?"BEV":"UNKNOWN",variant_name:cleanModelText(volvo[2]||""),canonical_key:`沃尔沃|${family}|${/EX/i.test(volvo[1])?"BEV":"UNKNOWN"}|${cleanModelText(volvo[2]||"")}`}}
+ return null;
+}
+function standardIdentityFor(model){
+ const local=localStandardIdentity(model),id=modelIdentityFor(model)||{};
+ const rawBrand=id.brand_name||id.brandName||"";
+ const brand=local?.brand_name||(!isBadBrandName(rawBrand,model)?rawBrand:brandForModel(model));
+ const family=local?.model_family||id.model_family||id.modelFamily||id.normalized_name||id.normalizedName||cleanModelText(model);
+ const normalized=local?.normalized_name||id.normalized_name||id.normalizedName||family;
+ const energy=local?.energy_type||id.energy_type||id.energyType||"UNKNOWN";
+ const variant=local?.variant_name||id.variant_name||id.variantName||"";
+ const canonical=local?.canonical_key||id.canonical_key||id.canonicalKey||`${brand}|${family}|${energy}|${variant}`;
+ return{brand_name:brand,normalized_name:normalized,model_family:family,energy_type:energy,variant_name:variant,canonical_key:canonical,display_model_name:id.display_model_name||id.displayModelName||normalized};
+}
 function isBadBrandName(brand,model){
  const b=String(brand||"").trim(),m=String(model||"").trim();
  if(!b)return true;
@@ -318,17 +344,16 @@ function isBadBrandName(brand,model){
  return false;
 }
 function brandForDisplay(model){
- const id=modelIdentityFor(model),qBrand=id?.brand_name||id?.brandName||"";
- return isBadBrandName(qBrand,model)?brandForModel(model):qBrand;
+ return standardIdentityFor(model).brand_name;
 }
 function canonicalModelLabel(model){
- const id=modelIdentityFor(model);
- if(!id)return model;
- const energy=id.energy_type||id.energyType||"";
- const family=id.model_family||id.modelFamily||id.normalized_name||id.normalizedName||model;
+ const id=standardIdentityFor(model);
+ const energy=id.energy_type||"";
+ const family=id.model_family||id.normalized_name||model;
  return energy&&energy!=="UNKNOWN"?`${family} · ${energy}`:family;
 }
 async function ensureModelIdentities(models=[]){
+ models.filter(Boolean).forEach(m=>{const local=localStandardIdentity(m);if(local&&!modelIdentityFor(m))modelIdentities.items[m]={raw_name:m,...local,confidence:"local-standard",qwen_checked:0,qwen_reason:"MMN本地车型资产规则"}});
  const missing=[...new Set(models.filter(Boolean))].filter(m=>!modelIdentityFor(m)||isBadBrandName(modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName,m)||((modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName)==="待确认品牌"&&!modelIdentityFor(m)?.qwen_checked&&!modelIdentityFor(m)?.qwenChecked));
  if(!missing.length||modelIdentitySyncing)return;
  modelIdentitySyncing=true;
@@ -430,9 +455,9 @@ function brandForModel(model){
  return cleaned&&knownBrandNames.includes(cleaned)?cleaned:"待确认品牌";
 }
 function modelNameUnderBrand(brand,model){
- const id=modelIdentityFor(model);
+ const id=standardIdentityFor(model);
  const b=String(brand||"").trim(),m=String(model||"").trim();
- const aliases={
+  const aliases={
   沃尔沃:["沃尔沃","Volvo"],
   智己:["智己"],
   奥迪:["奥迪","Audi"],
@@ -444,7 +469,7 @@ function modelNameUnderBrand(brand,model){
   问界:["问界"],
   特斯拉:["特斯拉","Tesla"],
   小米汽车:["小米"],
-  极氪:["极氪","ZEEKR","Zeekr"],
+  极氪:["极氪","ZEEKR","Zeekr","Zeeker"],
   阿维塔:["阿维塔"],
   奇瑞:["奇瑞"],
   MG:["MG"],
@@ -459,17 +484,18 @@ function modelNameUnderBrand(brand,model){
   吉利银河:["吉利银河","银河"]
  };
  const names=aliases[b]||[b];
- let out=String(id?.display_model_name||id?.displayModelName||m).trim();
+ let out=String(id?.display_model_name||id?.displayModelName||id?.normalized_name||m).trim();
  names.filter(Boolean).forEach(alias=>{out=out.replace(new RegExp(`^${alias}\\s*`,"i"),"")});
  return out.trim()||m;
 }
 function brandModelGroups(models){
  const groups={};
  models.forEach(model=>{
-  const brand=brandForDisplay(model),id=modelIdentityFor(model);
+  const brand=brandForDisplay(model),id=standardIdentityFor(model);
   const key=id?.canonical_key||id?.canonicalKey||`${brand}|${model}`;
   const list=(groups[brand]||(groups[brand]=new Map()));
-  if(!list.has(key)||String(model).length>String(list.get(key)).length)list.set(key,model);
+  const current=list.get(key);
+  if(!current||canonicalModelLabel(model).length>=canonicalModelLabel(current).length)list.set(key,model);
  });
  return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
 }

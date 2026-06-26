@@ -4,10 +4,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-NODE_BIN="${NODE_BINARY:-/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node}"
+NODE_BIN="${NODE_BINARY:-$(command -v node)}"
 PORT="${MMN_PORT:-8765}"
-URL="${MMN_URL:-http://127.0.0.1:${PORT}/}"
+URL="${MMN_URL:-http://localhost:${PORT}/}"
 SERVER_PID=""
+
+if [[ -z "$NODE_BIN" ]]; then
+  echo "未找到 Node.js，请安装 Node.js 或设置 NODE_BINARY。" >&2
+  exit 1
+fi
 
 echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check app.js
@@ -19,7 +24,7 @@ if rg -n "AI|ChatGPT|Codex|大模型辅助|AI生成|智能编写" "docs/研发�
   exit 1
 fi
 
-changed_files="$(git diff --name-only HEAD || true)"
+changed_files="$({ git -c core.quotePath=false diff --name-only HEAD || true; git -c core.quotePath=false ls-files --others --exclude-standard || true; } | sort -u)"
 if echo "$changed_files" | rg -q "^(app\.js|index\.html|server\.py|style\.css|knowhow\.css|scripts/)"; then
   if ! echo "$changed_files" | rg -q "^docs/研发档案/.*\.md$"; then
     echo "本次包含功能或流程变更，但未发现研发档案更新。" >&2

@@ -1,0 +1,92 @@
+services:
+  mmn-web:
+    image: nginx:1.27-alpine
+    container_name: mmn-web
+    restart: unless-stopped
+    ports:
+      - "${MMN_HTTP_PORT:-8765}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      mmn-app:
+        condition: service_healthy
+    networks:
+      - mmn_net
+
+  mmn-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
+    container_name: mmn-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MMN_HOST: ${MMN_HOST:-0.0.0.0}
+      MMN_PORT: ${MMN_PORT:-8765}
+      MMN_PUBLIC_BASE_URL: ${MMN_PUBLIC_BASE_URL:-}
+      MMN_AUTO_OPEN_BROWSER: "false"
+      MMN_DESKTOP_BRIDGE_ENABLED: "false"
+      MMN_DATA_DIR: /app/data
+      MMN_DB_PATH: /app/data/commercial_demo.db
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mmn:${POSTGRES_PASSWORD:-change-me}@mmn-db:5432/mmn}
+    expose:
+      - "8765"
+    volumes:
+      - mmn_data:/app/data
+      - mmn_backups:/app/backups
+      - mmn_logs:/app/logs
+    depends_on:
+      mmn-db:
+        condition: service_healthy
+    networks:
+      - mmn_net
+
+  mmn-db:
+    image: postgres:16-alpine
+    container_name: mmn-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mmn}
+      POSTGRES_USER: ${POSTGRES_USER:-mmn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - mmn_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmn} -d ${POSTGRES_DB:-mmn}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mmn_net
+
+  mmn-scheduler:
+    image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
+    container_name: mmn-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MMN_DATA_DIR: /app/data
+      MMN_DB_PATH: /app/data/commercial_demo.db
+    command: ["bash", "scripts/run_scheduler.sh"]
+    volumes:
+      - mmn_data:/app/data
+      - mmn_backups:/app/backups
+      - mmn_logs:/app/logs
+    depends_on:
+      mmn-app:
+        condition: service_started
+    networks:
+      - mmn_net
+
+networks:
+  mmn_net:
+    driver: bridge
+
+volumes:
+  mmn_data:
+  mmn_backups:
+  mmn_logs:
+  mmn_postgres:
