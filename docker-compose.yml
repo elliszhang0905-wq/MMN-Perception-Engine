@@ -78,6 +78,11 @@ services:
     depends_on:
       mmn-app:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/logs/scheduler.log"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       - mmn_net
 

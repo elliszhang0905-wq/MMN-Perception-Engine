@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 data/*.db
 data/sqlite/
+backups/
+cloud_model_test_result.json

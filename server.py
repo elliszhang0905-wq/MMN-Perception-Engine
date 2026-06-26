@@ -44,7 +44,7 @@ DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-reasoner"
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
-    "modules": ["NSR", "Emotion", "Attribute", "Identity", "Gap", "Action", "RAG知识库", "周报生成", "高管蒸馏", "车型传播分析"],
+    "modules": ["NSR", "Emotion", "Attribute", "Identity", "Positioning", "Gap", "Action", "RAG知识库", "周报生成", "高管蒸馏", "车型传播分析"],
     "workflow": ["本品", "竞品", "用户情绪", "产品属性", "身份认同", "认知空位", "传播动作"],
     "router": {
         "fast_strategy": {"primary": "qwen", "fallback": "deepseek", "label": "MMN快速策略"},

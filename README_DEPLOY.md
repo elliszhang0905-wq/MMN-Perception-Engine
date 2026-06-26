@@ -125,7 +125,80 @@ http://YOUR_ECS_PUBLIC_IP:8765/
 
 当前阶段仅内部测试，不对客户开放。
 
-## 7. 停止、重启和更新
+## 7. 标准发布流程
+
+MMN Perception Engine 当前采用以下标准发布流程：
+
+1. 本地 Mac 作为开发与验证环境。
+2. 本地完成代码修改、页面检查、数据验证和发布门禁。
+3. 确认无误后提交到 GitHub。
+4. 阿里云 ECS 只作为运行环境，不直接手工修改业务代码。
+5. ECS 通过 `deploy.sh` 从 GitHub 拉取最新代码，重新构建并启动 Docker 服务。
+6. 如发布异常，通过 `rollback.sh` 回滚到指定 Git 版本。
+
+### 本地发布前检查
+
+在本地项目目录执行：
+
+```bash
+bash scripts/release_gate.sh
+git status
+```
+
+确认无误后提交：
+
+```bash
+git add .
+git commit -m "release: vX.X.X"
+git push origin main
+```
+
+### 云端发布
+
+登录 ECS 后执行：
+
+```bash
+cd /opt/mmn-perception-engine
+bash deploy.sh
+```
+
+`deploy.sh` 会自动完成：
+
+1. 从 GitHub 拉取 `main` 分支最新代码。
+2. 保留服务器现有 `.env`，不会被 GitHub 覆盖。
+3. 如当前服务正在运行，先备份云端数据。
+4. 执行 `docker compose down --remove-orphans`。
+5. 重新 `build`。
+6. 执行 `docker compose up -d`。
+7. 输出服务状态。
+
+### 云端回滚
+
+查看最近版本：
+
+```bash
+git log --oneline -n 10
+```
+
+回滚到指定版本：
+
+```bash
+bash rollback.sh <git_ref>
+```
+
+示例：
+
+```bash
+bash rollback.sh HEAD~1
+```
+
+`rollback.sh` 会保留 `.env`，先备份当前数据，再切换代码版本并重建容器。
+
+### 发布记录
+
+每次正式发布前，复制根目录 `release.md` 模板，填写发布日期、版本号、变更内容、测试结果、GitHub Commit、云端健康检查和回滚方案。
+
+## 8. 停止、重启和更新
 
 停止：
 
@@ -145,14 +218,13 @@ docker compose up -d
 docker compose restart mmn-app mmn-web
 ```
 
-拉取新代码后更新：
+拉取新代码并更新：
 
 ```bash
-git pull
-bash scripts/deploy.sh
+bash deploy.sh
 ```
 
-## 8. 日志查看
+## 9. 日志查看
 
 查看全部服务日志：
 
@@ -178,7 +250,7 @@ docker compose logs -f mmn-web
 docker compose logs -f mmn-scheduler
 ```
 
-## 9. 备份
+## 10. 备份
 
 执行：
 
@@ -197,7 +269,7 @@ backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
 - 内部测试阶段每天至少备份一次。
 - 正式上线后接入 OSS 或企业备份系统。
 
-## 10. 恢复
+## 11. 恢复
 
 ```bash
 bash scripts/restore.sh backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
@@ -205,7 +277,47 @@ bash scripts/restore.sh backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
 
 恢复完成后应用会自动重启。
 
-## 11. 定时任务
+## 12. 本地与服务器数据同步
+
+当前阶段采用“本地主数据库兜底、服务器镜像运行”的同步策略：
+
+- 本地 Mac 保留主数据账本。
+- 服务器保留同一份运行数据，用于公网 IP 内部测试和后续商业化迁移。
+- 服务器中新增的数据会先回流到本地。
+- 如果同一条记录本地和服务器同时存在差异，默认保留本地版本。
+- 合并完成后，再把本地合并数据镜像到服务器。
+
+执行同步：
+
+```bash
+bash sync-local-primary.sh
+```
+
+该脚本会自动完成：
+
+1. 备份本地 `data/`。
+2. 调用服务器备份脚本备份云端数据。
+3. 拉取服务器 `/app/data/`。
+4. 将服务器新增 SQLite 记录和新增文件合并回本地。
+5. 将本地合并后的 `data/` 推送到服务器 Docker volume。
+6. 重启服务器应用和定时任务服务。
+
+默认连接信息可通过环境变量覆盖：
+
+```bash
+MMN_ECS_HOST=服务器公网IP
+MMN_ECS_USER=root
+MMN_ECS_KEY=/path/to/ssh_key
+MMN_REMOTE_DIR=/opt/mmn-perception-engine
+```
+
+注意：
+
+- 当前同步范围是项目 `data/` 目录和 `commercial_demo.db`，覆盖结构化数据、导入数据、RAG 训练文件和业务资产文件。
+- 浏览器临时状态必须先写入项目快照或数据库，才能进入同步链路。
+- 正式商业化阶段建议迁移到 RDS PostgreSQL + OSS，并将同步策略升级为实时事件同步和审计日志。
+
+## 13. 定时任务
 
 `mmn-scheduler` 当前预留并运行周度任务：
 
@@ -221,7 +333,7 @@ docker compose logs -f mmn-scheduler
 
 后续懂车帝销量、泰国市场数据、RAG资料更新等任务都可以纳入该服务。
 
-## 12. 后续迁移到正式 ECS/RDS/OSS
+## 14. 后续迁移到正式 ECS/RDS/OSS
 
 正式商业化建议按以下顺序升级：
 
@@ -252,7 +364,7 @@ MMN_PUBLIC_BASE_URL=https://正式域名
 
 当前阶段不执行域名绑定和 SSL 接入。
 
-## 14. 安全注意事项
+## 16. 安全注意事项
 
 - 不对客户开放当前测试地址。
 - 不把 API Key 写入代码。
@@ -262,7 +374,7 @@ MMN_PUBLIC_BASE_URL=https://正式域名
 - 测试完成后关闭或限制 8765 端口。
 - 定期备份 `mmn_data`。
 
-## 15. 常见问题
+## 17. 常见问题
 
 ### 页面无法访问
 
