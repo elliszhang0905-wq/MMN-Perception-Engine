@@ -473,16 +473,29 @@ function brandModelGroups(models){
  });
  return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
 }
+function dcdTopPositiveCompetitors(model){
+ const items=(verticalState.items||[]).filter(x=>x.ownModel===model&&x.platform==="懂车帝"&&x.competitor&&Number(x.positiveRank)>0);
+ if(!items.length)return[];
+ const periods=uniquePeriods(items),latest=periods[periods.length-1];
+ const picked=new Map();
+ items.filter(x=>x.period===latest).sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999)).forEach(x=>{
+  if((+x.positiveRank||999)<=3&&!picked.has(x.competitor))picked.set(x.competitor,x);
+ });
+ return [...picked.values()].sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999)).slice(0,3).map(x=>x.competitor);
+}
+function syncDashboardCompetitors(){
+ const comps=dcdTopPositiveCompetitors(state.config.model),next=comps.join(" / ");
+ if(state.config.competitor!==next)state.config.competitor=next;
+ return comps;
+}
 function applyModelSelection(model){
  const models=modelOptions();
  if(!models.includes(model))return;
  state.config.model=model;
  state.config.brand=brandForModel(model);
- const verticalComps=[...new Set((verticalState.items||[]).filter(x=>x.ownModel===model).sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999)).map(x=>x.competitor).filter(Boolean))];
- const rowComps=[...new Set(state.rows.filter(r=>r[0]!==model).map(r=>r[0]).filter(Boolean))];
- const comps=(verticalComps.length?verticalComps:rowComps.length?rowComps:models.filter(x=>x!==model)).slice(0,6);
+ const comps=dcdTopPositiveCompetitors(model);
  state.config.competitor=comps.join(" / ");
- state.config.project=`${model}认知诊断｜6车竞品评价`;
+ state.config.project=`${model}认知诊断${comps.length?`｜${comps.length}车核心竞品`:""}`;
 }
 function score(r){const [sat,risk]=emotions[r[5]]||[0,0],iw=identityWeights[r[6]]||.85,pw=state.platforms[r[2]]||1,intw=intentWeights[r[7]]||.5,n=+r[8]||0,impact=+r[9]||3;return{positive:sat>0?n*sat*iw*pw*intw:0,negative:risk>0?n*risk*impact*pw*intw:0}}
 function analysis(){
@@ -551,10 +564,11 @@ function platformAdvice(platform){
 }
 function money(n){return `${n.toFixed(1)} 万`}
 function render(){
+ const dashCompetitors=syncDashboardCompetitors();
  const a=analysis();
  renderEditionChrome();
  renderAccount();
- document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=state.config.competitor;document.querySelector("#dash-samples").textContent=`${a.ownComments.toLocaleString()} 条`;
+ document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=dashCompetitors.join(" / ");document.querySelector("#dash-samples").textContent=`${a.ownComments.toLocaleString()} 条`;
  document.querySelector("#kpi-nsr").textContent=(a.nsr*100).toFixed(1)+"%";document.querySelector("#kpi-nsr-note").textContent=a.nsr>=.7?"口碑健康":"需要优先处理购买阻力";document.querySelector("#kpi-ips").textContent=(a.ips*100).toFixed(1)+"%";document.querySelector("#kpi-intent").textContent=a.intent.toFixed(2);document.querySelector("#kpi-risk").textContent=Math.round(a.neg).toLocaleString();document.querySelector("#kpi-risk-note").textContent=`阈值 ${state.config.riskThreshold.toLocaleString()}`;
  renderDashboard(a);renderData();renderCognition(a);renderVertical();renderVideos();renderActions(a);renderKnowhow(a);renderFounderDistill();renderStrategyKb();renderLearning(a);renderArchitecture();renderWorkspace();renderConfig();
 }
@@ -633,7 +647,7 @@ function renderDashboardData(a){
   ["当前车型样本",a.ownComments.toLocaleString()],
   ["本品样本",a.ownComments.toLocaleString()]
  ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
- document.querySelector("#dashboard-data-table").innerHTML=`<thead><tr><th>车型</th><th>平台</th><th>赛道</th><th>标签</th><th>情绪</th><th>样本</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${(+r[8]||0).toLocaleString()}</td></tr>`).join(""):`<tr><td colspan="6" class="empty-cell">暂无 ${state.config.model} 的声量数据，请导入该车型 Excel / CSV，或切换到已有数据的车型。</td></tr>`}</tbody>`;
+ document.querySelector("#dashboard-data-table").innerHTML=`<thead><tr><th>车型</th><th>平台</th><th>赛道</th><th>标签</th><th>情绪</th><th>样本</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td><td>${(+r[8]||0).toLocaleString()}</td></tr>`).join(""):`<tr><td colspan="6" class="empty-cell">暂无 ${state.config.model} 的声量数据，请导入该车型声量数据，或切换到已有数据的车型。</td></tr>`}</tbody>`;
 }
 function renderDashboardCognition(a){
  const rows=a.labels.slice(0,8);
@@ -1640,7 +1654,7 @@ document.querySelector("#save-row").onclick=e=>{e.preventDefault();const f=new F
 function download(name,text,type="text/plain"){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
 document.querySelector("#download-template").onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
 document.querySelector("#dashboard-template").onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
-document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入 Excel…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`Excel 导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入数据…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#clear-vertical-data").onclick=()=>{if(confirm("确认清空当前垂媒看板数据？已沉淀的车型资产库不会删除。")){verticalState={sources:[],items:[],assetSummary:verticalState.assetSummary||null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};verticalSearch="";verticalPeriodPickerOpen=false;document.querySelector("#vertical-search").value="";saveVerticalState();renderVertical();toast("当前看板已清空，车型资产库已保留")}};
 document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已上传的抖音/小红书文件会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
