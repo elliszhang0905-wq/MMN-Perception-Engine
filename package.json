@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "release:gate": "bash scripts/release_gate.sh",
     "test:openai": "node scripts/test_openai_client.mjs"
   },
   "dependencies": {
