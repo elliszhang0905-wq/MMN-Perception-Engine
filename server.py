@@ -39,6 +39,17 @@ DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-reasoner"
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
+MMN_STRATEGY_MODEL = {
+    "modules": ["NSR", "Emotion", "Attribute", "Identity", "Gap", "Action", "RAG知识库", "周报生成", "高管蒸馏", "车型传播分析"],
+    "workflow": ["本品", "竞品", "用户情绪", "产品属性", "身份认同", "认知空位", "传播动作"],
+    "router": {
+        "fast_strategy": {"primary": "qwen", "fallback": "deepseek", "label": "MMN快速策略"},
+        "complex_strategy": {"primary": "deepseek", "fallback": "qwen", "label": "MMN深度策略"},
+        "content_generation": {"primary": "qwen", "fallback": "deepseek", "label": "MMN内容生成模型"},
+        "quality_review": {"primary": "deepseek", "fallback": "qwen", "label": "MMN策略质检模型"},
+        "data_summary": {"primary": "qwen", "fallback": "deepseek", "label": "MMN数据归纳模型"}
+    }
+}
 DONGCHEDI_SALES_BASE = "https://www.dongchedi.com"
 SALES_CACHE = {"expires": "", "payload": None}
 GLOBAL_SALES_CACHE = {"expires": "", "payload": None}
@@ -838,7 +849,7 @@ def founder_seed_items():
 def founder_talk_prompt(profile, scene, brief, archives):
     return [
         {"role": "system", "content": (
-            "你是MMN汽车营销引擎的高管IP话术生成模块。Qwen负责主控执行、知识调用、结构化输出和常规话术生成。"
+            "你是MMN汽车营销引擎的高管IP话术生成模块。底层主控执行引擎负责知识调用、结构化输出和常规话术生成。"
             "请基于已归档的公开表达样本生成可直接使用的中文话术。不要声称这是高管本人原话，只能说是风格参考。"
             "输出结构：核心话术、表达拆解、可发布版本、注意事项。"
             + MMN_OUTPUT_STYLE
@@ -849,7 +860,7 @@ def founder_talk_prompt(profile, scene, brief, archives):
 def founder_quality_prompt(profile, scene, brief, draft):
     return [
         {"role": "system", "content": (
-            "你是MMN汽车营销引擎的DeepSeek策略推理与质检模型。负责观点归因、语言风格蒸馏、舆论风险判断和高管IP Prompt校验。"
+            "你是MMN汽车营销引擎的策略推理与质检模块。负责观点归因、语言风格蒸馏、舆论风险判断和高管IP Prompt校验。"
             "请检查话术是否符合人物公开表达风格、是否存在过度承诺、事实不明、舆论风险或逻辑断裂。"
             "输出结构：质检结论、风险点、优化建议、最终可用Prompt。"
         )},
@@ -995,6 +1006,30 @@ def deepseek_config(profile="default"):
         "fast_model": deepseek_model_for("fast"),
         "deep_model": deepseek_model_for("deep")
     }
+
+def mmn_route_for(mode="fast"):
+    return MMN_STRATEGY_MODEL["router"]["complex_strategy" if mode == "deep" else "fast_strategy"]
+
+def call_mmn_strategy_engine(question, project, references, mode="fast"):
+    route = mmn_route_for(mode)
+    prompt = rag_strategy_prompt(question, project, references)
+    errors = {}
+    text = ""
+    used_model = "local-rag"
+    for provider in [route["primary"], route["fallback"]]:
+        try:
+            if provider == "deepseek":
+                text = call_deepseek(prompt, temperature=.25, profile=mode, timeout=90 if mode == "deep" else 60)
+            elif provider == "qwen":
+                text = call_qwen(prompt, temperature=.28, profile=mode, timeout=90 if mode == "deep" else 60)
+            if text:
+                used_model = provider
+                break
+        except Exception as exc:
+            errors[provider] = str(exc)
+    if not text:
+        text = local_rag_strategy_answer(question, project, references)
+    return text, used_model, errors, route
 
 def openai_config():
     api_key = env_value("OPENAI_API_KEY")
@@ -1421,11 +1456,11 @@ def parse_json_object(text):
 def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None, rule_text=None):
     available = []
     if qwen_text:
-        available.append(("千问", qwen_text))
+        available.append(("MMN主控执行引擎", qwen_text))
     if deepseek_text:
-        available.append(("DeepSeek", deepseek_text))
+        available.append(("MMN策略质检引擎", deepseek_text))
     if openai_text:
-        available.append(("ChatGPT", openai_text))
+        available.append(("MMN外部模型网关", openai_text))
     if rule_text:
         available.append(("规则引擎", rule_text))
     if not available:
@@ -2913,8 +2948,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 },
                 "sources": [{"name": x["name"], "platform": x["platform"], "url": x["url"], "enabled": x["enabled"]} for x in FOUNDER_PUBLIC_SOURCES],
                 "modelRoles": {
-                    "qwen": "主控执行：抓取内容清洗、摘要和结构化入库",
-                    "deepseek": "策略质检：观点归因、语言风格蒸馏、舆论风险判断和高管IP Prompt生成"
+                    "primary": "MMN主控执行：抓取内容清洗、摘要和结构化入库",
+                    "review": "MMN策略质检：观点归因、语言风格蒸馏、舆论风险判断和高管IP Prompt生成"
                 }
             })
             return
@@ -3224,7 +3259,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     review = call_deepseek(founder_quality_prompt(profile, scene, brief, draft), temperature=.2, profile="fast", timeout=120, max_tokens=700)
                 except Exception as exc:
                     errors["deepseek"] = str(exc)
-                    review = "质检结论：DeepSeek暂未完成复核，请人工检查事实依据、过度承诺和舆论风险。"
+                    review = "质检结论：MMN策略质检暂未完成复核，请人工检查事实依据、过度承诺和舆论风险。"
                 self.send_json({"ok": True, "draft": draft, "review": review, "errors": errors, "qwen": qwen_config(), "deepseek": deepseek_config()})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -3268,25 +3303,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 mode = "deep" if body.get("mode") == "deep" else "fast"
                 if not question:
                     raise ValueError("请输入策略问题。")
-                errors = {}
-                used_model = "local-rag"
-                try:
-                    text = call_qwen(rag_strategy_prompt(question, project, references), temperature=.28, profile=mode)
-                    used_model = "qwen"
-                except Exception as exc:
-                    errors["qwen"] = str(exc)
-                    try:
-                        text = call_deepseek(rag_strategy_prompt(question, project, references), temperature=.25, profile=mode, timeout=60)
-                        used_model = "deepseek"
-                    except Exception as ds_exc:
-                        errors["deepseek"] = str(ds_exc)
-                        text = local_rag_strategy_answer(question, project, references)
+                text, used_model, errors, route = call_mmn_strategy_engine(question, project, references, mode)
                 self.send_json({
                     "ok": True,
                     "text": text,
                     "model": used_model,
                     "mode": mode,
-                    "modelLabel": "MMN深度策略" if mode == "deep" else "MMN快速策略",
+                    "modelLabel": route["label"],
                     "references": references[:8],
                     "errors": errors,
                     "qwen": qwen_config(mode),

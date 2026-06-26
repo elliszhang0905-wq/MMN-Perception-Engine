@@ -67,8 +67,8 @@ const editions={
   sideTitle:"国内版运行",
   sideDesc:"MMN多模态 / 本土化RAG / 本土规则优先",
   logo:"assets/mmn-logo-cn-line-cropped.png",
-  routerTitle:"MMN双模型策略路由（国内版）",
-  routerRole:"Qwen作为主控执行模型，负责RAG检索、知识库调用、结构化输出和常规营销方案生成；DeepSeek作为策略推理与质检模型，负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析。",
+  routerTitle:"MMN多模型策略路由（国内版）",
+  routerRole:"MMN根据任务类型自动调度底层AI发动机：复杂策略分析走深度推理，中文营销表达走内容生成，数据归纳走稳定摘要，失败时自动切换备用模型并由本地规则兜底。",
   scopeSuffix:"国内版：集团-品牌-车型-项目隔离",
   knowledge:[
    {tier:"MMN母知识库",scope:"中国汽车营销方法论、垂媒/抖音/小红书打法、可复用策略框架",items:13,storage:"平台只读"},
@@ -81,9 +81,9 @@ const editions={
    button:"国内版优先优化",
    mode:"国内版",
    headline:"从国内声量数据到 MMN 策略闭环",
-   desc:"优先打通抖音、小红书、垂媒、人工结论、RAG知识库和MMN双模型策略路由，让Qwen负责执行与输出，DeepSeek负责推理质检，本地系统先具备稳定可演示、可私有化、可持续学习的能力。",
-   status:[["当前重点","国内网络可用"],["策略路由","Qwen主控 / DeepSeek质检"],["部署形态","本地 / 私有云"],["数据原则","客户隔离"]],
-   flow:["国内声量数据","清洗与标签拆解","本土化RAG召回","Qwen主控执行","DeepSeek策略质检","行动计划与学习"],
+   desc:"优先打通抖音、小红书、垂媒、人工结论、RAG知识库和MMN多模型策略路由，让系统围绕MMN方法论完成执行、推理、质检和兜底，本地系统先具备稳定可演示、可私有化、可持续学习的能力。",
+   status:[["当前重点","国内网络可用"],["策略路由","MMN自动调度"],["部署形态","本地 / 私有云"],["数据原则","客户隔离"]],
+   flow:["国内声量数据","清洗与标签拆解","本土化RAG召回","MMN策略模型分析","MMN策略质检","行动计划与学习"],
    data:[
     ["抖音 / 小红书","短视频与种草内容，区分商业化声量和自然声量，按车型/竞品/平台拆解。","已接入导入面板"],
     ["汽车之家 / 懂车帝","正反向排名、竞品格局、周期趋势和标签钻取。","已接入 Excel 导入"],
@@ -92,13 +92,13 @@ const editions={
    ],
    ai:[
     ["MMN策略按钮","前台只露出 MMN策略，不暴露底层模型品牌。","已完成"],
-    ["Qwen主控执行模型","负责RAG检索、知识库调用、结构化输出和常规营销方案生成。","主控"],
-    ["DeepSeek策略推理与质检模型","负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析。","质检"],
+    ["MMN主控执行引擎","负责RAG检索、知识库调用、结构化输出和常规营销方案生成。","主控"],
+    ["MMN策略推理质检引擎","负责竞品拆解、观点压力测试、逻辑校验和数据分析。","质检"],
     ["本土化RAG巡检","策略生成前召回MMN母库、客户私库、项目学习库，输出可追溯依据。","已接入原型"],
     ["本土规则兜底","无模型或模型失败时，仍可用本土规则生成保守策略建议。","已运行"]
    ],
    roadmap:[
-    ["01","稳定双模型路由","Qwen负责执行输出，DeepSeek负责策略推理与质检，前台统一只显示MMN策略。"],
+    ["01","稳定多模型路由","底层模型由MMN自动调度，前台统一只显示MMN策略。"],
     ["02","RAG文件库","支持 PDF/Word/Markdown/Excel 策略资料导入，形成客户私有知识库。"],
     ["03","数据版本管理","每次导入形成数据版本，支持项目复盘、回滚、对比。"],
     ["04","权限隔离","集团、品牌、车型、项目四级权限和知识库隔离。"],
@@ -111,7 +111,7 @@ const editions={
   title:"MMN汽车营销引擎｜出海版",
   eyebrow:"MMN PERCEPTION ENGINE · GLOBAL AUTO",
   sideTitle:"出海版预览",
-  sideDesc:"海外平台 / OpenAI / 全球素材预留",
+  sideDesc:"海外平台 / 海外模型网关 / 全球素材预留",
   logo:"assets/mmn-logo-reverse-cropped.png",
   ticker:[
    {text:"SEA EV Watch｜泰国/印尼/马来西亚新能源关注：注册量、TikTok声量、经销商线索待接入"},
@@ -122,7 +122,7 @@ const editions={
    {text:"Compliance｜出海版按区域隔离数据源，保留原文引用与本地法规标签"}
   ],
   routerTitle:"MMN策略路由（出海版）",
-  routerRole:"面向海外市场接入 OpenAI、海外社媒数据、跨语言RAG和区域化合规规则。",
+  routerRole:"面向海外市场接入海外模型网关、海外社媒数据、跨语言RAG和区域化合规规则。",
   scopeSuffix:"出海版：区域-国家-品牌-车型项目隔离",
   knowledge:[
    {tier:"MMN Global Playbook",scope:"海外上市、社媒种草、创作者营销、区域定位方法论",items:0,storage:"平台只读"},
@@ -135,8 +135,8 @@ const editions={
    button:"出海版同步开发",
    mode:"出海版",
    headline:"从海外平台声量到区域化增长策略",
-   desc:"出海版保留独立架构位，面向海外社媒、跨语言RAG、OpenAI/海外模型网关和区域市场隔离，后续与国内版共享MMN方法论底座。",
-   status:[["当前重点","架构占位"],["模型路由","OpenAI / 网关"],["部署形态","SaaS / 专属云"],["数据原则","区域隔离"]],
+   desc:"出海版保留独立架构位，面向海外社媒、跨语言RAG、海外模型网关和区域市场隔离，后续与国内版共享MMN方法论底座。",
+   status:[["当前重点","架构占位"],["模型路由","海外模型网关"],["部署形态","SaaS / 专属云"],["数据原则","区域隔离"]],
    flow:["海外社媒数据","翻译与本地化标签","多语言RAG","全球模型路由","区域策略计划","Campaign Learning"],
    data:[
     ["TikTok / YouTube","海外短视频内容、创作者素材、互动表现和话题趋势。","预留"],
@@ -146,7 +146,7 @@ const editions={
    ],
    ai:[
     ["MMN策略按钮","出海版同样只暴露MMN策略，背后路由不同区域模型与知识库。","已占位"],
-    ["OpenAI / 企业网关","额度和网络可用后接入Responses API，或走客户可控模型网关。","已接入SDK"],
+    ["MMN海外模型网关","额度和网络可用后接入海外模型或客户可控模型网关。","已接入SDK"],
     ["跨语言RAG","召回海外资料并保留原文引用、中文解释和区域化建议。","待建设"],
     ["合规规则引擎","区域广告合规、数据合规、素材禁区和风险提示。","待建设"]
    ],
@@ -154,7 +154,7 @@ const editions={
     ["01","海外市场模板","建立国家/区域/品牌/车型项目结构。"],
     ["02","平台数据字段","定义TikTok、YouTube、Instagram、Reddit导入模板。"],
     ["03","跨语言RAG","支持原文、翻译、摘要、策略引用四层输出。"],
-    ["04","海外模型网关","支持OpenAI、客户网关和无模型规则兜底。"],
+    ["04","海外模型网关","支持海外模型、客户网关和无模型规则兜底。"],
     ["05","全球战役复盘","沉淀Campaign Learning并反哺MMN Global Playbook。"]
    ]
   }
@@ -352,7 +352,7 @@ function defaultWorkspaceState(){
   {tier:"项目学习库",scope:"人工结论、项目复盘、数据版本",items:0,storage:"项目隔离"}
  ],modelRouter:[
   {provider:"无模型规则引擎",role:"本地评分、排名、分类、权限判断",status:"已运行"},
-  {provider:"OpenAI / ChatGPT",role:"复杂策略推理与报告生成",status:"可插拔"},
+  {provider:"MMN海外模型网关",role:"复杂策略推理与报告生成",status:"可插拔"},
   {provider:"MMN多模态能力层",role:"国内网络可用的多模态策略、摘要和RAG问答能力",status:"预留"},
   {provider:"客户私有模型",role:"私有化或专属云部署",status:"预留"}
  ],snapshots:[],updatedAt:""};
@@ -807,7 +807,8 @@ async function generateModelStrategy(engine,btn){
   clearTimeout(timer);
   const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
   if(!res.ok||!data.ok)throw new Error(data.error||`${label}生成失败`);
-  const parts=data.parts?`<details class="model-parts"><summary>查看多模型原始意见</summary>${Object.entries(data.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${k}</b>${String(v).split(/\n+/).filter(Boolean).map(x=>`<p>${x}</p>`).join("")}</section>`).join("")}${data.errors&&Object.keys(data.errors).length?`<section><b>缺席/错误</b>${Object.entries(data.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+  const partLabels={qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"};
+  const parts=data.parts?`<details class="model-parts"><summary>查看MMN引擎过程记录</summary>${Object.entries(data.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${partLabels[k]||k}</b>${String(v).split(/\n+/).filter(Boolean).map(x=>`<p>${x}</p>`).join("")}</section>`).join("")}${data.errors&&Object.keys(data.errors).length?`<section><b>缺席/错误</b>${Object.entries(data.errors).map(([k,v])=>`<p>${partLabels[k]||k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
   result.innerHTML=`<h4>${label}建议</h4>${String(data.text||"").split(/\n+/).filter(Boolean).map(x=>`<p>${x}</p>`).join("")}${parts}`;
  }catch(e){
   const msg=e.name==="AbortError"?"生成超过 90 秒，已自动停止。建议缩小筛选范围，或稍后重试。":e.message;
@@ -1398,7 +1399,7 @@ async function submitModelJudgment(e){
   if(modelName&&modelName!==state.config.model){applyModelSelection(modelName)}
   textarea.value="";
   save();render();
-  toast(data.model==="qwen"?"MMN已完成车型判断并写入资产库":"MMN已用本地规则先入库，Qwen暂未完成兜底");
+  toast(data.model==="local-rule"?"MMN已用本地规则先入库，模型兜底暂未完成":"MMN已完成车型判断并写入资产库");
  }catch(err){
   toast(`车型判断学习失败：${err.message}`);
  }finally{
@@ -1427,7 +1428,7 @@ function setCachedStrategy(mode,query,references,data){
 }
 function renderMmnStrategyBubble({query,references,data,cached=false}){
  const box=document.querySelector("#rag-results");if(!box)return;
- const modelCopy=data.model==="qwen"?`${data.modelLabel||"MMN策略"} · ${data.qwen?.model||"千问"}`:"本地RAG兜底生成";
+ const modelCopy=data.model==="local-rag"?"MMN本地规则兜底":data.model==="local-rule"?"MMN本地规则兜底":"MMN多模型引擎";
  const cachedCopy=cached?" · 已缓存":"";
  box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${query.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${data.modelLabel||"MMN智能策略"}</b><span>RAG巡检 + ${modelCopy}${cachedCopy}</span></div><div class="mmn-ai-content">${markdownish(data.text)}</div><button type="button" class="rag-summary-pill" id="rag-results-toggle"><b>查看引用依据：${references.length} 条</b><span>点击展开本次策略引用了哪些知识</span></button><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
  document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
@@ -1492,10 +1493,10 @@ async function generateFounderTalk(){
  const brief=document.querySelector("#founder-brief")?.value.trim()||"围绕当前品牌传播重点生成高管IP话术";
  const box=document.querySelector("#founder-output");
  if(!person){toast("请先选择一位创始人/高管");return}
- box.innerHTML=`<div class="mmn-ai-bubble"><b>MMN正在生成高管IP话术…</b><p>Qwen负责主控生成，DeepSeek负责策略推理与质检。</p></div>`;
+ box.innerHTML=`<div class="mmn-ai-bubble"><b>MMN正在生成高管IP话术…</b><p>MMN高管蒸馏模型正在完成话术生成、策略推理与风险质检。</p></div>`;
  try{
   const data=await api("/api/ai/founder-talk",{method:"POST",body:JSON.stringify({edition:activeEdition(),person,scene,brief})});
-  const html=`<div class="mmn-strategy-chat"><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${person} · ${scene}话术</b><span>Qwen主控执行 + DeepSeek策略质检</span></div><div class="mmn-ai-content">${markdownish(data.draft)}</div><div class="founder-review"><b>DeepSeek质检</b>${markdownish(data.review)}</div><div class="mmn-engine-signature">该话术由MMN营销引擎输出，基于公开表达风格蒸馏，不代表本人原话</div></article></div>`;
+  const html=`<div class="mmn-strategy-chat"><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${person} · ${scene}话术</b><span>MMN高管蒸馏模型</span></div><div class="mmn-ai-content">${markdownish(data.draft)}</div><div class="founder-review"><b>MMN策略质检</b>${markdownish(data.review)}</div><div class="mmn-engine-signature">该话术由MMN营销引擎输出，基于公开表达风格蒸馏，不代表本人原话</div></article></div>`;
   box.innerHTML=html;
   founderState.lastOutput=html;saveFounderState();
   const profile=founderProfile(person);mergeStrategyKnowledge([founderKnowledgeItem(profile,`${data.draft}\n\n${data.review}`)]);
@@ -1531,7 +1532,7 @@ function renderArchitecture(){
  document.querySelector("#architecture-data-note").textContent=edition==="china"?"可逐步自动化":"按区域逐步接入";
  document.querySelector("#architecture-data-list").innerHTML=arch.data.map(x=>`<div class="architecture-item"><span>${x[2]}</span><b>${x[0]}</b><p>${x[1]}</p></div>`).join("");
  document.querySelector("#architecture-ai-title").textContent=edition==="china"?"MMN策略生成与学习闭环":"全球模型与多语言策略闭环";
- document.querySelector("#architecture-ai-note").textContent=edition==="china"?"模型隐藏在路由后":"可走OpenAI或企业网关";
+ document.querySelector("#architecture-ai-note").textContent=edition==="china"?"模型隐藏在MMN路由后":"可走海外模型网关或企业网关";
  document.querySelector("#architecture-ai-list").innerHTML=arch.ai.map(x=>`<div class="architecture-item"><span>${x[2]}</span><b>${x[0]}</b><p>${x[1]}</p></div>`).join("");
  document.querySelector("#architecture-roadmap-title").textContent=edition==="china"?"国内版下一步建设顺序":"出海版同步建设顺序";
  document.querySelector("#architecture-roadmap").innerHTML=arch.roadmap.map(x=>`<div class="roadmap-step"><span>${x[0]}</span><b>${x[1]}</b><p>${x[2]}</p></div>`).join("");
@@ -1541,14 +1542,14 @@ function renderWorkspace(){
  const h=workspaceState.hierarchy||defaultWorkspaceState().hierarchy,cfg=currentEdition(),k=cfg.knowledge.map((x,i)=>({...x,items:i===1?(workspaceState.knowledge?.[1]?.items||x.items):i===2?learnings().length:x.items})),snapshots=workspaceState.snapshots||[];
  const r=edition==="china"?[
   {provider:cfg.routerTitle,role:cfg.routerRole,status:"当前优先"},
-  {provider:`Qwen主控执行模型 / ${aiStatus?.qwen?.model||"qwen-plus"}`,role:aiStatus?.qwen?.configured?"负责RAG检索、知识库调用、结构化输出和常规营销方案生成。":"待配置 DASHSCOPE_API_KEY，配置后作为MMN主控执行模型。",status:aiStatus?.qwen?.configured?"主控已启用":"待配置"},
-  {provider:`DeepSeek策略推理与质检 / ${aiStatus?.deepseek?.model||"deepseek-chat"}`,role:aiStatus?.deepseek?.configured?"负责竞品拆解、观点压力测试、逻辑校验和代码/数据分析；当Qwen不确定时参与交叉确认。":"待配置 DEEPSEEK_API_KEY，配置后作为MMN策略质检模型。",status:aiStatus?.deepseek?.configured?"质检已启用":"待配置"},
+  {provider:"MMN主控执行引擎",role:aiStatus?.qwen?.configured?"负责RAG检索、知识库调用、结构化输出和常规营销方案生成。":"待配置底层执行模型密钥，配置后由MMN自动调用。",status:aiStatus?.qwen?.configured?"主控已启用":"待配置"},
+  {provider:"MMN策略推理质检引擎",role:aiStatus?.deepseek?.configured?"负责竞品拆解、观点压力测试、逻辑校验和数据分析；当主控模型不确定时参与交叉确认。":"待配置底层质检模型密钥，配置后由MMN自动调用。",status:aiStatus?.deepseek?.configured?"质检已启用":"待配置"},
   {provider:"本土化RAG",role:"召回MMN母库、客户私有知识库、项目学习库，为策略生成提供可追溯依据。",status:"已接入原型"},
   {provider:"客户私有模型 / 专属云",role:"面向集团客户私有化部署，隔离客户数据和项目学习库。",status:"架构预留"},
   {provider:"本土规则引擎",role:"本地评分、拆解、融合评审底线，无模型也可运行。",status:"已启用"}
  ]:[
   {provider:cfg.routerTitle,role:cfg.routerRole,status:"同步开发"},
-  {provider:`OpenAI / ${aiStatus?.openai?.model||"gpt-5.5"}`,role:aiStatus?.openai?.configured?"已接入本地后端；额度可用后参与出海策略生成":"待配置 OPENAI_API_KEY 或可控网关",status:aiStatus?.openai?.configured?"已配置":"待配置"},
+  {provider:"MMN海外模型网关",role:aiStatus?.openai?.configured?"已接入本地后端；额度可用后参与出海策略生成":"待配置海外模型密钥或客户可控网关",status:aiStatus?.openai?.configured?"已配置":"待配置"},
   {provider:"TikTok / YouTube / Instagram / Reddit",role:"海外社媒、视频、社区和媒体声量数据源预留。",status:"数据源预留"},
   {provider:"多语言RAG / 翻译层",role:"支持英文、东南亚语种、中东/欧洲市场资料的召回和策略归纳。",status:"预留"},
   {provider:aiStatus?.rules?.model||"MMN规则引擎",role:"跨市场基础分类、规则评分和合规检查底线。",status:"已启用"}
@@ -1664,7 +1665,7 @@ function reportPayload(){
  return{title:state.config.project,model:state.config.model,competitor:state.config.competitor,account:session?`${session.org} / ${session.email}`:"本机临时模式",metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString()},manual,diagnostics:list.map(x=>({label:x.label,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),knowhow:list.slice(0,6).map(x=>{const k=knowhowFor(x),learned=latestLearning(x.label);return{label:x.label,message:learned?.recommendation||k.message,evidence:learned?.evidence||k.proof,kpi:learned?.kpi||k.kpi}}),strategyKnowledge:strategyKb.slice(-8),calendar};
 }
 const exportPptxButton=document.querySelector("#export-pptx");if(exportPptxButton)exportPptxButton.onclick=async()=>{try{toast("正在生成 PPT…");const res=await fetch("/api/export-pptx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(reportPayload())});if(!res.ok){const err=await res.json().catch(()=>({error:"PPT 生成失败"}));throw new Error(err.error)}const blob=await res.blob();const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.config.project}_策略报告.pptx`;a.click();URL.revokeObjectURL(a.href);toast("PPT 已导出")}catch(err){toast(`PPT 导出失败：${err.message}`)}};
-const exportGammaButton=document.querySelector("#export-gamma");if(exportGammaButton)exportGammaButton.onclick=()=>{const p=reportPayload();const text=[`# Gamma 提案生成大纲｜${p.title}`,``,`请基于以下内容生成一份中文汽车营销策略汇报 PPT。`,`风格：专业、简洁、有咨询感，适合给汽车品牌营销负责人/管理层汇报。`,`页数建议：8页，16:9。`,``,`## 1. 封面`,`标题：${p.title}`,`副标题：分析对象 ${p.model}｜竞品 ${p.competitor}`,``,`## 2. 核心数据结果`,`- NSR：${p.metrics.nsr}` ,`- IPS：${p.metrics.ips}`,`- 购买意向指数：${p.metrics.intent}`,`- 购买阻力风险：${p.metrics.risk}`,``,`## 3. 认知诊断排序`,...p.diagnostics.slice(0,8).map((x,i)=>`${i+1}. ${x.label}｜${x.diagnosis}｜负向 ${x.negative}｜Gap ${x.gap}｜优先级 ${x.priority}`),``,`## 4. 人工结论与建议`,...(p.manual.length?p.manual.map((x,i)=>`${i+1}. ${x.label}\n- 结论：${x.conclusion||"未填写"}\n- 建议：${x.recommendation||"未填写"}\n- 证据：${x.evidence||"未填写"}\n- 平台：${x.platform||"未填写"}\n- KPI：${x.kpi||"未填写"}`):["尚未填写人工结论，请在页面中补充后再生成正式提案。"]),``,`## 5. 参考 Know-how`,...p.knowhow.map((x,i)=>`${i+1}. ${x.label}：${x.message}；证据链：${x.evidence}；KPI：${x.kpi}`),``,`## 6. 策略知识库补充`,...(p.strategyKnowledge?.length?p.strategyKnowledge.map((x,i)=>`${i+1}. ${x.type}：${x.body}`):["暂无导入的 ChatGPT 策略知识。"]),``,`## 7. 30天行动节奏`,...p.calendar.map(x=>`- ${x.week}｜${x.theme}：${x.task}`),``,`## 8. 风险与下一步`,`强调：数据结果由系统计算，最终结论和建议以人工填写为准；企业知识库会持续学习人工判断。`,``,`## 9. 结尾页`,`输出：下一步需要确认的策略动作、内容证据、责任分工和复盘指标。`].join("\\n");download(`${p.title}_Gamma大纲.md`,text,"text/markdown");toast("Gamma 大纲已导出")};
+const exportGammaButton=document.querySelector("#export-gamma");if(exportGammaButton)exportGammaButton.onclick=()=>{const p=reportPayload();const text=[`# Gamma 提案生成大纲｜${p.title}`,``,`请基于以下内容生成一份中文汽车营销策略汇报 PPT。`,`风格：专业、简洁、有咨询感，适合给汽车品牌营销负责人/管理层汇报。`,`页数建议：8页，16:9。`,``,`## 1. 封面`,`标题：${p.title}`,`副标题：分析对象 ${p.model}｜竞品 ${p.competitor}`,``,`## 2. 核心数据结果`,`- NSR：${p.metrics.nsr}` ,`- IPS：${p.metrics.ips}`,`- 购买意向指数：${p.metrics.intent}`,`- 购买阻力风险：${p.metrics.risk}`,``,`## 3. 认知诊断排序`,...p.diagnostics.slice(0,8).map((x,i)=>`${i+1}. ${x.label}｜${x.diagnosis}｜负向 ${x.negative}｜Gap ${x.gap}｜优先级 ${x.priority}`),``,`## 4. 人工结论与建议`,...(p.manual.length?p.manual.map((x,i)=>`${i+1}. ${x.label}\n- 结论：${x.conclusion||"未填写"}\n- 建议：${x.recommendation||"未填写"}\n- 证据：${x.evidence||"未填写"}\n- 平台：${x.platform||"未填写"}\n- KPI：${x.kpi||"未填写"}`):["尚未填写人工结论，请在页面中补充后再生成正式提案。"]),``,`## 5. 参考 Know-how`,...p.knowhow.map((x,i)=>`${i+1}. ${x.label}：${x.message}；证据链：${x.evidence}；KPI：${x.kpi}`),``,`## 6. 策略知识库补充`,...(p.strategyKnowledge?.length?p.strategyKnowledge.map((x,i)=>`${i+1}. ${x.type}：${x.body}`):["暂无导入的策略知识。"]),``,`## 7. 30天行动节奏`,...p.calendar.map(x=>`- ${x.week}｜${x.theme}：${x.task}`),``,`## 8. 风险与下一步`,`强调：数据结果由系统计算，最终结论和建议以人工填写为准；企业知识库会持续学习人工判断。`,``,`## 9. 结尾页`,`输出：下一步需要确认的策略动作、内容证据、责任分工和复盘指标。`].join("\\n");download(`${p.title}_Gamma大纲.md`,text,"text/markdown");toast("Gamma 大纲已导出")};
 const exportReportButton=document.querySelector("#export-report");if(exportReportButton)exportReportButton.onclick=()=>{
  const a=analysis(),list=a.labels.filter(x=>x.priority>0).slice(0,10),sum=list.reduce((s,x)=>s+x.priority,0)||1,risks=a.labels.filter(x=>x.diagnosis==="优先修复").slice(0,3),assets=a.labels.filter(x=>x.diagnosis==="持续放大").slice(0,3);
  const main=list[0],mainKh=main?knowhowFor(main):null;
