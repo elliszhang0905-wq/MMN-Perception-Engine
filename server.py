@@ -301,6 +301,33 @@ def infer_brand_from_model(model):
     brand_rules = [
         ("firefly", "firefly"),
         ("萤火虫", "firefly"),
+        ("艾力绅", "东风本田"),
+        ("奥德赛", "广汽本田"),
+        ("本田", "本田"),
+        ("宝骏悦也", "宝骏"),
+        ("宝骏", "宝骏"),
+        ("缤果", "五菱"),
+        ("宏光", "五菱"),
+        ("北京越野", "北京越野"),
+        ("BJ30", "北京越野"),
+        ("奔腾小马", "奔腾"),
+        ("奔腾", "奔腾"),
+        ("标致", "标致"),
+        ("铂智", "广汽丰田"),
+        ("锋兰达", "广汽丰田"),
+        ("广汽丰田", "广汽丰田"),
+        ("格瑞维亚", "一汽丰田"),
+        ("丰田 bZ", "丰田"),
+        ("丰田bZ", "丰田"),
+        ("宝来", "大众"),
+        ("MINI", "MINI"),
+        ("ACEMAN", "MINI"),
+        ("COOPER", "MINI"),
+        ("凡尔赛", "雪铁龙"),
+        ("C5 X", "雪铁龙"),
+        ("大通", "上汽大通"),
+        ("G50", "上汽大通"),
+        ("埃尚", "埃尚"),
         ("MG", "MG"),
         ("QQ冰淇淋", "奇瑞"),
         ("QQ3", "奇瑞"),
@@ -397,13 +424,14 @@ def infer_brand_from_model(model):
     for key, brand in brand_rules:
         if key in text:
             return brand
-    return "待确认品牌"
+    return "待人工确认"
 
 KNOWN_BRANDS = {
-    "沃尔沃", "阿维塔", "广汽埃安", "奇瑞", "别克", "奥迪", "宝马", "奔驰", "本田",
-    "智己", "小米汽车", "特斯拉", "蔚来", "极氪", "理想", "问界", "比亚迪",
+    "沃尔沃", "阿维塔", "广汽埃安", "埃安", "奇瑞", "别克", "奥迪", "宝马", "奔驰", "本田", "东风本田", "广汽本田",
+    "智己", "小米汽车", "特斯拉", "蔚来", "乐道", "极氪", "理想", "问界", "比亚迪",
     "吉利", "吉利银河", "领克", "零跑", "小鹏", "广汽传祺", "腾势", "深蓝",
-    "长安", "长安启源", "五菱", "丰田", "大众", "日产", "MG", "smart", "firefly", "待确认品牌"
+    "长安", "长安启源", "五菱", "宝骏", "丰田", "广汽丰田", "一汽丰田", "大众", "日产",
+    "MG", "smart", "firefly", "北京越野", "奔腾", "标致", "MINI", "雪铁龙", "上汽大通", "埃尚", "极狐", "东风纳米", "待人工确认"
 }
 
 def valid_brand_name(brand, model=""):
@@ -441,6 +469,45 @@ def local_standard_model_identity(raw_name):
             "energyType": energy,
             "variantName": suffix,
             "canonicalKey": "|".join(["极氪", family, energy, suffix])
+        }
+    im = re.match(r"^智己(L6|LS6|LS7|LS8|LS9)(.*)$", compact, re.I)
+    if im:
+        code = str(im.group(1)).upper()
+        suffix = str(im.group(2) or "").strip()
+        family = f"智己{code}"
+        return {
+            "brandName": "智己",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": "UNKNOWN",
+            "variantName": suffix,
+            "canonicalKey": "|".join(["智己", family, "UNKNOWN", suffix])
+        }
+    onvo = re.match(r"^(?:乐道|ONVO)?(L60)(.*)$", compact, re.I)
+    if onvo and re.search(r"乐道|ONVO|L60", raw, re.I):
+        suffix = str(onvo.group(2) or "").strip()
+        family = "乐道L60"
+        return {
+            "brandName": "乐道",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": "BEV",
+            "variantName": suffix,
+            "canonicalKey": "|".join(["乐道", family, "BEV", suffix])
+        }
+    galaxy = re.match(r"^(?:吉利银河|银河)(L6|L7|L8|E5|E8)(.*)$", compact, re.I)
+    if galaxy:
+        code = str(galaxy.group(1)).upper()
+        suffix = str(galaxy.group(2) or "").strip()
+        family = f"银河{code}"
+        energy = "BEV" if code.startswith("E") else "UNKNOWN"
+        return {
+            "brandName": "吉利银河",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": suffix,
+            "canonicalKey": "|".join(["吉利银河", family, energy, suffix])
         }
     avatr = re.match(r"^阿维塔(06|07|11|12|15)(.*)$", compact)
     if avatr:
@@ -816,9 +883,21 @@ FOUNDER_PEOPLE = [
 ]
 
 FOUNDER_PUBLIC_SOURCES = [
-    {"name": "新浪汽车公开资讯", "platform": "媒体报道", "url": "https://auto.sina.com.cn/", "enabled": True},
-    {"name": "腾讯汽车公开资讯", "platform": "媒体报道", "url": "https://auto.qq.com/", "enabled": True},
-    {"name": "网易汽车公开资讯", "platform": "媒体报道", "url": "https://auto.163.com/", "enabled": True},
+    {"name": "新浪汽车公开资讯", "platform": "媒体报道", "url": "https://auto.sina.com.cn/", "enabled": False, "note": "媒体首页不进入蒸馏归档"},
+    {"name": "腾讯汽车公开资讯", "platform": "媒体报道", "url": "https://auto.qq.com/", "enabled": False, "note": "媒体首页不进入蒸馏归档"},
+    {"name": "网易汽车公开资讯", "platform": "媒体报道", "url": "https://auto.163.com/", "enabled": False, "note": "媒体首页不进入蒸馏归档"},
+]
+
+FOUNDER_NAV_NOISE_TERMS = [
+    "导航", "车型", "报价", "经销商", "图片", "视频", "新闻", "排行", "排行榜", "热搜",
+    "请选择品牌", "请选择车系", "紧凑型", "中型", "中大型", "大型", "小型", "微型",
+    "SUV", "MPV", "两厢", "三厢", "旅行车", "新浪汽车", "腾讯汽车", "网易汽车",
+]
+
+FOUNDER_SPEECH_MARKERS = [
+    "表示", "称", "说", "认为", "提到", "强调", "回应", "解释", "透露", "发布",
+    "接受采访", "公开信", "微博", "直播", "发布会", "发文", "谈到", "指出", "宣布",
+    "“", "”", "\"", "：",
 ]
 
 def shanghai_now():
@@ -861,18 +940,75 @@ def safe_public_fetch(url, rate_limit_seconds=10):
         raise ValueError("疑似验证码、登录或付费限制，已停止，不尝试绕过")
     return {"url": url, "status": status, "content_type": ctype, "text": text, "hash": file_hash(data)}
 
+def normalize_founder_plain_text(text):
+    text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", text or "", flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;|&#160;", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+def founder_excerpt_is_valid(excerpt, person_name=""):
+    excerpt = normalize_founder_plain_text(excerpt)
+    if not excerpt or len(excerpt) < 36:
+        return False
+    if person_name and person_name not in excerpt:
+        return False
+    noise_hits = sum(1 for term in FOUNDER_NAV_NOISE_TERMS if term in excerpt)
+    marker_hits = sum(1 for term in FOUNDER_SPEECH_MARKERS if term in excerpt)
+    if noise_hits >= 8:
+        return False
+    if marker_hits <= 0:
+        return False
+    # If the text looks like a media homepage or model-selector dump, reject it even if a person name appears once.
+    if noise_hits >= 4 and marker_hits < 2:
+        return False
+    return True
+
+def founder_excerpt_window(plain, person_name, width=420):
+    idx = plain.find(person_name)
+    if idx < 0:
+        return ""
+    left = max(0, idx - width // 3)
+    right = min(len(plain), idx + width)
+    excerpt = plain[left:right].strip()
+    # Prefer a sentence-like window instead of a raw homepage slice.
+    parts = re.split(r"(?<=[。！？!?；;])", excerpt)
+    focused = " ".join(p.strip() for p in parts if person_name in p or any(m in p for m in FOUNDER_SPEECH_MARKERS))
+    return (focused or excerpt)[:520].strip()
+
+def founder_source_url_is_specific(source_url):
+    source_url = str(source_url or "").strip()
+    if not source_url:
+        return False
+    if source_url.startswith(("local://", "social-plugin://")):
+        return True
+    parsed = urlparse(source_url)
+    path = (parsed.path or "/").strip()
+    if path in {"", "/"}:
+        return False
+    homepage_paths = {
+        "/auto/", "/car/", "/cars/", "/news/", "/index.html", "/index.shtml",
+        "/m/", "/motor/", "/sales"
+    }
+    return path not in homepage_paths
+
+def founder_item_is_persistable(item):
+    source_url = item.get("source_url") or ""
+    if not founder_source_url_is_specific(source_url):
+        return False
+    if source_url.startswith("local://"):
+        return True
+    return founder_excerpt_is_valid(item.get("original_summary") or "", item.get("person") or "")
+
 def extract_founder_candidates(payload, week_start, week_end, source):
-    text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>", " ", payload.get("text") or "", flags=re.I)
-    plain = re.sub(r"<[^>]+>", " ", text)
-    plain = re.sub(r"\s+", " ", plain)
+    plain = normalize_founder_plain_text(payload.get("text") or "")
     items = []
     for person in FOUNDER_PEOPLE:
         idx = plain.find(person["person"])
-        if idx < 0 and person["brand"] not in plain:
+        if idx < 0:
             continue
-        start = max(0, idx - 160 if idx >= 0 else 0)
-        excerpt = plain[start:start + 520].strip()
-        if not excerpt:
+        excerpt = founder_excerpt_window(plain, person["person"])
+        if not founder_excerpt_is_valid(excerpt, person["person"]):
             continue
         topic = "品牌叙事"
         if re.search(r"智驾|自动驾驶|辅助驾驶|技术|芯片|算法|纯电|增程", excerpt):
@@ -891,12 +1027,12 @@ def extract_founder_candidates(payload, week_start, week_end, source):
             "source_url": payload["url"],
             "event_type": topic,
             "original_summary": excerpt[:220],
-            "core_viewpoint": "待Qwen清洗摘要",
+            "core_viewpoint": "待MMN模型清洗摘要",
             "language_style_tags": ["公开表达", topic],
-            "distillable_talk": "待DeepSeek蒸馏",
+            "distillable_talk": "待MMN策略模型蒸馏",
             "prompt_template": f"请参考{person['brand']}{person['person']}的公开表达风格，围绕用户问题、事实证据和行动承诺生成高管IP话术。",
-            "risk_note": "待DeepSeek质检",
-            "model_trace": {"extractor": "local-compliant-html", "qwen": "reserved", "deepseek": "reserved"},
+            "risk_note": "待MMN策略模型质检",
+            "model_trace": {"extractor": "local-compliant-html", "mmn_strategy_model": "reserved"},
             "raw_payload_hash": payload["hash"]
         })
     return items
@@ -906,7 +1042,8 @@ def founder_seed_items():
     return [
         {"brand":"理想","person":"李想","role":"创始人/CEO","published_at":"2026-06-24","platform":"微博","source_name":"公开表达样例","source_url":"local://founder-seed/li-xiang","event_type":"产品定义","original_summary":"用家庭用户真实场景解释产品取舍，把配置、空间、能耗和智能化放回日常用车任务里讲。","core_viewpoint":"产品表达应从家庭任务出发，而不是堆参数。","language_style_tags":["家庭场景","产品定义","用户价值"],"distillable_talk":"这件事我们先不讲参数，先讲一家人每天怎么用车。","prompt_template":"以李想式家庭场景表达，先讲用户任务，再讲产品取舍，最后讲承诺。","risk_note":"避免把产品定义说成绝对正确，需要承认不同用户场景差异。","model_trace":{"source":"seed"},"raw_payload_hash":stable_id("founder-seed","li-xiang"),"captured_at":captured},
         {"brand":"小鹏","person":"何小鹏","role":"董事长/CEO","published_at":"2026-06-20","platform":"发布会","source_name":"公开表达样例","source_url":"local://founder-seed/he-xiaopeng","event_type":"技术叙事","original_summary":"强调技术路线、长期投入和体验边界，把智能驾驶从参数竞争转成可验证的用户体验。","core_viewpoint":"智能化要讲清长期投入、体验边界和可验证成果。","language_style_tags":["智驾","技术路线","长期主义"],"distillable_talk":"技术不是口号，用户每天敢不敢用、好不好用，才是标准。","prompt_template":"以何小鹏式技术路线表达，明确技术投入、用户体验和边界条件。","risk_note":"避免过度承诺自动驾驶能力。","model_trace":{"source":"seed"},"raw_payload_hash":stable_id("founder-seed","he-xiaopeng"),"captured_at":captured},
-        {"brand":"小米汽车","person":"雷军","role":"创始人/董事长","published_at":"2026-06-18","platform":"短视频","source_name":"公开表达样例","source_url":"local://founder-seed/lei-jun","event_type":"用户沟通","original_summary":"用通俗语言降低技术理解门槛，通过个人信誉、工程细节和用户反馈建立品牌亲近感。","core_viewpoint":"复杂技术要转译为用户听得懂的真实体验。","language_style_tags":["用户沟通","工程细节","亲和表达"],"distillable_talk":"我们把复杂的工程问题讲简单，让大家知道每一处改进到底解决什么麻烦。","prompt_template":"以雷军式通俗表达，少术语，多细节，多用户视角。","risk_note":"避免过度个人化承诺，应保留团队和数据依据。","model_trace":{"source":"seed"},"raw_payload_hash":stable_id("founder-seed","lei-jun"),"captured_at":captured}
+        {"brand":"小米汽车","person":"雷军","role":"创始人/董事长","published_at":"2026-06-18","platform":"短视频","source_name":"公开表达样例","source_url":"local://founder-seed/lei-jun","event_type":"用户沟通","original_summary":"用通俗语言降低技术理解门槛，通过个人信誉、工程细节和用户反馈建立品牌亲近感。","core_viewpoint":"复杂技术要转译为用户听得懂的真实体验。","language_style_tags":["用户沟通","工程细节","亲和表达"],"distillable_talk":"我们把复杂的工程问题讲简单，让大家知道每一处改进到底解决什么麻烦。","prompt_template":"以雷军式通俗表达，少术语，多细节，多用户视角。","risk_note":"避免过度个人化承诺，应保留团队和数据依据。","model_trace":{"source":"seed"},"raw_payload_hash":stable_id("founder-seed","lei-jun"),"captured_at":captured},
+        {"brand":"蔚来","person":"李斌","role":"创始人/CEO","published_at":"2026-06-15","platform":"用户沟通会","source_name":"公开表达样例","source_url":"local://founder-seed/li-bin","event_type":"服务体系","original_summary":"围绕用户社区、补能体系和长期陪伴讲品牌，强调信任关系、服务确定性和用户共创。","core_viewpoint":"高端新能源品牌表达要把服务确定性和长期关系讲清楚。","language_style_tags":["用户社区","服务体系","长期信任"],"distillable_talk":"车不是一次交易，真正的体验来自长期使用、服务承诺和用户关系。","prompt_template":"以李斌式用户陪伴表达，先讲用户关系，再讲服务体系，最后讲长期承诺。","risk_note":"避免把服务承诺泛化为无边界兜底，需要明确服务范围和兑现机制。","model_trace":{"source":"seed"},"raw_payload_hash":stable_id("founder-seed","li-bin"),"captured_at":captured}
     ]
 
 def founder_talk_prompt(profile, scene, brief, archives):
@@ -934,6 +1071,8 @@ def save_founder_items(items, edition="china"):
     saved = []
     with db() as conn:
         for item in items:
+            if not founder_item_is_persistable(item):
+                continue
             item_id = stable_id("founder", edition, item.get("source_url"), item.get("person"), item.get("raw_payload_hash"))
             captured = item.get("captured_at") or now()
             conn.execute("""
@@ -965,6 +1104,11 @@ def founder_archive_rows(edition="china", limit=200):
         d = rowdict(r)
         d["language_style_tags"] = json.loads(d.pop("language_style_tags_json") or "[]")
         d["model_trace"] = json.loads(d.pop("model_trace_json") or "{}")
+        source_url = d.get("source_url") or ""
+        if not founder_source_url_is_specific(source_url):
+            continue
+        if not source_url.startswith("local://") and not founder_excerpt_is_valid(d.get("original_summary") or "", d.get("person") or ""):
+            continue
         out.append(d)
     return out
 
@@ -975,7 +1119,8 @@ def run_founder_weekly_crawl(edition="china", manual=False):
     errors, items = [], []
     with db() as conn:
         conn.execute("insert into founder_crawl_runs (id, edition, week_start, week_end, status, started_at) values (?, ?, ?, ?, ?, ?)", (run_id, edition, week_start.date().isoformat(), week_end.date().isoformat(), "running", started))
-    for source in FOUNDER_PUBLIC_SOURCES:
+    enabled_sources = [source for source in FOUNDER_PUBLIC_SOURCES if source.get("enabled")]
+    for source in enabled_sources:
         if not source.get("enabled"):
             continue
         try:
@@ -984,11 +1129,10 @@ def run_founder_weekly_crawl(edition="china", manual=False):
         except Exception as exc:
             errors.append({"source": source.get("name"), "url": source.get("url"), "error": str(exc)})
     if not items:
-        items = founder_seed_items()
-        errors.append({"source": "fallback", "error": "本次公开源未抓取到可结构化内容，已保留样例数据结构；请补充可访问公开源清单。"})
+        errors.append({"source": "fallback", "error": "本次公开源未抓取到可蒸馏的高管公开发言，未写入媒体首页或导航类噪音；请补充具体文章、采访、发布会或社媒公开链接。"})
     saved = save_founder_items(items, edition=edition)
     with db() as conn:
-        conn.execute("update founder_crawl_runs set status=?, source_count=?, item_count=?, error_json=?, finished_at=? where id=?", ("done", len(FOUNDER_PUBLIC_SOURCES), len(saved), json.dumps(errors, ensure_ascii=False), now(), run_id))
+        conn.execute("update founder_crawl_runs set status=?, source_count=?, item_count=?, error_json=?, finished_at=? where id=?", ("done", len(enabled_sources), len(saved), json.dumps(errors, ensure_ascii=False), now(), run_id))
     return {"ok": True, "runId": run_id, "weekStart": week_start.date().isoformat(), "weekEnd": week_end.date().isoformat(), "items": saved, "errors": errors}
 
 def seconds_until_next_founder_run():
@@ -1336,8 +1480,11 @@ def model_identity_prompt(models):
         {"role": "system", "content": (
             "你是MMN汽车车型资产库的品牌归属与车型标准化助手。只返回JSON，不要Markdown。"
             "返回根对象必须是：{\"items\":[...]}。"
+            "MMN新增车型资产以汽车之家PC端选车板块公开展示的品牌-车型树作为一级标准源；如你的知识中可确认汽车之家品牌归属，应优先按该归属输出。"
+            "Qwen负责主识别与结构化，DeepSeek负责复核品牌归属、车型去重和逻辑质检；无法确认时不要硬猜，confidence返回low。"
             "你要把每个原始车型名归纳为：rawName, normalizedName, brandName, modelFamily, energyType, variantName, canonicalKey, confidence, reason。"
             "品牌名必须是汽车品牌，不是车型。很多中国汽车品牌使用“品牌名+数字/字母”命名车型，例如：阿维塔06的brandName必须是阿维塔，modelFamily/normalizedName必须是阿维塔06；沃尔沃EX90的brandName必须是沃尔沃，modelFamily/normalizedName必须是沃尔沃EX90；蔚来ET5T的brandName必须是蔚来，modelFamily/normalizedName必须是蔚来ET5T；ZEEKR 001、Zeekr 009、Zeeker 009、极氪009的brandName都必须是极氪，modelFamily统一为极氪001或极氪009。"
+            "例如：艾力绅归属东风本田，奥德赛归属广汽本田，宝骏悦也归属宝骏，北京越野BJ30归属北京越野，奔腾小马归属奔腾，锋兰达/铂智归属广汽丰田，格瑞维亚归属一汽丰田，MINI COOPER/ACEMAN归属MINI，凡尔赛C5 X归属雪铁龙，上汽大通G50归属上汽大通。"
             "不要把阿维塔06、阿维塔07、艾瑞泽8、奥迪E5、宝马i3、沃尔沃EX90、蔚来ET5T、ZEEKR 001、ZEEKR 7X、Zeeker 009这类完整车型名写进brandName。"
             "energyType只能是：BEV、EREV、PHEV、HEV、ICE、UNKNOWN。"
             "注意：纯电、增程、插混/PHEV、燃油版本不能盲目排重；例如同一车型家族下不同能源版本要保留不同canonicalKey。"
@@ -3239,8 +3386,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
         if cloud_login_required():
-            trial_allowed = {"/api/ai/rag-strategy", "/api/ai/fusion-strategy", "/api/ai/founder-talk", "/api/import-rag-seed"}
-            roles = None if parsed.path in trial_allowed else {"admin"}
+            trial_post_allowed = {
+                "/api/ai/rag-strategy",
+                "/api/ai/fusion-strategy",
+                "/api/ai/qwen-strategy",
+                "/api/ai/creator-tags",
+                "/api/ai/founder-talk",
+                "/api/ai/model-identities",
+                "/api/ai/model-judgment",
+            }
+            roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
         if parsed.path == "/api/workspace":
@@ -3458,7 +3613,26 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception as exc:
                     errors["deepseek"] = str(exc)
                     review = "质检结论：MMN策略质检暂未完成复核，请人工检查事实依据、过度承诺和舆论风险。"
-                self.send_json({"ok": True, "draft": draft, "review": review, "errors": errors, "qwen": qwen_config(), "deepseek": deepseek_config()})
+                generated_hash = stable_id("founder-talk", edition, person, scene, brief, draft, review)
+                generated_items = save_founder_items([{
+                    "brand": profile.get("brand") or "",
+                    "person": person,
+                    "role": profile.get("role") or "",
+                    "published_at": shanghai_now().date().isoformat(),
+                    "platform": "MMN高管蒸馏",
+                    "source_name": "MMN高管IP话术生成",
+                    "source_url": f"local://founder-generated/{quote(person)}/{generated_hash}",
+                    "event_type": scene,
+                    "original_summary": brief or f"{person}{scene}高管IP话术生成",
+                    "core_viewpoint": f"围绕“{brief or scene}”生成可复用高管表达资产。",
+                    "language_style_tags": ["MMN蒸馏", scene, *profile.get("styleTags", [])[:4]],
+                    "distillable_talk": draft,
+                    "prompt_template": f"请参考{profile.get('brand','')}{person}已归档公开表达风格，面向{scene}输出高管IP话术。",
+                    "risk_note": review,
+                    "model_trace": {"source": "mmn-founder-talk", "errors": errors},
+                    "raw_payload_hash": generated_hash
+                }], edition=edition)
+                self.send_json({"ok": True, "draft": draft, "review": review, "archiveItem": generated_items[0] if generated_items else None, "errors": errors, "qwen": qwen_config(), "deepseek": deepseek_config()})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

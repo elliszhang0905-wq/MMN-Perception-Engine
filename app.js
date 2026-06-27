@@ -246,6 +246,21 @@ function defaultFounderArchive(){
 }
 function loadFounderState(){try{return JSON.parse(localStorage.getItem(storageKey("mmnFounderDistill")))||{archive:defaultFounderArchive(),selectedPerson:"李想",lastOutput:""}}catch{return{archive:defaultFounderArchive(),selectedPerson:"李想",lastOutput:""}}}
 function saveFounderState(){localStorage.setItem(storageKey("mmnFounderDistill"),JSON.stringify(founderState));queueWorkspaceSnapshot()}
+const founderNavNoiseTerms=["导航","车型","报价","经销商","图片","视频","新闻","排行","排行榜","热搜","请选择品牌","请选择车系","紧凑型","中型","中大型","大型","小型","微型","SUV","MPV","两厢","三厢","旅行车","新浪汽车","腾讯汽车","网易汽车"];
+const founderSpeechMarkers=["表示","称","说","认为","提到","强调","回应","解释","透露","发布","接受采访","公开信","微博","直播","发布会","发文","谈到","指出","宣布","“","”","\"", "："];
+function isValidFounderArchiveItem(x={}){
+ const source=String(x.sourceUrl||x.source_url||"");
+ if(source.startsWith("local://"))return true;
+ const text=String(x.originalSummary||x.original_summary||x.content||"").replace(/\s+/g," ").trim();
+ if(text.length<36)return false;
+ if(x.person&&!text.includes(x.person))return false;
+ const noise=founderNavNoiseTerms.filter(t=>text.includes(t)).length;
+ const markers=founderSpeechMarkers.filter(t=>text.includes(t)).length;
+ if(noise>=8)return false;
+ if(markers<=0)return false;
+ if(noise>=4&&markers<2)return false;
+ return true;
+}
 async function loadFounderArchives(){
  try{
   const data=await api(`/api/founder-archives?edition=${encodeURIComponent(activeEdition())}`);
@@ -255,7 +270,7 @@ async function loadFounderArchives(){
    content:x.original_summary,originalSummary:x.original_summary,coreViewpoint:x.core_viewpoint,
    languageStyleTags:x.language_style_tags||[],tags:x.language_style_tags||[],distillableTalk:x.distillable_talk,
    promptTemplate:x.prompt_template,riskNote:x.risk_note,capturedAt:x.captured_at
-  }));
+  })).filter(isValidFounderArchiveItem);
   founderState.scheduler=data.scheduler;
   founderState.sources=data.sources||[];
   founderState.modelRoles=data.modelRoles||{};
@@ -265,7 +280,7 @@ async function loadFounderArchives(){
 }
 function founderRows(){
  const q=founderSearch.trim().toLowerCase();
- return (founderState.archive||[]).filter(x=>
+ return (founderState.archive||[]).filter(x=>isValidFounderArchiveItem(x)&&
   (founderFilters.brand==="all"||x.brand===founderFilters.brand)&&
   (founderFilters.person==="all"||x.person===founderFilters.person)&&
   (founderFilters.topic==="all"||x.type===founderFilters.topic||x.topic===founderFilters.topic)&&
@@ -273,19 +288,19 @@ function founderRows(){
  ).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
 }
 function founderProfile(person=founderState.selectedPerson){
- const rows=(founderState.archive||[]).filter(x=>x.person===person);
+ const rows=(founderState.archive||[]).filter(x=>x.person===person&&isValidFounderArchiveItem(x));
  const personRows=rows.length?rows:founderRows();
  const tags=[...new Set(personRows.flatMap(x=>x.tags||[]))].slice(0,8);
  const topics=[...new Set(personRows.map(x=>x.topic).filter(Boolean))].slice(0,6);
  const brand=personRows[0]?.brand||"待选择品牌";
  return {
   brand,person:person||personRows[0]?.person||"待选择人物",role:personRows[0]?.role||"高管",
-  style:tags.length?`高频表达围绕${tags.slice(0,4).join("、")}展开，语言应保持具体、克制、可验证。`:"需要更多公开表达样本后再沉淀语言风格。",
-  narrative:topics.length?`品牌叙事主线：${topics.join(" / ")}。`:"品牌叙事框架待补充。",
-  tech:"技术表达要把参数翻译成用户可感知场景，并明确边界、证据和可验证动作。",
-  user:"用户沟通要先承认真实疑虑，再用产品证据、服务承诺和后续动作建立信任。",
-  defense:"舆论攻防不硬怼，优先拆清事实、口径、证据和下一步解决机制。",
-  prompt:`请模仿${brand}${person||"高管"}的公开表达风格，输出面向汽车用户的高管IP话术。要求：表达通俗、证据明确、少空话；先讲用户问题，再讲技术/产品逻辑，最后给出行动承诺。`
+  style:tags.length?`基于已验证公开表达，围绕${tags.slice(0,4).join("、")}沉淀语言风格；输出必须具体、克制、可追溯。`:"有效公开表达样本不足，暂不生成语言风格结论。",
+  narrative:topics.length?`品牌叙事主线：${topics.join(" / ")}。`:"有效样本不足，品牌叙事框架待补充。",
+  tech:personRows.length?"技术表达要把参数翻译成用户可感知场景，并明确边界、证据和可验证动作。":"待补充具体发布会、采访或社媒原文后再做技术表达蒸馏。",
+  user:personRows.length?"用户沟通要先承认真实疑虑，再用产品证据、服务承诺和后续动作建立信任。":"待补充用户沟通类公开表达后再归纳。",
+  defense:personRows.length?"舆论攻防不硬怼，优先拆清事实、口径、证据和下一步解决机制。":"待补充争议回应或公开说明后再判断。",
+  prompt:personRows.length?`请参考${brand}${person||"高管"}已验证公开表达风格，输出面向汽车用户的高管IP话术。要求：表达通俗、证据明确、少空话；先讲用户问题，再讲技术/产品逻辑，最后给出行动承诺。`:"有效公开表达样本不足，暂不生成高管IP Prompt。"
  };
 }
 function founderKnowledgeItem(profile, output){
@@ -307,7 +322,7 @@ function modelJudgmentsFor(model=state.config.model){
 function loadModelIdentities(){try{return JSON.parse(localStorage.getItem(storageKey("mmnModelIdentities")))||{items:{},updatedAt:""}}catch{return{items:{},updatedAt:""}}}
 function saveModelIdentities(){localStorage.setItem(storageKey("mmnModelIdentities"),JSON.stringify(modelIdentities))}
 function modelIdentityFor(model){return modelIdentities.items?.[model]||null}
-const knownBrandNames=["沃尔沃","阿维塔","广汽埃安","奇瑞","别克","奥迪","宝马","奔驰","本田","智己","小米汽车","特斯拉","蔚来","极氪","理想","问界","比亚迪","吉利","吉利银河","领克","零跑","小鹏","广汽传祺","腾势","深蓝","长安","长安启源","五菱","丰田","大众","日产","MG","smart","firefly","待确认品牌"];
+const knownBrandNames=["沃尔沃","阿维塔","广汽埃安","埃安","奇瑞","别克","奥迪","宝马","奔驰","本田","东风本田","广汽本田","智己","小米汽车","特斯拉","蔚来","乐道","极氪","理想","问界","比亚迪","吉利","吉利银河","领克","零跑","小鹏","广汽传祺","腾势","深蓝","长安","长安启源","五菱","宝骏","丰田","广汽丰田","一汽丰田","大众","日产","MG","smart","firefly","北京越野","奔腾","标致","MINI","雪铁龙","上汽大通","埃尚","极狐","东风纳米","待人工确认"];
 function cleanModelText(model){return String(model||"").trim().replace(/\s+/g," ")}
 function localStandardIdentity(model){
  const raw=cleanModelText(model),compact=raw.replace(/\s+/g,"");
@@ -321,6 +336,12 @@ function localStandardIdentity(model){
  if(avatr){const family=`阿维塔${avatr[1]}`;return{brand_name:"阿维塔",normalized_name:family+(avatr[2]?` ${avatr[2]}`:""),model_family:family,energy_type:"UNKNOWN",variant_name:avatr[2]||"",canonical_key:`阿维塔|${family}|UNKNOWN|${avatr[2]||""}`}}
  const volvo=raw.match(/^(?:Volvo|沃尔沃)\s*(EX90|EX30|XC60|XC90|S90)(.*)$/i);
  if(volvo){const family=`沃尔沃${String(volvo[1]).toUpperCase()}`;return{brand_name:"沃尔沃",normalized_name:family,model_family:family,energy_type:/EX/i.test(volvo[1])?"BEV":"UNKNOWN",variant_name:cleanModelText(volvo[2]||""),canonical_key:`沃尔沃|${family}|${/EX/i.test(volvo[1])?"BEV":"UNKNOWN"}|${cleanModelText(volvo[2]||"")}`}}
+ const im=compact.match(/^智己(L6|LS6|LS7|LS8|LS9)(.*)$/i);
+ if(im){const family=`智己${String(im[1]).toUpperCase()}`;return{brand_name:"智己",normalized_name:family+(im[2]?` ${im[2]}`:""),model_family:family,energy_type:"UNKNOWN",variant_name:im[2]||"",canonical_key:`智己|${family}|UNKNOWN|${im[2]||""}`}}
+ const onvo=compact.match(/^(?:乐道|ONVO)?(L60)(.*)$/i);
+ if(onvo&&/(乐道|ONVO|L60)/i.test(raw)){const family=`乐道${String(onvo[1]).toUpperCase()}`;return{brand_name:"乐道",normalized_name:family+(onvo[2]?` ${onvo[2]}`:""),model_family:family,energy_type:"BEV",variant_name:onvo[2]||"",canonical_key:`乐道|${family}|BEV|${onvo[2]||""}`}}
+ const galaxy=compact.match(/^(?:吉利银河|银河)(L6|L7|L8|E5|E8)(.*)$/i);
+ if(galaxy){const family=`银河${String(galaxy[1]).toUpperCase()}`;return{brand_name:"吉利银河",normalized_name:family+(galaxy[2]?` ${galaxy[2]}`:""),model_family:family,energy_type:/^E/i.test(galaxy[1])?"BEV":"UNKNOWN",variant_name:galaxy[2]||"",canonical_key:`吉利银河|${family}|${/^E/i.test(galaxy[1])?"BEV":"UNKNOWN"}|${galaxy[2]||""}`}}
  return null;
 }
 function standardIdentityFor(model){
@@ -476,6 +497,17 @@ function brandForModel(model){
  const text=String(model||"").trim();
  const rules=[
   ["firefly","firefly"],["萤火虫","firefly"],
+  ["艾力绅","东风本田"],["奥德赛","广汽本田"],["本田","本田"],
+  ["宝骏悦也","宝骏"],["宝骏","宝骏"],["缤果","五菱"],["宏光","五菱"],
+  ["北京越野","北京越野"],["BJ30","北京越野"],
+  ["奔腾小马","奔腾"],["奔腾","奔腾"],
+  ["标致","标致"],
+  ["铂智","广汽丰田"],["锋兰达","广汽丰田"],["广汽丰田","广汽丰田"],["格瑞维亚","一汽丰田"],["丰田 bZ","丰田"],["丰田bZ","丰田"],
+  ["宝来","大众"],["T-ROC","大众"],["探歌","大众"],["途观","大众"],["途昂","大众"],["朗逸","大众"],["速腾","大众"],
+  ["MINI","MINI"],["ACEMAN","MINI"],["COOPER","MINI"],
+  ["凡尔赛","雪铁龙"],["C5 X","雪铁龙"],
+  ["大通","上汽大通"],["G50","上汽大通"],
+  ["埃尚","埃尚"],["极狐","极狐"],
   ["MG","MG"],
   ["QQ冰淇淋","奇瑞"],["QQ3","奇瑞"],["QQ","奇瑞"],
   ["RAV4","丰田"],
@@ -484,8 +516,8 @@ function brandForModel(model){
   ["沃尔沃","沃尔沃"],["Volvo","沃尔沃"],["EX90","沃尔沃"],["XC60","沃尔沃"],["XC90","沃尔沃"],["S90","沃尔沃"],
   ["阿维塔","阿维塔"],["埃安","广汽埃安"],["AION","广汽埃安"],["艾瑞泽","奇瑞"],["瑞虎","奇瑞"],["风云","奇瑞"],
   ["昂科威","别克"],["别克","别克"],["奥迪","奥迪"],["E5 Sportback","奥迪"],["E5","奥迪"],["宝马","宝马"],["i3","宝马"],["i5","宝马"],["iX3","宝马"],["奔驰","奔驰"],["本田","本田"],
-  ["智己","智己"],["小米","小米汽车"],["SU7","小米汽车"],["Model","特斯拉"],["蔚来","蔚来"],["ET","蔚来"],
-  ["ZEEKR","极氪"],["Zeekr","极氪"],["极氪","极氪"],["007","极氪"],["001","极氪"],["7X","极氪"],["8X","极氪"],["9X","极氪"],["理想","理想"],["L6","智己"],["LS","智己"],["问界","问界"],["比亚迪","比亚迪"],
+  ["智己LS9","智己"],["智己LS8","智己"],["智己LS7","智己"],["智己LS6","智己"],["智己L6","智己"],["智己","智己"],["小米","小米汽车"],["SU7","小米汽车"],["Model","特斯拉"],["乐道","乐道"],["ONVO","乐道"],["蔚来","蔚来"],["ET","蔚来"],
+  ["ZEEKR","极氪"],["Zeekr","极氪"],["极氪","极氪"],["007","极氪"],["001","极氪"],["7X","极氪"],["8X","极氪"],["9X","极氪"],["理想","理想"],["问界","问界"],["比亚迪","比亚迪"],
   ["秦","比亚迪"],["宋","比亚迪"],["唐","比亚迪"],["海鸥","比亚迪"],["海豚","比亚迪"],["海狮","比亚迪"],
   ["银河","吉利银河"],["星愿","吉利"],["星瑞","吉利"],["领克","领克"],["零跑","零跑"],["小鹏","小鹏"],
   ["传祺","广汽传祺"],["腾势","腾势"],["深蓝","深蓝"],["长安","长安"],["五菱","五菱"]
@@ -493,7 +525,7 @@ function brandForModel(model){
  const hit=rules.find(([k])=>text.toLowerCase().includes(k.toLowerCase()));
  if(hit)return hit[1];
  const cleaned=text.replace(/[A-Z0-9\\s].*$/,"").replace(/[\\-_/].*$/,"").trim();
- return cleaned&&knownBrandNames.includes(cleaned)?cleaned:"待确认品牌";
+ return cleaned&&knownBrandNames.includes(cleaned)?cleaned:"待人工确认";
 }
 function modelNameUnderBrand(brand,model){
  const id=standardIdentityFor(model);
@@ -514,11 +546,24 @@ function modelNameUnderBrand(brand,model){
   阿维塔:["阿维塔"],
   奇瑞:["奇瑞"],
   MG:["MG"],
+  宝骏:["宝骏"],
+  北京越野:["北京越野","BJ"],
+  奔腾:["奔腾"],
+  标致:["标致"],
+  MINI:["MINI","电动 MINI"],
+  雪铁龙:["雪铁龙"],
+  上汽大通:["上汽大通","大通"],
+  东风本田:["东风本田","本田"],
+  广汽本田:["广汽本田","本田"],
+  埃尚:["埃尚"],
+  极狐:["极狐"],
   丰田:["丰田","Toyota"],
+  广汽丰田:["广汽丰田","丰田"],
+  一汽丰田:["一汽丰田","丰田"],
   大众:["大众","Volkswagen"],
   smart:["smart"],
   firefly:["firefly","萤火虫"],
-  待确认品牌:[],
+  待人工确认:[],
   比亚迪:["比亚迪"],
   广汽埃安:["广汽埃安","埃安","AION"],
   广汽传祺:["广汽传祺","传祺"],
@@ -533,6 +578,7 @@ function brandModelGroups(models){
  const groups={};
  models.forEach(model=>{
   const brand=brandForDisplay(model),id=standardIdentityFor(model);
+  if(brand==="待确认品牌"||brand==="待人工确认")return;
   const key=id?.canonical_key||id?.canonicalKey||`${brand}|${model}`;
   const list=(groups[brand]||(groups[brand]=new Map()));
   const current=list.get(key);
@@ -1426,7 +1472,7 @@ function renderKnowhow(a){
 function renderFounderDistill(){
  const list=document.querySelector("#founder-archive-list");if(!list)return;
  const rows=founderRows();
- const archive=founderState.archive||[];
+ const archive=(founderState.archive||[]).filter(isValidFounderArchiveItem);
  const brands=["all",...[...new Set(archive.map(x=>x.brand).filter(Boolean))]];
  const persons=["all",...[...new Set(archive.map(x=>x.person).filter(Boolean))]];
  const topics=["all",...[...new Set(archive.flatMap(x=>[x.event_type||x.type,x.topic]).filter(Boolean))]];
@@ -1437,7 +1483,7 @@ function renderFounderDistill(){
  const speaker=document.querySelector("#founder-speaker");
  if(speaker){const current=speaker.value||founderState.selectedPerson||"";speaker.innerHTML=persons.filter(x=>x!=="all").map(x=>`<option value="${escapeAttr(x)}">${x}</option>`).join("");if([...speaker.options].some(o=>o.value===current))speaker.value=current}
  document.querySelector("#founder-archive-count").textContent=`${rows.length} 条`;
- list.innerHTML=rows.length?rows.map(x=>`<article class="founder-archive-card" data-founder-person="${escapeAttr(x.person)}"><div><span>${x.brand} · ${x.person}</span><b>${x.event_type||x.type||x.topic||"公开表达"}</b></div><p>${x.originalSummary||x.original_summary||x.content||""}</p><small>${x.published_at||x.date||""}｜${x.platform||"公开平台"}｜${x.sourceName||x.source_name||"公开来源"}</small><div>${(x.languageStyleTags||x.language_style_tags||x.tags||[]).slice(0,5).map(t=>`<em>${t}</em>`).join("")}</div></article>`).join(""):`<p class="empty">还没有归档数据。可以先导入公开表达样例，或手动运行一次周度抓取。</p>`;
+ list.innerHTML=rows.length?rows.map(x=>`<article class="founder-archive-card" data-founder-person="${escapeAttr(x.person)}"><div><span>${x.brand} · ${x.person}</span><b>${x.event_type||x.type||x.topic||"公开表达"}</b></div><p>${x.originalSummary||x.original_summary||x.content||""}</p><small>${x.published_at||x.date||""}｜${x.platform||"公开平台"}｜${x.sourceName||x.source_name||"公开来源"}</small><div>${(x.languageStyleTags||x.language_style_tags||x.tags||[]).slice(0,5).map(t=>`<em>${t}</em>`).join("")}</div></article>`).join(""):`<p class="empty">当前没有可蒸馏的高管公开表达。请补充具体文章、采访、发布会、直播文字稿或社媒公开链接；媒体首页、导航页和车型筛选页不会进入归档。</p>`;
  list.querySelectorAll("[data-founder-person]").forEach(card=>card.onclick=()=>{founderState.selectedPerson=card.dataset.founderPerson;saveFounderState();renderFounderDistill()});
  const activePerson=founderState.selectedPerson||persons.find(x=>x!=="all")||"";
  const profile=founderProfile(activePerson);
@@ -1575,11 +1621,16 @@ async function seedFounderArchive(){
 async function runFounderWeeklyCrawl(){
  const btn=document.querySelector("#run-founder-distill"),old=btn?.textContent;
  if(btn){btn.disabled=true;btn.textContent="周度抓取中…"}
- try{
-  const data=await api("/api/founder-archives/run-weekly",{method:"POST",body:JSON.stringify({edition:activeEdition()})});
-  await loadFounderArchives();
-  toast(`周度抓取完成：归档 ${data.items?.length||0} 条`);
- }catch(err){toast(`周度抓取失败：${err.message}`)}
+	 try{
+	  const data=await api("/api/founder-archives/run-weekly",{method:"POST",body:JSON.stringify({edition:activeEdition()})});
+	  await loadFounderArchives();
+	  const count=data.items?.length||0;
+	  if(count){
+	   toast(`周度巡检完成：新增 ${count} 条可蒸馏公开表达`);
+	  }else{
+	   toast("本次未发现可蒸馏公开表达；媒体首页和导航页已自动拦截，请用社媒助手导出内容或补充具体文章链接");
+	  }
+	 }catch(err){toast(`周度抓取失败：${err.message}`)}
  finally{if(btn){btn.disabled=false;btn.textContent=old}}
 }
 async function generateFounderTalk(){
@@ -1592,10 +1643,11 @@ async function generateFounderTalk(){
  try{
   const data=await api("/api/ai/founder-talk",{method:"POST",body:JSON.stringify({edition:activeEdition(),person,scene,brief})});
   const html=`<div class="mmn-strategy-chat"><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${person} · ${scene}话术</b><span>MMN高管蒸馏模型</span></div><div class="mmn-ai-content">${markdownish(data.draft)}</div><div class="founder-review"><b>MMN策略质检</b>${markdownish(data.review)}</div><div class="mmn-engine-signature">该话术由MMN营销引擎输出，基于公开表达风格蒸馏，不代表本人原话</div></article></div>`;
-  box.innerHTML=html;
-  founderState.lastOutput=html;saveFounderState();
-  const profile=founderProfile(person);mergeStrategyKnowledge([founderKnowledgeItem(profile,`${data.draft}\n\n${data.review}`)]);
-  toast("高管IP话术已生成并写入策略知识库");
+	  box.innerHTML=html;
+	  founderState.lastOutput=html;saveFounderState();
+	  const profile=founderProfile(person);mergeStrategyKnowledge([founderKnowledgeItem(profile,`${data.draft}\n\n${data.review}`)]);
+	  await loadFounderArchives();
+	  toast(data.archiveItem?"高管IP话术已生成，并沉淀到创始人蒸馏库":"高管IP话术已生成并写入策略知识库");
  }catch(err){
   box.innerHTML=`<div class="mmn-ai-bubble"><b>生成失败</b><p>${err.message}</p></div>`;
   toast(`生成失败：${err.message}`);

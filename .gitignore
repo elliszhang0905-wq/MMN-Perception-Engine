@@ -5,5 +5,9 @@ __pycache__/
 .DS_Store
 data/*.db
 data/sqlite/
+data/raw/
+data/processed/
+data/reports/
 backups/
 cloud_model_test_result.json
+.codebase-memory/

@@ -252,6 +252,69 @@ docker compose restart mmn-app mmn-web
 bash deploy.sh
 ```
 
+## 9.1 本地访问保障
+
+本地 Mac 开发环境使用桌面启动文件：
+
+```text
+/Users/ellis/Desktop/启动中国汽车营销引擎.command
+```
+
+该启动文件会调用：
+
+```bash
+bash scripts/ensure_local_mmn.sh
+```
+
+启动逻辑：
+
+1. 先检查 `http://127.0.0.1:8765/api/health` 是否可用。
+2. 如果端口被占用但服务无响应，自动清理卡住的本地 MMN 服务。
+3. 重新以本地免登录模式启动。
+4. 健康检查通过后再打开浏览器。
+
+本地访问地址固定为：
+
+```text
+http://127.0.0.1:8765/
+```
+
+本地地址只适用于当前 Mac。手机或客户设备不在同一台电脑上，不能使用 `127.0.0.1` 访问本地服务。
+
+## 9.2 云端访问保障
+
+手机、客户设备、不同网络环境访问 MMN，必须使用服务器公网 IP 或正式域名。
+
+内部测试阶段：
+
+```text
+http://服务器公网IP:8765/
+```
+
+域名和 HTTPS 完成后：
+
+```text
+https://mmnsh.com/
+```
+
+云端基础健康检查：
+
+```bash
+bash scripts/test_mmn_cloud.sh http://服务器公网IP:8765
+```
+
+或：
+
+```bash
+MMN_CLOUD_URL=https://mmnsh.com bash scripts/test_mmn_cloud.sh
+```
+
+检查项：
+
+1. 首页是否返回 `200`。
+2. `/api/health` 是否返回 `200`。
+3. 如果检查失败，优先排查阿里云安全组、Docker 服务状态、域名解析、备案状态和 HTTPS 证书。
+
 ## 10. 日志查看
 
 查看全部服务日志：
@@ -347,11 +410,16 @@ MMN_REMOTE_DIR=/opt/mmn-perception-engine
 
 ## 14. 定时任务
 
-`mmn-scheduler` 当前预留并运行周度任务：
+`mmn-scheduler` 当前运行以下任务：
 
 - 时间：每周日 23:00
 - 时区：Asia/Shanghai
 - 当前用途：创始人公开表达周度归档接口触发
+
+- 时间：每月 1 日 03:10，支持通过 `.env` 的 `MMN_VEHICLE_ASSET_SYNC_DAY` 和 `MMN_VEHICLE_ASSET_SYNC_TIME` 调整
+- 时区：Asia/Shanghai
+- 当前用途：MMN 车型资产主库月度撞库，更新品牌、车型、别名和新能源标识等基础资产
+- 说明：用户侧车型库只展示 MMN 数据资产；外部标准源仅用于后台溯源和质量校验，不作为前台展示名称
 
 查看任务日志：
 

@@ -47,7 +47,7 @@ async function main() {
   add("dashboard cognition panel renders", cognitionRows > 0, String(cognitionRows));
 
   const identityCheck = await page.evaluate(() => {
-    const groups = brandModelGroups(["极氪009", "Zeekr 009", "ZEEKR 009", "Zeeker 009", "阿维塔06", "沃尔沃EX90"]);
+    const groups = brandModelGroups(["极氪009", "Zeekr 009", "ZEEKR 009", "Zeeker 009", "阿维塔06", "沃尔沃EX90", "乐道L60", "银河L6", "智己L6", "智己LS7"]);
     const byBrand = Object.fromEntries(groups.map(group => [group.brand, group.models.map(model => canonicalModelLabel(model))]));
     return {
       byBrand,
@@ -55,11 +55,15 @@ async function main() {
       zeekrLabel: byBrand["极氪"]?.[0] || "",
       avatrBrand: brandForDisplay("阿维塔06"),
       volvoBrand: brandForDisplay("沃尔沃EX90"),
+      onvoBrand: brandForDisplay("乐道L60"),
+      galaxyBrand: brandForDisplay("银河L6"),
+      imModels: byBrand["智己"] || [],
       hasPendingBrand: Object.keys(byBrand).includes("待确认品牌")
     };
   });
   add("vehicle identity assigns pending brands", identityCheck.avatrBrand === "阿维塔" && identityCheck.volvoBrand === "沃尔沃" && !identityCheck.hasPendingBrand, JSON.stringify(identityCheck));
   add("vehicle identity deduplicates Zeekr aliases", identityCheck.zeekrCount === 1 && identityCheck.zeekrLabel.includes("极氪009"), JSON.stringify(identityCheck));
+  add("vehicle identity keeps IM Motors clean", identityCheck.onvoBrand === "乐道" && identityCheck.galaxyBrand === "吉利银河" && identityCheck.imModels.every(name => name.includes("智己")), JSON.stringify(identityCheck));
 
   await page.locator('#nav button[data-page="data"]').click();
   add("data center opens", await page.locator("#data.page.active").count() === 1);
