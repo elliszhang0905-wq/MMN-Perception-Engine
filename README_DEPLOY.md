@@ -198,7 +198,35 @@ bash rollback.sh HEAD~1
 
 每次正式发布前，复制根目录 `release.md` 模板，填写发布日期、版本号、变更内容、测试结果、GitHub Commit、云端健康检查和回滚方案。
 
-## 8. 停止、重启和更新
+## 8. 云端登录与权限
+
+当前阶段执行以下边界：
+
+- 本地 Mac 开发环境免登录，打开后直接进入工作台。
+- 阿里云 ECS 云端演示环境需要登录。
+- 云端登录只用于演示环境权限隔离，不改变本地开发效率。
+
+云端 `.env` 需要配置：
+
+```bash
+MMN_CLOUD_LOGIN_REQUIRED=true
+MMN_AUTH_SECRET=一段较长随机密钥
+MMN_ADMIN_USERNAME=Ellis
+MMN_ADMIN_PASSWORD=管理员初始密码
+MMN_TRIAL_USERNAME=MMN
+MMN_TRIAL_PASSWORD=试用者初始密码
+```
+
+权限说明：
+
+| 账号类型 | 权限 |
+| --- | --- |
+| 管理员 | 可查看、导入、清空、写入、同步、运行模型策略和管理演示数据 |
+| 试用者 | 可查看核心演示、运行策略分析，不可导入、清空、同步或写入云端资产 |
+
+登录页使用 MMN 品牌背景，面向云端演示场景呈现。
+
+## 9. 停止、重启和更新
 
 停止：
 
@@ -224,7 +252,7 @@ docker compose restart mmn-app mmn-web
 bash deploy.sh
 ```
 
-## 9. 日志查看
+## 10. 日志查看
 
 查看全部服务日志：
 
@@ -250,7 +278,7 @@ docker compose logs -f mmn-web
 docker compose logs -f mmn-scheduler
 ```
 
-## 10. 备份
+## 11. 备份
 
 执行：
 
@@ -269,7 +297,7 @@ backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
 - 内部测试阶段每天至少备份一次。
 - 正式上线后接入 OSS 或企业备份系统。
 
-## 11. 恢复
+## 12. 恢复
 
 ```bash
 bash scripts/restore.sh backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
@@ -277,7 +305,7 @@ bash scripts/restore.sh backups/mmn_backup_YYYYMMDD_HHMMSS.tar.gz
 
 恢复完成后应用会自动重启。
 
-## 12. 本地与服务器数据同步
+## 13. 本地与服务器数据同步
 
 当前阶段采用“本地主数据库兜底、服务器镜像运行”的同步策略：
 
@@ -317,7 +345,7 @@ MMN_REMOTE_DIR=/opt/mmn-perception-engine
 - 浏览器临时状态必须先写入项目快照或数据库，才能进入同步链路。
 - 正式商业化阶段建议迁移到 RDS PostgreSQL + OSS，并将同步策略升级为实时事件同步和审计日志。
 
-## 13. 定时任务
+## 14. 定时任务
 
 `mmn-scheduler` 当前预留并运行周度任务：
 
@@ -333,7 +361,7 @@ docker compose logs -f mmn-scheduler
 
 后续懂车帝销量、泰国市场数据、RAG资料更新等任务都可以纳入该服务。
 
-## 14. 后续迁移到正式 ECS/RDS/OSS
+## 15. 后续迁移到正式 ECS/RDS/OSS
 
 正式商业化建议按以下顺序升级：
 
@@ -345,7 +373,7 @@ docker compose logs -f mmn-scheduler
 6. 开启应用监控、日志服务和告警。
 7. 将测试端口 8765 改为内网服务，由 Nginx 通过 80/443 对外提供正式访问。
 
-## 13. 企业实名认证、域名备案和 SSL
+## 16. 企业实名认证、域名备案和 SSL
 
 正式对客户开放前，需要完成：
 
@@ -364,7 +392,7 @@ MMN_PUBLIC_BASE_URL=https://正式域名
 
 当前阶段不执行域名绑定和 SSL 接入。
 
-## 16. 安全注意事项
+## 17. 安全注意事项
 
 - 不对客户开放当前测试地址。
 - 不把 API Key 写入代码。
@@ -374,7 +402,7 @@ MMN_PUBLIC_BASE_URL=https://正式域名
 - 测试完成后关闭或限制 8765 端口。
 - 定期备份 `mmn_data`。
 
-## 17. 常见问题
+## 18. 常见问题
 
 ### 页面无法访问
 

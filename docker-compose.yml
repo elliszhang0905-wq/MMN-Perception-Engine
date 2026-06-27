@@ -28,6 +28,12 @@ services:
       MMN_PUBLIC_BASE_URL: ${MMN_PUBLIC_BASE_URL:-}
       MMN_AUTO_OPEN_BROWSER: "false"
       MMN_DESKTOP_BRIDGE_ENABLED: "false"
+      MMN_CLOUD_LOGIN_REQUIRED: ${MMN_CLOUD_LOGIN_REQUIRED:-true}
+      MMN_AUTH_SECRET: ${MMN_AUTH_SECRET:-change-this-auth-secret}
+      MMN_ADMIN_USERNAME: ${MMN_ADMIN_USERNAME:-Ellis}
+      MMN_ADMIN_PASSWORD: ${MMN_ADMIN_PASSWORD:-}
+      MMN_TRIAL_USERNAME: ${MMN_TRIAL_USERNAME:-MMN}
+      MMN_TRIAL_PASSWORD: ${MMN_TRIAL_PASSWORD:-}
       MMN_DATA_DIR: /app/data
       MMN_DB_PATH: /app/data/commercial_demo.db
       DATABASE_URL: ${DATABASE_URL:-postgresql://mmn:${POSTGRES_PASSWORD:-change-me}@mmn-db:5432/mmn}

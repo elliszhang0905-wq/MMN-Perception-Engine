@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 NODE_BIN="${NODE_BINARY:-$(command -v node)}"
-PORT="${MMN_PORT:-8765}"
+PORT="${MMN_PORT:-18765}"
 URL="${MMN_URL:-http://localhost:${PORT}/}"
 SERVER_PID=""
 
@@ -34,7 +34,7 @@ fi
 
 if ! curl -fsS "$URL" >/dev/null 2>&1; then
   echo "MMN release gate: 启动临时本地服务"
-  python3 server.py >/tmp/mmn-release-gate-server.log 2>&1 &
+  MMN_PORT="$PORT" python3 server.py >/tmp/mmn-release-gate-server.log 2>&1 &
   SERVER_PID="$!"
   for _ in {1..20}; do
     if curl -fsS "$URL" >/dev/null 2>&1; then

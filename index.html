@@ -5,10 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=20260627-dashboard-render-fix-13">
-  <link rel="stylesheet" href="knowhow.css?v=20260627-dashboard-render-fix-13">
+  <link rel="stylesheet" href="style.css?v=20260627-cloud-login-auth-1">
+  <link rel="stylesheet" href="knowhow.css?v=20260627-cloud-login-auth-1">
 </head>
 <body>
+  <section id="cloud-login-screen" class="cloud-login-screen" hidden>
+    <div class="cloud-login-bg" aria-hidden="true"></div>
+    <div class="cloud-login-shade" aria-hidden="true"></div>
+    <form id="cloud-login-form" class="cloud-login-card">
+      <div class="cloud-login-kicker">MMN PERCEPTION ENGINE</div>
+      <h1>进入 MMN 云端演示环境</h1>
+      <p>云端版本用于客户演示与权限隔离。本地 Mac 仍保持免登录，直接进入工作台。</p>
+      <div class="cloud-login-fields">
+        <label>
+          <span>用户名</span>
+          <input name="username" autocomplete="username" placeholder="Ellis / MMN" required>
+        </label>
+        <label>
+          <span>密码</span>
+          <input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+        </label>
+      </div>
+      <button type="submit">进入系统</button>
+      <small id="cloud-login-message">管理员拥有完整权限，试用者仅可体验核心演示功能。</small>
+    </form>
+  </section>
   <aside class="sidebar">
     <div class="brand">
       <img class="brand-logo" src="assets/mmn-logo-cn-line-cropped.png" alt="MMN 艾姆恩多模态营销引擎" width="184" height="100" style="width:184px;max-width:184px;height:auto;display:block;object-fit:contain;">
@@ -644,7 +665,7 @@
     </form>
   </dialog>
   <div id="toast"></div>
-  <script src="data_20260608.js?v=20260627-dashboard-render-fix-13"></script>
-  <script src="app.js?v=20260627-dashboard-render-fix-13"></script>
+  <script src="data_20260608.js?v=20260627-cloud-login-auth-1"></script>
+  <script src="app.js?v=20260627-cloud-login-auth-1"></script>
 </body>
 </html>

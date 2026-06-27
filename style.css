@@ -3,6 +3,119 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+.cloud-login-screen{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  display:grid;
+  place-items:center;
+  min-height:100vh;
+  overflow:hidden;
+  background:#111417;
+}
+.cloud-login-screen[hidden]{display:none}
+.cloud-login-bg{
+  position:absolute;
+  inset:0;
+  background:url("assets/mmn-logo-cn-line.png") center / cover no-repeat;
+  transform:scale(1.01);
+}
+.cloud-login-shade{
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(circle at 74% 38%,rgba(255,255,255,.08),transparent 30%),
+    linear-gradient(90deg,rgba(17,20,23,.5),rgba(17,20,23,.16) 48%,rgba(17,20,23,.54));
+  backdrop-filter:blur(1px);
+}
+.cloud-login-card{
+  position:relative;
+  width:min(430px,calc(100vw - 42px));
+  margin-left:min(48vw,720px);
+  padding:32px;
+  border:1px solid rgba(255,255,255,.22);
+  border-radius:18px;
+  background:linear-gradient(180deg,rgba(238,240,242,.86),rgba(219,223,226,.78));
+  box-shadow:0 34px 90px rgba(0,0,0,.36),inset 0 1px 0 rgba(255,255,255,.55);
+  color:#171b1f;
+}
+.cloud-login-kicker{
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:2.4px;
+  color:#5c646b;
+  margin-bottom:12px;
+}
+.cloud-login-card h1{
+  font-size:25px;
+  line-height:1.2;
+  color:#111417;
+  margin-bottom:10px;
+}
+.cloud-login-card p{
+  font-size:13px;
+  line-height:1.65;
+  color:#5d666e;
+  margin-bottom:24px;
+}
+.cloud-login-fields{
+  display:grid;
+  gap:14px;
+}
+.cloud-login-fields label span{
+  display:block;
+  font-size:11px;
+  font-weight:850;
+  color:#626b73;
+  margin-bottom:7px;
+}
+.cloud-login-fields input{
+  width:100%;
+  height:48px;
+  border:1px solid rgba(80,88,96,.22);
+  border-radius:12px;
+  padding:0 14px;
+  background:rgba(246,247,248,.82);
+  color:#15191d;
+  font:inherit;
+  font-weight:760;
+  outline:none;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 8px 18px rgba(17,20,23,.06);
+}
+.cloud-login-fields input:focus{
+  border-color:#838c94;
+  background:#fff;
+  box-shadow:0 0 0 4px rgba(80,88,96,.13),0 12px 28px rgba(17,20,23,.08);
+}
+.cloud-login-card button{
+  width:100%;
+  height:48px;
+  margin-top:18px;
+  border:0;
+  border-radius:12px;
+  background:linear-gradient(135deg,#15191d,#424a51);
+  color:#fff;
+  font-weight:900;
+  box-shadow:0 16px 34px rgba(17,20,23,.26);
+}
+.cloud-login-card button:disabled{opacity:.65;cursor:wait}
+.cloud-login-card small{
+  display:block;
+  min-height:18px;
+  margin-top:14px;
+  color:#68727a;
+  font-size:11px;
+  line-height:1.5;
+}
+body.cloud-auth-required main,
+body.cloud-auth-required .sidebar{
+  transition:filter .2s ease;
+}
+body.cloud-auth-required:has(.cloud-login-screen:not([hidden])) main,
+body.cloud-auth-required:has(.cloud-login-screen:not([hidden])) .sidebar{
+  filter:blur(3px);
+  pointer-events:none;
+}
 .sidebar{position:fixed;inset:0 auto 0 0;width:244px;background:linear-gradient(180deg,#15181b 0%,#1d2024 58%,#23272b 100%);color:#fff;padding:24px 18px;display:flex;flex-direction:column;z-index:5;overflow:hidden}
 .brand{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;margin:-24px -18px 0;padding:18px 18px 16px;background:#15181b;border-bottom:1px solid rgba(255,255,255,.08);height:188px;flex:0 0 188px;overflow:hidden}
 .brand-logo{display:block;width:184px!important;max-width:184px!important;height:auto!important;object-fit:contain;flex:0 0 auto}
@@ -42,6 +155,12 @@ body[data-edition="global"] .sales-marquee-track span:before{background:#2f7ea4;
 button,.file-button{font:inherit;cursor:pointer;border-radius:9px;padding:10px 15px;border:1px solid var(--line)}
 button.primary,.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 button.ghost,.ghost{background:var(--surface);color:var(--text)}
+button.permission-locked,.file-button.permission-locked{
+  opacity:.46;
+  cursor:not-allowed;
+  transform:none!important;
+  box-shadow:none!important;
+}
 .page{display:none;padding:28px 38px 50px}.page.active{display:block}
 .project-strip{background:linear-gradient(115deg,#202327,#363b40);color:#fff;border-radius:14px;padding:20px 25px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:20px;box-shadow:var(--shadow)}
 .project-strip span,.project-strip b{display:block}.project-strip span{font-size:11px;color:#b9c0c5;margin-bottom:7px}.project-strip b{font-size:15px}

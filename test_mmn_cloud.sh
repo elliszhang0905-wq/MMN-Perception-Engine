@@ -7,25 +7,31 @@ SSH_CHECK="${MMN_CLOUD_SSH_CHECK:-true}"
 ECS_HOST="${MMN_ECS_HOST:-121.40.60.90}"
 ECS_USER="${MMN_ECS_USER:-root}"
 ECS_KEY="${MMN_ECS_KEY:-/Users/ellis/.ssh/mmn_ecs_hangzhou_v1}"
+MMN_TEST_USERNAME="${MMN_TEST_USERNAME:-Ellis}"
+MMN_TEST_PASSWORD="${MMN_TEST_PASSWORD:-Ellis123}"
 
 echo "MMN cloud test target: ${BASE_URL}"
 
-python3 - "$BASE_URL" "$OUT_FILE" <<'PY'
+python3 - "$BASE_URL" "$OUT_FILE" "$MMN_TEST_USERNAME" "$MMN_TEST_PASSWORD" <<'PY'
 import json
 import sys
 import time
 import urllib.request
 import urllib.error
 
-base_url, out_file = sys.argv[1:3]
+base_url, out_file, test_username, test_password = sys.argv[1:5]
 results = []
+auth_token = ""
 
 def request_json(method, path, body=None, timeout=180):
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
     req = urllib.request.Request(
         base_url.rstrip("/") + path,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method=method,
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -68,6 +74,21 @@ def check_frontend():
     if not ok:
         raise RuntimeError("首页未检测到 MMN 或 app.js")
     return "首页 HTML 可访问，前端资源入口存在。", "", {"htmlLength": len(html)}
+
+def check_cloud_login():
+    global auth_token
+    config = request_json("GET", "/api/auth/config", timeout=30)
+    if not config.get("loginRequired"):
+        return "云端未开启登录门禁，按本地免登录模式测试。", "如目标是服务器演示环境，应确认 MMN_CLOUD_LOGIN_REQUIRED=true。", config
+    data = request_json("POST", "/api/login", {"username": test_username, "password": test_password}, timeout=30)
+    token = data.get("session", {}).get("token")
+    if not token:
+        raise RuntimeError("登录成功但未返回 token")
+    auth_token = token
+    return f"云端登录成功：{data.get('session', {}).get('username')} / {data.get('session', {}).get('role')}", "", {
+        "role": data.get("session", {}).get("role"),
+        "permissions": data.get("session", {}).get("permissions", []),
+    }
 
 def check_ai_status():
     data = request_json("GET", "/api/ai/status", timeout=30)
@@ -204,6 +225,7 @@ def check_judgment_write():
 
 run("health", check_health)
 run("frontend", check_frontend)
+run("cloud_login", check_cloud_login)
 run("ai_status", check_ai_status)
 run("rag_seed_parse", check_rag_seed)
 run("strategy_fast_generation", check_strategy_fast)

@@ -14,6 +14,8 @@ import subprocess
 import shutil
 import hashlib
 import time
+import base64
+import hmac
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -31,6 +33,7 @@ PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
 AUTO_OPEN_BROWSER = os.getenv("MMN_AUTO_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
 DESKTOP_BRIDGE_ENABLED = os.getenv("MMN_DESKTOP_BRIDGE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+CLOUD_LOGIN_REQUIRED = os.getenv("MMN_CLOUD_LOGIN_REQUIRED", "false").lower() in {"1", "true", "yes", "on"}
 DATA_DIR = Path(os.getenv("MMN_DATA_DIR", str(ROOT / "data"))).expanduser().resolve()
 DB_PATH = Path(os.getenv("MMN_DB_PATH", str(DATA_DIR / "commercial_demo.db"))).expanduser().resolve()
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -1028,6 +1031,57 @@ def env_file_values():
 
 def env_value(key, default=""):
     return os.getenv(key) or env_file_values().get(key) or default
+
+def cloud_login_required():
+    return os.getenv("MMN_CLOUD_LOGIN_REQUIRED", str(CLOUD_LOGIN_REQUIRED)).lower() in {"1", "true", "yes", "on"}
+
+def auth_secret():
+    return env_value("MMN_AUTH_SECRET") or env_value("DASHSCOPE_API_KEY") or "mmn-local-demo-secret"
+
+def cloud_accounts():
+    return {
+        env_value("MMN_ADMIN_USERNAME", "Ellis"): {
+            "password": env_value("MMN_ADMIN_PASSWORD", ""),
+            "role": "admin",
+            "name": "Ellis",
+            "org": "MMN管理空间",
+            "permissions": ["manage_all", "configure_models", "import_data", "delete_data", "view_demo"]
+        },
+        env_value("MMN_TRIAL_USERNAME", "MMN"): {
+            "password": env_value("MMN_TRIAL_PASSWORD", ""),
+            "role": "trial",
+            "name": "MMN试用者",
+            "org": "MMN试用空间",
+            "permissions": ["view_demo", "run_strategy", "view_reports"]
+        }
+    }
+
+def make_auth_token(username, role):
+    payload = {
+        "username": username,
+        "role": role,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60 * 60 * 12
+    }
+    body = base64.urlsafe_b64encode(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+    sig = hmac.new(auth_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
+
+def parse_auth_token(token):
+    if not token or "." not in token:
+        return None
+    body, sig = token.rsplit(".", 1)
+    expected = hmac.new(auth_secret().encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    padded = body + "=" * (-len(body) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception:
+        return None
+    if int(payload.get("exp") or 0) < int(time.time()):
+        return None
+    return payload
 
 def qwen_model_for(profile="default"):
     profile = (profile or "default").lower()
@@ -2969,11 +3023,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
 
+    def current_auth(self):
+        auth = self.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            return parse_auth_token(auth.split(" ", 1)[1].strip())
+        return None
+
+    def require_cloud_auth(self, roles=None):
+        if not cloud_login_required():
+            return {"username": "local", "role": "admin", "local": True}
+        payload = self.current_auth()
+        if not payload:
+            self.send_json({"ok": False, "error": "请先登录 MMN 云端演示系统。"}, 401)
+            return None
+        if roles and payload.get("role") not in roles:
+            self.send_json({"ok": False, "error": "当前账号没有执行该操作的权限。"}, 403)
+            return None
+        return payload
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
             self.send_json({"ok": True, "mode": "commercial-demo", "db": str(DB_PATH)})
             return
+        if parsed.path == "/api/auth/config":
+            auth_payload = self.current_auth()
+            self.send_json({
+                "ok": True,
+                "loginRequired": cloud_login_required(),
+                "user": {"username": auth_payload.get("username"), "role": auth_payload.get("role")} if auth_payload else None
+            })
+            return
+        if parsed.path.startswith("/api/") and parsed.path not in {"/api/sales-marquee", "/api/global-sales-marquee"}:
+            if not self.require_cloud_auth():
+                return
         if parsed.path == "/api/ai/status":
             qcfg = qwen_config()
             dcfg = deepseek_config()
@@ -3093,6 +3176,45 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/login":
             try:
                 body = self.read_json()
+                if cloud_login_required() and body.get("username"):
+                    username = str(body.get("username") or "").strip()
+                    password = str(body.get("password") or "")
+                    accounts = cloud_accounts()
+                    account = accounts.get(username)
+                    if not account or not account.get("password") or not hmac.compare_digest(password, account["password"]):
+                        raise ValueError("用户名或密码不正确。")
+                    created = now()
+                    org_name = account["org"]
+                    email = f"{username.lower()}@mmn.local"
+                    with db() as conn:
+                        org = conn.execute("select * from organizations where name=?", (org_name,)).fetchone()
+                        if not org:
+                            org_id = str(uuid.uuid4())
+                            conn.execute("insert into organizations values (?,?,?)", (org_id, org_name, created))
+                        else:
+                            org_id = org["id"]
+                        user = conn.execute("select * from users where org_id=? and email=?", (org_id, email)).fetchone()
+                        if not user:
+                            user_id = str(uuid.uuid4())
+                            conn.execute("insert into users values (?,?,?,?,?)", (user_id, org_id, email, account["name"], created))
+                        else:
+                            user_id = user["id"]
+                        ensure_workspace(conn, scoped_org_id(org_id, "china"), org_name)
+                        ensure_workspace(conn, scoped_org_id(org_id, "global"), org_name)
+                    self.send_json({"ok": True, "session": {
+                        "org_id": org_id,
+                        "org": org_name,
+                        "user_id": user_id,
+                        "email": email,
+                        "name": account["name"],
+                        "username": username,
+                        "role": account["role"],
+                        "permissions": account["permissions"],
+                        "token": make_auth_token(username, account["role"])
+                    }})
+                    return
+                if cloud_login_required():
+                    raise ValueError("云端演示环境请使用用户名和密码登录。")
                 org_name = (body.get("org") or "默认客户").strip()
                 email = (body.get("email") or "demo@example.com").strip().lower()
                 name = (body.get("name") or email.split("@")[0]).strip()
@@ -3116,6 +3238,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if cloud_login_required():
+            trial_allowed = {"/api/ai/rag-strategy", "/api/ai/fusion-strategy", "/api/ai/founder-talk", "/api/import-rag-seed"}
+            roles = None if parsed.path in trial_allowed else {"admin"}
+            if not self.require_cloud_auth(roles):
+                return
         if parsed.path == "/api/workspace":
             try:
                 body = self.read_json()

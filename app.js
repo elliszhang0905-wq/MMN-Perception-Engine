@@ -395,7 +395,48 @@ function allVideoItems(){
 let session=loadSession(),serverLearnings=[];
 function loadSession(){try{return JSON.parse(localStorage.getItem("mmnCommercialSession"))||null}catch{return null}}
 function saveSession(s){session=s;localStorage.setItem("mmnCommercialSession",JSON.stringify(s));renderAccount()}
-async function api(path,options={}){const res=await fetch(path,{headers:{"Content-Type":"application/json",...(options.headers||{})},...options});const data=await res.json();if(!data.ok)throw new Error(data.error||"请求失败");return data}
+function authHeaders(extra={}){return session?.token?{"Authorization":`Bearer ${session.token}`,...extra}:extra}
+async function api(path,options={}){const res=await fetch(path,{headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})}),...options});const data=await res.json();if(!data.ok)throw new Error(data.error||"请求失败");return data}
+async function initCloudLoginGate(){
+ const screen=document.querySelector("#cloud-login-screen"),form=document.querySelector("#cloud-login-form"),msg=document.querySelector("#cloud-login-message");
+ if(!screen||!form)return true;
+ try{
+  const res=await fetch("/api/auth/config",{headers:authHeaders()});
+  const data=await res.json();
+  if(!data.loginRequired){screen.hidden=true;return true}
+  document.body.classList.add("cloud-auth-required");
+  if(session?.token&&data.user){screen.hidden=true;return true}
+  if(session?.token&&!data.user){
+   localStorage.removeItem("mmnCommercialSession");
+   session=null;
+  }
+  screen.hidden=false;
+  form.onsubmit=async e=>{
+   e.preventDefault();
+   const old=msg.textContent;
+   msg.textContent="正在验证账号权限…";
+   form.querySelector("button").disabled=true;
+   try{
+    const fd=new FormData(form);
+    const data=await api("/api/login",{method:"POST",body:JSON.stringify({username:fd.get("username"),password:fd.get("password")})});
+    saveSession(data.session);
+    screen.hidden=true;
+    startAppDataLoads();
+    toast(`${data.session.name} 已进入云端演示环境`);
+   }catch(err){
+    msg.textContent=err.message||"登录失败，请检查账号密码。";
+   }finally{
+    form.querySelector("button").disabled=false;
+   if(msg.textContent==="正在验证账号权限…")msg.textContent=old;
+   }
+  };
+  return false;
+ }catch(err){
+  screen.hidden=false;
+  msg.textContent="云端登录状态检查失败，请稍后刷新。";
+  return false;
+ }
+}
 async function loadServerLearnings(){if(!session)return;try{const data=await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`);serverLearnings=data.items.map(x=>({...x,savedAt:x.saved_at,userId:x.user_id,orgId:x.org_id}));render()}catch(e){toast(`学习库同步失败：${e.message}`)}}
 async function loadWorkspace(){
  if(!session){workspaceState=defaultWorkspaceState();renderWorkspace();return}
@@ -636,8 +677,22 @@ async function loadSalesMarquee(){
 }
 function renderAccount(){
  const btn=document.querySelector("#account-button");if(!btn)return;
- btn.textContent=session?`客户空间：${session.org} / ${session.name}`:"客户空间：未登录";
+ btn.textContent=session?`客户空间：${session.org} / ${session.name}${session.role?` · ${session.role==="admin"?"管理员":"试用"}`:""}`:"客户空间：未登录";
  btn.classList.toggle("primary",!!session);
+ applyRoleRestrictions();
+}
+function applyRoleRestrictions(){
+ const trial=session?.role==="trial";
+ const selectors=[
+  "#add-row",".file-button","#save-row","#sync-project-state","#clear-learning","#clear-video-data","#clear-vertical-data","#clear-strategy-kb",
+  "#import-rag-seed","#import-strategy-kb","#run-founder-crawl","#seed-founder-archive","[data-plugin-sync]"
+ ];
+ document.querySelectorAll(selectors.join(",")).forEach(el=>{
+  el.disabled=trial;
+  el.classList.toggle("permission-locked",trial);
+  if(trial)el.title="试用账号仅可查看演示和运行策略，不可修改云端数据。";
+  else if(el.classList.contains("permission-locked"))el.removeAttribute("title");
+ });
 }
 function renderModelSwitcher(){
  const models=modelOptions(),wrap=document.querySelector("#dash-model");
@@ -843,7 +898,7 @@ async function generateModelStrategy(engine,btn){
  result.scrollIntoView({block:"nearest",behavior:"smooth"});
  try{
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
-  const res=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({context:currentDrillContext}),signal:controller.signal});
+  const res=await fetch(endpoint,{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({context:currentDrillContext}),signal:controller.signal});
   clearTimeout(timer);
   const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
   if(!res.ok||!data.ok)throw new Error(data.error||`${label}生成失败`);
@@ -1258,7 +1313,7 @@ async function handleAssetUpload(e){
  if(!file||!platformKey||!slot||!model)return;
  toast(`正在导入${assetPlatformName(platformKey)} · ${role}内容…`);
  try{
-  const res=await fetch(`/api/import-video-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});
+  const res=await fetch(`/api/import-video-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
   const items=json.dataset.items.map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:file.name}));
   videoState.files[platformKey][slot]={source:file.name,count:items.length,uploadedAt:new Date().toISOString(),items};
@@ -1680,14 +1735,14 @@ document.querySelector("#save-row").onclick=e=>{e.preventDefault();const f=new F
 function download(name,text,type="text/plain"){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
 document.querySelector("#download-template").onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
 const dashboardTemplateButton=document.querySelector("#dashboard-template");if(dashboardTemplateButton)dashboardTemplateButton.onclick=()=>download("中国汽车营销引擎_导入模板.csv",extendedHeaders.join(",")+"\n");
-document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入数据…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
-document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入数据…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#clear-vertical-data").onclick=()=>{if(confirm("确认清空当前垂媒看板数据？已沉淀的车型资产库不会删除。")){verticalState={sources:[],items:[],assetSummary:verticalState.assetSummary||null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};verticalSearch="";verticalPeriodPickerOpen=false;document.querySelector("#vertical-search").value="";saveVerticalState();renderVertical();toast("当前看板已清空，车型资产库已保留")}};
 document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已上传的抖音/小红书文件会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
 document.querySelector("#csv-file").onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const lines=reader.result.trim().split(/\r?\n/).slice(1);const parsed=lines.map(line=>line.split(",").map(x=>x.trim())).filter(r=>r.length>=12).map(r=>r.map((v,i)=>i>=8&&i<=11?+v:v));if(parsed.length){state.rows.push(...parsed);save();render();toast(`已导入 ${parsed.length} 行数据`)}else toast("未识别到有效数据")};reader.readAsText(file,"utf-8")};
 document.querySelector("#learning-form").onsubmit=async e=>{e.preventDefault();const f=e.target,item={edition:activeEdition(),model:state.config.model,label:f.elements.label.value,conclusion:f.elements.conclusion.value.trim(),recommendation:f.elements.recommendation.value.trim(),evidence:f.elements.evidence.value.trim(),platform:f.elements.platform.value.trim(),kpi:f.elements.kpi.value.trim(),stage:f.elements.stage.value,savedAt:new Date().toISOString()};if(!item.conclusion&&!item.recommendation){toast("请先填写结论或建议");return}try{if(session){const data=await api("/api/learnings",{method:"POST",body:JSON.stringify({...item,org_id:session.org_id,user_id:session.user_id})});serverLearnings.unshift({...data.item,savedAt:data.item.saved_at});}else{const items=learnings();items.push(item);saveLearnings(items)}f.elements.conclusion.value="";f.elements.recommendation.value="";f.elements.evidence.value="";f.elements.platform.value="";f.elements.kpi.value="";render();toast(session?"已保存到当前版本企业知识库":"已保存到当前版本本机学习库")}catch(err){toast(`保存失败：${err.message}`)}};
 document.querySelector("#clear-learning").onclick=async()=>{if(confirm(session?"确认清空当前企业空间、当前版本的学习记录？":"确认清空本机当前版本学习记录？")){try{if(session){await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`,{method:"DELETE"});serverLearnings=[]}else saveLearnings([]);render();toast("当前版本学习记录已清空")}catch(err){toast(`清空失败：${err.message}`)}}};
-document.querySelector("#strategy-kb-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入RAG材料…");try{const res=await fetch(`/api/import-rag-file?filename=${encodeURIComponent(file.name)}`,{method:"POST",body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");mergeStrategyKnowledge(json.dataset.items||[]);render();showPage("strategykb");toast(`已导入 ${json.dataset.count} 条RAG知识`)}catch(err){toast(`RAG材料导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#strategy-kb-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入RAG材料…");try{const res=await fetch(`/api/import-rag-file?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");mergeStrategyKnowledge(json.dataset.items||[]);render();showPage("strategykb");toast(`已导入 ${json.dataset.count} 条RAG知识`)}catch(err){toast(`RAG材料导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#import-rag-seed").onclick=async()=>{toast("正在导入MMN训练包v1…");try{const data=await api("/api/import-rag-seed",{method:"POST",body:"{}"});mergeStrategyKnowledge(data.dataset.items||[]);render();showPage("strategykb");document.querySelector("#rag-query").value="智己LS8 最大传播问题 下一阶段怎么打";renderRagResults();toast(`MMN训练包已导入 ${data.dataset.count} 条知识`)}catch(err){toast(`训练包导入失败：${err.message}`)}};
 document.querySelector("#import-strategy-kb").onclick=()=>{const input=document.querySelector("#strategy-kb-input"),text=input.value.trim();if(!text){toast("请先粘贴策略对话，或上传RAG材料");return}const items=summarizeKnowledgeText(text);if(!items.length){toast("暂未提取到可用策略知识，请补充更完整的对话内容");return}mergeStrategyKnowledge(items);input.value="";render();showPage("strategykb");toast(`已归纳 ${items.length} 条策略知识`)};
 document.querySelector("#clear-strategy-kb").onclick=()=>{if(confirm("确认清空策略知识库？")){strategyKb=[];saveStrategyKb();renderStrategyKb();render();toast("策略知识库已清空")}};
@@ -1704,7 +1759,7 @@ function reportPayload(){
  ];
  return{title:state.config.project,model:state.config.model,competitor:state.config.competitor,account:session?`${session.org} / ${session.email}`:"本机临时模式",metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString()},manual,diagnostics:list.map(x=>({label:x.label,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),knowhow:list.slice(0,6).map(x=>{const k=knowhowFor(x),learned=latestLearning(x.label);return{label:x.label,message:learned?.recommendation||k.message,evidence:learned?.evidence||k.proof,kpi:learned?.kpi||k.kpi}}),strategyKnowledge:strategyKb.slice(-8),calendar};
 }
-const exportPptxButton=document.querySelector("#export-pptx");if(exportPptxButton)exportPptxButton.onclick=async()=>{try{toast("正在生成 PPT…");const res=await fetch("/api/export-pptx",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(reportPayload())});if(!res.ok){const err=await res.json().catch(()=>({error:"PPT 生成失败"}));throw new Error(err.error)}const blob=await res.blob();const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.config.project}_策略报告.pptx`;a.click();URL.revokeObjectURL(a.href);toast("PPT 已导出")}catch(err){toast(`PPT 导出失败：${err.message}`)}};
+const exportPptxButton=document.querySelector("#export-pptx");if(exportPptxButton)exportPptxButton.onclick=async()=>{try{toast("正在生成 PPT…");const res=await fetch("/api/export-pptx",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(reportPayload())});if(!res.ok){const err=await res.json().catch(()=>({error:"PPT 生成失败"}));throw new Error(err.error)}const blob=await res.blob();const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.config.project}_策略报告.pptx`;a.click();URL.revokeObjectURL(a.href);toast("PPT 已导出")}catch(err){toast(`PPT 导出失败：${err.message}`)}};
 const exportGammaButton=document.querySelector("#export-gamma");if(exportGammaButton)exportGammaButton.onclick=()=>{const p=reportPayload();const text=[`# Gamma 提案生成大纲｜${p.title}`,``,`请基于以下内容生成一份中文汽车营销策略汇报 PPT。`,`风格：专业、简洁、有咨询感，适合给汽车品牌营销负责人/管理层汇报。`,`页数建议：8页，16:9。`,``,`## 1. 封面`,`标题：${p.title}`,`副标题：分析对象 ${p.model}｜竞品 ${p.competitor}`,``,`## 2. 核心数据结果`,`- NSR：${p.metrics.nsr}` ,`- IPS：${p.metrics.ips}`,`- 购买意向指数：${p.metrics.intent}`,`- 购买阻力风险：${p.metrics.risk}`,``,`## 3. 认知诊断排序`,...p.diagnostics.slice(0,8).map((x,i)=>`${i+1}. ${x.label}｜${x.diagnosis}｜负向 ${x.negative}｜Gap ${x.gap}｜优先级 ${x.priority}`),``,`## 4. 人工结论与建议`,...(p.manual.length?p.manual.map((x,i)=>`${i+1}. ${x.label}\n- 结论：${x.conclusion||"未填写"}\n- 建议：${x.recommendation||"未填写"}\n- 证据：${x.evidence||"未填写"}\n- 平台：${x.platform||"未填写"}\n- KPI：${x.kpi||"未填写"}`):["尚未填写人工结论，请在页面中补充后再生成正式提案。"]),``,`## 5. 参考 Know-how`,...p.knowhow.map((x,i)=>`${i+1}. ${x.label}：${x.message}；证据链：${x.evidence}；KPI：${x.kpi}`),``,`## 6. 策略知识库补充`,...(p.strategyKnowledge?.length?p.strategyKnowledge.map((x,i)=>`${i+1}. ${x.type}：${x.body}`):["暂无导入的策略知识。"]),``,`## 7. 30天行动节奏`,...p.calendar.map(x=>`- ${x.week}｜${x.theme}：${x.task}`),``,`## 8. 风险与下一步`,`强调：数据结果由系统计算，最终结论和建议以人工填写为准；企业知识库会持续学习人工判断。`,``,`## 9. 结尾页`,`输出：下一步需要确认的策略动作、内容证据、责任分工和复盘指标。`].join("\\n");download(`${p.title}_Gamma大纲.md`,text,"text/markdown");toast("Gamma 大纲已导出")};
 const exportReportButton=document.querySelector("#export-report");if(exportReportButton)exportReportButton.onclick=()=>{
  const a=analysis(),list=a.labels.filter(x=>x.priority>0).slice(0,10),sum=list.reduce((s,x)=>s+x.priority,0)||1,risks=a.labels.filter(x=>x.diagnosis==="优先修复").slice(0,3),assets=a.labels.filter(x=>x.diagnosis==="持续放大").slice(0,3);
@@ -1719,9 +1774,12 @@ const exportReportButton=document.querySelector("#export-report");if(exportRepor
  const report=[`# ${state.config.project}｜营销策略报告`,``,`版本：${currentEdition().label}`,`分析对象：${state.config.model}  ｜ 核心竞品：${state.config.competitor}`,session?`客户空间：${session.org} ｜ 账号：${session.email}`:"客户空间：未登录，本机临时模式",``,`## 数据结果`,`- 口碑健康 NSR：${(a.nsr*100).toFixed(1)}%`,`- 目标人群穿透 IPS：${(a.ips*100).toFixed(1)}%`,`- 购买意向指数：${a.intent.toFixed(2)}`,`- 购买阻力风险分：${Math.round(a.neg).toLocaleString()}`,``,`## 人工结论与建议`,...(manual.length?manual.map((x,i)=>`${i+1}. **${x.label}**\n   - 结论：${x.conclusion||"未填写"}\n   - 建议：${x.recommendation||"未填写"}\n   - 证据：${x.evidence||"未填写"}\n   - 平台：${x.platform||"未填写"}\n   - KPI：${x.kpi||"未填写"}`):["尚未填写人工结论。"]),``,`## 系统诊断参考`,...list.map((x,i)=>{const ac=actionFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}｜${x.diagnosis}**：本品负向 ${Math.round(x.on).toLocaleString()}，认知 Gap ${(x.gap*100).toFixed(1)}%；参考证据：${learned?.evidence||ac.evidence}；参考平台：${learned?.platform||ac.platform}；建议预算参考：${money(state.config.budget*x.priority/sum)}。`}),``,`## 参考 Know-how`,...list.slice(0,6).map((x,i)=>{const k=knowhowFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}**：${learned?.conclusion||k.why}\n   - 参考打法：${learned?.recommendation||k.message}\n   - 证据链：${learned?.evidence||k.proof}\n   - KPI：${learned?.kpi||k.kpi}`}),``,`## 30天排期参考`,...calendar.map(x=>`- **${x[0]}｜${x[1]}**：${x[2]}`),``,session?`> 数据结果由系统计算；结论和建议以人工填写内容为准；学习案例来自 ${session.org} 企业知识库。`:`> 数据结果由系统计算；结论和建议以人工填写内容为准；当前为本机临时学习模式。`].join("\n");
  download(`${state.config.project}_策略报告.md`,report,"text/markdown");toast("策略报告已导出");
 };
+function startAppDataLoads(){
+ loadAiStatus();
+ loadSalesMarquee();
+ loadFounderArchives();
+ loadSocialPluginStatus();
+ if(session){loadServerLearnings();loadWorkspace()}else renderWorkspace();
+}
 render();
-loadAiStatus();
-loadSalesMarquee();
-loadFounderArchives();
-loadSocialPluginStatus();
-if(session){loadServerLearnings();loadWorkspace()}else renderWorkspace();
+initCloudLoginGate().then(ok=>{if(ok)startAppDataLoads()});
