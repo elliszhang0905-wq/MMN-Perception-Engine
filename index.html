@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=20260628-content-distill-1">
-  <link rel="stylesheet" href="knowhow.css?v=20260628-content-distill-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.01">
+  <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -371,6 +371,7 @@
         <div><p class="eyebrow">MARKETING KNOW-HOW</p><h2>把数据诊断翻译成可执行打法</h2></div>
         <div class="legend"><i class="red"></i>先止血 <i class="amber"></i>再抢位 <i class="green"></i>后放大</div>
       </div>
+      <div class="notice knowhow-source-note" id="knowhow-model-source"></div>
       <div class="grid two">
         <article class="panel">
           <div class="panel-title"><div><span>作战判断</span><h2>本轮传播的核心命题</h2></div></div>
@@ -453,7 +454,8 @@
           <div class="panel-title"><div><span>人工输入</span><h2>本次结论与建议</h2></div><em>保存后成为本地学习案例</em></div>
           <form id="learning-form" class="learning-form">
             <div class="form-grid">
-              <div class="field"><label>分析车型</label><input name="model" readonly></div>
+              <div class="field"><label>分析品牌</label><select name="brand"></select></div>
+              <div class="field"><label>分析车型</label><select name="model"></select></div>
               <div class="field"><label>认知标签</label><select name="label"></select></div>
             </div>
             <div class="field"><label>你的结论</label><textarea name="conclusion" placeholder="例如：智己L6当前不是产品认知不足，而是质量/安全疑虑压制试驾转化。"></textarea></div>
@@ -464,10 +466,12 @@
               <div class="field"><label>KPI</label><input name="kpi" placeholder="负面占比下降 / 询价提升…"></div>
               <div class="field"><label>适用阶段</label><select name="stage"><option>上市期</option><option>口碑修复期</option><option>竞品对抗期</option><option>常态经营期</option></select></div>
             </div>
-            <div class="dialog-actions"><button type="submit" class="primary">保存并学习</button></div>
+            <div class="dialog-actions"><button type="button" class="ghost" id="learning-ai-generate">MMN生成结论草案</button><button type="submit" class="primary">保存并学习</button></div>
           </form>
         </article>
         <article class="panel">
+          <div class="panel-title"><div><span>MMN分析输出</span><h2>基于现有资产生成内容</h2></div><em id="learning-ai-status">等待选择车型</em></div>
+          <div id="learning-ai-output" class="qwen-result"></div>
           <div class="panel-title"><div><span>相似案例</span><h2>系统已学到什么</h2></div></div>
           <div id="similar-learnings" class="learning-list"></div>
         </article>
@@ -721,7 +725,7 @@
     </form>
   </dialog>
   <div id="toast"></div>
-  <script src="data_20260608.js?v=20260628-content-distill-1"></script>
-  <script src="app.js?v=20260628-content-distill-1"></script>
+  <script src="data_20260608.js?v=beta-1.01"></script>
+  <script src="app.js?v=beta-1.01"></script>
 </body>
 </html>

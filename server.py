@@ -28,6 +28,9 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
+APP_VERSION = "beta 1.01"
+APP_VERSION_CODE = "beta-1.01"
+APP_RELEASE_DATE = "2026-06-28"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -501,9 +504,7 @@ def infer_brand_from_model(model):
         ("E5", "奥迪"),
         ("奥迪", "奥迪"),
         ("Audi", "奥迪"),
-        ("iX3", "宝马"),
-        ("i3", "宝马"),
-        ("i5", "宝马"),
+        ("荣威", "荣威"),
         ("宝马", "宝马"),
         ("BMW", "宝马"),
         ("奔驰", "奔驰"),
@@ -523,13 +524,11 @@ def infer_brand_from_model(model):
         ("ZEEKR", "极氪"),
         ("Zeekr", "极氪"),
         ("Zeeker", "极氪"),
+        ("ZEEKER", "极氪"),
         ("极氪", "极氪"),
         ("009", "极氪"),
         ("001", "极氪"),
         ("007", "极氪"),
-        ("7X", "极氪"),
-        ("8X", "极氪"),
-        ("9X", "极氪"),
         ("MIX", "极氪"),
         ("智己", "智己"),
         ("小米", "小米汽车"),
@@ -580,7 +579,7 @@ def infer_brand_from_model(model):
     return "待人工确认"
 
 KNOWN_BRANDS = {
-    "沃尔沃", "阿维塔", "广汽埃安", "埃安", "奇瑞", "别克", "奥迪", "宝马", "奔驰", "本田", "东风本田", "广汽本田",
+    "沃尔沃", "阿维塔", "广汽埃安", "埃安", "奇瑞", "别克", "奥迪", "宝马", "奔驰", "本田", "东风本田", "广汽本田", "荣威",
     "智己", "小米汽车", "特斯拉", "蔚来", "乐道", "极氪", "理想", "问界", "比亚迪",
     "吉利", "吉利银河", "领克", "零跑", "小鹏", "广汽传祺", "腾势", "深蓝",
     "长安", "长安启源", "五菱", "宝骏", "丰田", "广汽丰田", "一汽丰田", "大众", "日产",
@@ -605,14 +604,40 @@ def corrected_brand_name(brand, model):
 def local_standard_model_identity(raw_name):
     raw = re.sub(r"\s+", " ", str(raw_name or "").strip())
     compact = re.sub(r"\s+", "", raw)
+    token = re.sub(r"[.\-_·]", "", compact).upper()
     if not raw:
         return None
-    zeekr = re.match(r"^(?:ZEEKR|Zeekr|Zeeker|极氪)\s*(001|007|009|7X|8X|9X|MIX|X)(.*)$", raw, re.I)
+    vw_id_era = re.match(r"^(?:大众|VOLKSWAGEN)?IDERA(8X|9X)$", token, re.I)
+    if vw_id_era:
+        family = f"大众ID.ERA {vw_id_era.group(1).upper()}"
+        return {
+            "brandName": "大众",
+            "normalizedName": family,
+            "modelFamily": family,
+            "energyType": "UNKNOWN",
+            "variantName": "",
+            "canonicalKey": "|".join(["大众", family, "UNKNOWN", ""])
+        }
+    tiguan = re.match(r"^(?:大众|VOLKSWAGEN)?途观L(PHEV|插电混动|插混|新能源)?(.*)$", compact, re.I)
+    if tiguan:
+        energy = "PHEV" if tiguan.group(1) else "UNKNOWN"
+        family = "大众途观L"
+        normalized = f"{family} PHEV" if energy == "PHEV" else family
+        return {
+            "brandName": "大众",
+            "normalizedName": normalized,
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": "",
+            "canonicalKey": "|".join(["大众", family, energy, ""])
+        }
+    zeekr = re.match(r"^(?:ZEEKR|Zeekr|Zeeker|ZEEKER|极氪)\s*(001|007|009|7X|8X|9X|MIX|X)(.*)$", raw, re.I)
     if not zeekr:
-        zeekr = re.match(r"^(001|007|009|7X|8X|9X)(.*)$", raw, re.I)
+        zeekr = re.match(r"^(001|007|009)(.*)$", raw, re.I)
     if zeekr:
         code = str(zeekr.group(1)).upper()
         suffix = re.sub(r"\s+", " ", str(zeekr.group(2) or "").strip())
+        suffix = "" if re.fullmatch(r"GT|GT版|ME版|WE版|YOU版", suffix, re.I) else suffix
         family = f"极氪{code}"
         energy = "PHEV" if re.search(r"PHEV|插混", raw, re.I) else "EREV" if re.search(r"增程|EREV", raw, re.I) else "HEV" if re.search(r"HEV|混动", raw, re.I) else "ICE" if re.search(r"燃油|ICE", raw, re.I) else "UNKNOWN"
         return {
@@ -622,6 +647,51 @@ def local_standard_model_identity(raw_name):
             "energyType": energy,
             "variantName": suffix,
             "canonicalKey": "|".join(["极氪", family, energy, suffix])
+        }
+    roewe = re.match(r"^荣威(i5|i6|D7|D5X|RX5|RX9|IMAX8)(.*)$", compact, re.I)
+    if roewe:
+        raw_code = str(roewe.group(1))
+        code = raw_code.lower() if re.match(r"^i[56]$", raw_code, re.I) else raw_code.upper()
+        suffix = str(roewe.group(2) or "").strip()
+        family = f"荣威{code}"
+        energy = "BEV" if re.search(r"EV|纯电|BEV", raw, re.I) else "PHEV" if re.search(r"DMH|插混|PHEV", raw, re.I) else "UNKNOWN"
+        return {
+            "brandName": "荣威",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": suffix,
+            "canonicalKey": "|".join(["荣威", family, energy, suffix])
+        }
+    bmw = re.match(r"^(?:宝马|BMW)\s*(i3|i5|iX1|iX3|X1|X3|3系|5系)(.*)$", raw, re.I)
+    if bmw:
+        raw_code = str(bmw.group(1))
+        code = raw_code.upper().replace("IX", "iX")
+        code = re.sub(r"^I([0-9])", r"i\1", code)
+        suffix = re.sub(r"\s+", " ", str(bmw.group(2) or "").strip())
+        family = f"宝马{code}"
+        energy = "BEV" if code.startswith("i") else "UNKNOWN"
+        return {
+            "brandName": "宝马",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": energy,
+            "variantName": suffix,
+            "canonicalKey": "|".join(["宝马", family, energy, suffix])
+        }
+    arcfox = re.match(r"^极狐(?:(阿尔法|α|Alpha|贝塔|β|Beta))?([ST]\d|考拉|森林版|V9)(.*)$", compact, re.I)
+    if arcfox:
+        series = "贝塔" if re.match(r"^(贝塔|β|Beta)$", str(arcfox.group(1) or ""), re.I) else "阿尔法" if arcfox.group(1) else ""
+        code = str(arcfox.group(2)).upper()
+        suffix = str(arcfox.group(3) or "").strip()
+        family = f"极狐{series}{code}"
+        return {
+            "brandName": "极狐",
+            "normalizedName": f"{family} {suffix}".strip(),
+            "modelFamily": family,
+            "energyType": "BEV",
+            "variantName": suffix,
+            "canonicalKey": "|".join(["极狐", family, "BEV", suffix])
         }
     im = re.match(r"^智己(L6|LS6|LS7|LS8|LS9)(.*)$", compact, re.I)
     if im:
@@ -692,6 +762,14 @@ def local_standard_model_identity(raw_name):
 
 def social_platform(value):
     return "xiaohongshu" if value in ("xiaohongshu", "xhs", "小红书") else "douyin"
+
+def creator_platform_from_text(value):
+    s = str(value or "").lower()
+    if "xiaohongshu" in s or "xhs" in s or "小红书" in s or "xhslink" in s:
+        return "xiaohongshu"
+    if "douyin" in s or "抖音" in s:
+        return "douyin"
+    return "douyin"
 
 def latest_social_export(platform):
     folder = SOCIAL_PLUGIN_EXPORT_DIRS[social_platform(platform)]
@@ -1841,6 +1919,7 @@ def model_identity_prompt(models):
             "你要把每个原始车型名归纳为：rawName, normalizedName, brandName, modelFamily, energyType, variantName, canonicalKey, confidence, reason。"
             "品牌名必须是汽车品牌，不是车型。很多中国汽车品牌使用“品牌名+数字/字母”命名车型，例如：阿维塔06的brandName必须是阿维塔，modelFamily/normalizedName必须是阿维塔06；沃尔沃EX90的brandName必须是沃尔沃，modelFamily/normalizedName必须是沃尔沃EX90；蔚来ET5T的brandName必须是蔚来，modelFamily/normalizedName必须是蔚来ET5T；ZEEKR 001、Zeekr 009、Zeeker 009、极氪009的brandName都必须是极氪，modelFamily统一为极氪001或极氪009。"
             "例如：艾力绅归属东风本田，奥德赛归属广汽本田，宝骏悦也归属宝骏，北京越野BJ30归属北京越野，奔腾小马归属奔腾，锋兰达/铂智归属广汽丰田，格瑞维亚归属一汽丰田，MINI COOPER/ACEMAN归属MINI，凡尔赛C5 X归属雪铁龙，上汽大通G50归属上汽大通。"
+            "车型名中的空格和大小写不能制造新车型：极狐贝塔S3、极狐 贝塔 S3、极狐 贝塔S3是同一台车，统一为极狐贝塔S3；极狐阿尔法T5、极狐 阿尔法 T5是同一台车，统一为极狐阿尔法T5。荣威i5/荣威 i5必须归属荣威；宝马i5/宝马 i5必须归属宝马；不要因为裸i5把荣威i5归到宝马。"
             "不要把阿维塔06、阿维塔07、艾瑞泽8、奥迪E5、宝马i3、沃尔沃EX90、蔚来ET5T、ZEEKR 001、ZEEKR 7X、Zeeker 009这类完整车型名写进brandName。"
             "energyType只能是：BEV、EREV、PHEV、HEV、ICE、UNKNOWN。"
             "注意：纯电、增程、插混/PHEV、燃油版本不能盲目排重；例如同一车型家族下不同能源版本要保留不同canonicalKey。"
@@ -1892,6 +1971,7 @@ def display_model_name_under_brand(brand, model):
         "奥迪": ["奥迪", "Audi"],
         "宝马": ["宝马", "BMW"],
         "奔驰": ["奔驰", "Mercedes-Benz", "Mercedes"],
+        "荣威": ["荣威", "Roewe", "ROEWE"],
         "蔚来": ["蔚来", "NIO"],
         "智己": ["智己"],
         "极氪": ["极氪", "ZEEKR", "Zeekr", "Zeeker"],
@@ -1902,6 +1982,7 @@ def display_model_name_under_brand(brand, model):
         "广汽埃安": ["广汽埃安", "埃安", "AION"],
         "广汽传祺": ["广汽传祺", "传祺"],
         "吉利银河": ["吉利银河", "银河"],
+        "极狐": ["极狐"],
     }
     out = m
     for alias in aliases.get(b, [b]):
@@ -1942,7 +2023,7 @@ def normalize_model_identity_records(records, edition="china", source="model_ide
                 "canonical_key": canonical,
                 "confidence": rec.get("confidence") or "low",
                 "source": source,
-                "qwen_checked": 1 if source == "qwen" else 0,
+                "qwen_checked": 1 if "qwen" in source else 0,
                 "qwen_reason": rec.get("reason") or ""
             }
             conn.execute("""
@@ -4095,13 +4176,72 @@ def scan_blogger_skill_imports(edition="china", limit=30):
     data.update({"imported": imported, "errors": errors})
     return data
 
+def distilled_creator_libraries(profiles, samples):
+    grouped = {}
+    for sample in samples:
+        name = sample.get("blogger_name") or ""
+        if not name:
+            continue
+        grouped.setdefault(name, []).append(sample)
+    libraries = {"douyin": [], "xiaohongshu": []}
+    for profile in profiles:
+        name = profile.get("blogger_name") or ""
+        if not name:
+            continue
+        person_samples = grouped.get(name, [])
+        platform = creator_platform_from_text(profile.get("platform") or " ".join([x.get("platform", "") for x in person_samples]))
+        sample_text = " ".join([
+            profile.get("vertical_domain") or "",
+            " ".join(profile.get("content_topics") or []),
+            " ".join(profile.get("terminology_system") or []),
+            " ".join(x.get("original_topic") or "" for x in person_samples[:12]),
+        ])
+        ctype = creator_type_from_text(sample_text)
+        categories = list(dict.fromkeys([
+            *creator_categories_from_text(sample_text),
+            *(profile.get("content_topics") or [])[:3],
+            profile.get("vertical_domain") or "",
+        ]))[:6]
+        strengths = list(dict.fromkeys([
+            *creator_strengths_from_text(sample_text, ctype),
+            *(profile.get("evaluation_framework") or [])[:3],
+        ]))[:6]
+        source_url = next((x.get("source_url") for x in person_samples if x.get("source_url")), "")
+        safe_name = re.sub(r"[^A-Za-z0-9_\u4e00-\u9fff]+", "_", name)[:48]
+        item = {
+            "id": f"distilled_{platform}_{safe_name}",
+            "name": name,
+            "type": ctype,
+            "city": "待核验",
+            "fans": 0,
+            "avgViews": 0,
+            "engagementRate": 0,
+            "costLevel": "待评估",
+            "categories": categories,
+            "strengths": strengths,
+            "fitStages": ["专业内容种草", "疑虑澄清", "Campaign候选"],
+            "risk": "蒸馏达人已进入平台达人库；合作前仍需复核账号授权、近期内容表现和商业可用性",
+            "summary": profile.get("professional_background") or "公开内容能力蒸馏",
+            "profileUrl": source_url,
+            "source": "blogger_skill_distill",
+            "sampleCount": len(person_samples),
+            "verticalDomain": profile.get("vertical_domain") or "",
+            "updatedAt": profile.get("updated_at") or now(),
+        }
+        item.update(creator_influence_tier(platform, 0))
+        libraries.setdefault(platform, []).append(item)
+    return libraries
+
 def blogger_skill_payload(edition="china", imported=0, result=None):
     with db() as conn:
+        source_count = conn.execute("select count(*) from blogger_skill_sources where edition=?", (edition,)).fetchone()[0]
+        sample_count = conn.execute("select count(*) from blogger_skill_samples where edition=?", (edition,)).fetchone()[0]
+        profile_count = conn.execute("select count(*) from blogger_skill_profiles where edition=?", (edition,)).fetchone()[0]
         source_rows = [rowdict(r) for r in conn.execute(
             "select * from blogger_skill_sources where edition=? order by ingest_time desc limit 80", (edition,)
         ).fetchall()]
         sample_rows = [rowdict(r) for r in conn.execute(
-            "select * from blogger_skill_samples where edition=? order by created_at desc limit 80", (edition,)
+            "select * from blogger_skill_samples where edition=? order by created_at desc limit 600", (edition,)
         ).fetchall()]
         profile_rows = [rowdict(r) for r in conn.execute(
             "select * from blogger_skill_profiles where edition=? order by updated_at desc", (edition,)
@@ -4134,11 +4274,12 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
     return {
         "ok": True,
         "imported": imported,
-        "stats": {"sources": len(source_rows), "samples": len(samples), "profiles": len(profiles), "ragChunks": len(knowledge)},
+        "stats": {"sources": source_count, "samples": sample_count, "profiles": profile_count, "ragChunks": len(knowledge)},
         "sources": source_rows,
         "samples": samples,
         "profiles": profiles,
         "knowledgeItems": knowledge,
+        "creatorLibraries": distilled_creator_libraries(profiles, samples),
         "result": result or {}
     }
 
@@ -4304,7 +4445,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "mode": "commercial-demo", "db": str(DB_PATH)})
+            self.send_json({
+                "ok": True,
+                "mode": "commercial-demo",
+                "version": APP_VERSION,
+                "versionCode": APP_VERSION_CODE,
+                "releaseDate": APP_RELEASE_DATE,
+                "db": str(DB_PATH)
+            })
             return
         if parsed.path == "/api/auth/config":
             auth_payload = self.current_auth()
@@ -4935,6 +5083,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 edition = edition_from(body.get("edition", "china"))
+                force_review = bool(body.get("forceReview") or body.get("force_review"))
                 raw_models = [str(x).strip() for x in (body.get("models") or []) if str(x).strip()]
                 raw_models = list(dict.fromkeys(raw_models))[:80]
                 if not raw_models:
@@ -4954,7 +5103,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception as exc:
                     errors["qwen"] = str(exc)
                     saved = []
-                if identity_needs_deepseek_review(saved) and deepseek_config()["configured"]:
+                if (force_review or identity_needs_deepseek_review(saved)) and deepseek_config()["configured"]:
                     try:
                         text = call_deepseek(model_identity_prompt(raw_models), temperature=.1, profile="fast", timeout=45)
                         parsed_items = parse_json_object(text)
@@ -5076,7 +5225,7 @@ if __name__ == "__main__":
     init_db()
     schedule_founder_weekly_crawl()
     with Server((APP_HOST, PORT), Handler) as server:
-        print(f"中国汽车营销引擎已启动：{PUBLIC_BASE_URL}")
+        print(f"中国汽车营销引擎 {APP_VERSION} 已启动：{PUBLIC_BASE_URL}")
         print("按 Ctrl+C 即可停止系统。")
         if AUTO_OPEN_BROWSER:
             Timer(0.7, lambda: webbrowser.open(PUBLIC_BASE_URL)).start()

@@ -1,6 +1,6 @@
 {
   "name": "china-auto-marketing-engine",
-  "version": "0.1.0",
+  "version": "1.0.1-beta",
   "private": true,
   "scripts": {
     "release:gate": "bash scripts/release_gate.sh",

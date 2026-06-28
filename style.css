@@ -202,6 +202,11 @@ button.permission-locked,.file-button.permission-locked{
 .bubble.asset{background:var(--green)}.bubble.risk{background:var(--red)}.bubble.chance{background:var(--amber)}
 .toolbar{justify-content:space-between;margin-bottom:15px}.file-input-hidden{position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}.search input{width:260px}
 .notice{padding:12px 15px;border-radius:9px;background:#eceff1;color:#53606a;font-size:12px;margin-bottom:15px}
+.knowhow-source-note{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#f6f7f7}
+.knowhow-source-note div{display:flex;align-items:center;gap:6px}
+.knowhow-source-note span{font-size:11px;color:#7b858d;font-weight:800}
+.knowhow-source-note b{font-size:13px;color:#171c21}
+.knowhow-source-note small{margin-left:auto;color:#68727a}
 .content-subnav{display:inline-flex;gap:6px;padding:5px;border:1px solid var(--line);border-radius:13px;background:#f5f6f6;margin:0 0 16px}
 .content-subnav[hidden]{display:none}
 .content-subnav button{border:0;background:transparent;color:#68727a;font-size:13px;font-weight:850;padding:9px 13px;border-radius:9px}
