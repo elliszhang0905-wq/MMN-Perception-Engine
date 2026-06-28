@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=20260627-cloud-login-auth-1">
-  <link rel="stylesheet" href="knowhow.css?v=20260627-cloud-login-auth-1">
+  <link rel="stylesheet" href="style.css?v=20260628-content-distill-1">
+  <link rel="stylesheet" href="knowhow.css?v=20260628-content-distill-1">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -46,7 +46,6 @@
       <button data-page="videos">内容资产中心</button>
       <button data-page="actions">行动与预算</button>
       <button data-page="knowhow">打法知识库</button>
-      <button data-page="founder">创始人蒸馏</button>
       <button data-page="strategykb">RAG知识库管理</button>
       <button data-page="learning">人工结论学习</button>
       <button data-page="architecture">版本架构</button>
@@ -265,6 +264,8 @@
         <button type="button" class="active" data-content-view="assets">内容看板</button>
         <button type="button" data-content-view="douyinCreators">抖音达人库</button>
         <button type="button" data-content-view="xhsCreators">小红书达人库</button>
+        <button type="button" data-content-view="founderDistill">创始人蒸馏</button>
+        <button type="button" data-content-view="bloggerDistill">博主/达人蒸馏</button>
       </div>
       <article class="panel social-plugin-panel" id="social-plugin-panel">
         <div class="panel-title"><div><span>CHROME PLUGIN BRIDGE</span><h2>抖音 / 小红书采集插件控制台</h2></div><em id="social-plugin-status">检测中</em></div>
@@ -353,6 +354,8 @@
           <div id="creator-planner-flow" class="creator-planner-flow"></div>
         </article>
       </div>
+      <div id="content-founder-distill-view" class="content-distill-view" hidden></div>
+      <div id="content-blogger-distill-view" class="content-distill-view" hidden></div>
     </section>
 
     <section class="page" id="actions">
@@ -472,6 +475,59 @@
       <article class="panel">
         <div class="panel-title"><div><span>学习记录</span><h2>你的历史结论库</h2></div><em>只保存在本机浏览器</em></div>
         <div id="learning-history" class="learning-history"></div>
+      </article>
+    </section>
+
+    <section class="page" id="bloggerskill">
+      <div class="section-intro">
+        <div><p class="eyebrow">BLOGGER SKILL DISTILLATION</p><h2>博主能力蒸馏 Skill</h2></div>
+        <div class="header-actions">
+          <button type="button" class="primary file-button" data-file-target="blogger-skill-file">导入样本数据</button><input class="file-input-hidden" id="blogger-skill-file" type="file" accept=".xlsx,.csv,.json,.txt,.md,.markdown">
+          <button class="ghost" id="scan-blogger-skill">扫描本地导入目录</button>
+        </div>
+      </div>
+      <div class="founder-hero panel">
+        <div>
+          <span>公开内容样本 / 专业判断框架 / RAG chunk / Agent Prompt</span>
+          <h2>把汽车垂直博主的专业判断能力，沉淀为 MMN 可调用的垂直 Skill</h2>
+          <p>第一阶段以“冷静的饺子”为底盘工程样本源，只归纳判断框架、术语体系、选题逻辑和传播表达，不复刻原文、不模仿个人身份。</p>
+        </div>
+        <div class="founder-status">
+          <b id="blogger-skill-rag-count">0</b>
+          <span>RAG chunks</span>
+          <small>根据外部公开内容归纳</small>
+        </div>
+      </div>
+      <div class="toolbar blogger-skill-toolbar">
+        <div class="field"><label>蒸馏博主 / 达人</label><select id="blogger-skill-person-select"></select></div>
+        <p class="notice">先选择蒸馏对象，再查看这个人的样本拆解、能力画像和 RAG 知识片段。</p>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>链接导入</span><h2>记录公开内容链接，正文可后续人工补全</h2></div><em>不绕过登录、验证码、反爬或付费墙</em></div>
+        <div class="rag-console">
+          <div class="search"><input id="blogger-skill-url" placeholder="粘贴小红书、知乎、抖音、懂车帝、汽车之家等公开内容链接"></div>
+          <button class="primary" id="import-blogger-skill-url">记录链接</button>
+        </div>
+      </article>
+      <div class="kpis data-kpis">
+        <article class="kpi"><span>来源样本</span><strong id="blogger-skill-source-count">—</strong><small>可追溯来源</small></article>
+        <article class="kpi"><span>内容拆解</span><strong id="blogger-skill-sample-count">—</strong><small>主题 / 车型 / 判断链</small></article>
+        <article class="kpi"><span>能力画像</span><strong id="blogger-skill-profile-count">—</strong><small>博主 × 垂直领域</small></article>
+        <article class="kpi"><span>垂直方向</span><strong>底盘</strong><small>第一阶段</small></article>
+      </div>
+      <div class="grid two">
+        <article class="panel">
+          <div class="panel-title"><div><span>冷静的饺子样本库</span><h2>样本内容拆解结果</h2></div><em id="blogger-skill-status">等待导入</em></div>
+          <div id="blogger-skill-samples" class="founder-archive-list"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><span>底盘工程蒸馏 Skill</span><h2>能力画像、标签体系与判断规则</h2></div><em>MMN内部能力</em></div>
+          <div id="blogger-skill-profile" class="founder-profile"></div>
+        </article>
+      </div>
+      <article class="panel">
+        <div class="panel-title"><div><span>底盘工程 RAG chunk</span><h2>可进入 MMN 策略模型的知识片段</h2></div><em>保留 source_url / author / ingest_time</em></div>
+        <div id="blogger-skill-rag-list" class="kb-list"></div>
       </article>
     </section>
 
@@ -665,7 +721,7 @@
     </form>
   </dialog>
   <div id="toast"></div>
-  <script src="data_20260608.js?v=20260627-cloud-login-auth-1"></script>
-  <script src="app.js?v=20260627-cloud-login-auth-1"></script>
+  <script src="data_20260608.js?v=20260628-content-distill-1"></script>
+  <script src="app.js?v=20260628-content-distill-1"></script>
 </body>
 </html>

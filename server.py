@@ -50,11 +50,12 @@ MMN_STRATEGY_MODEL = {
     "modules": ["NSR", "Emotion", "Attribute", "Identity", "Positioning", "Gap", "Action", "RAG知识库", "周报生成", "高管蒸馏", "车型传播分析"],
     "workflow": ["本品", "竞品", "用户情绪", "产品属性", "身份认同", "认知空位", "传播动作"],
     "router": {
-        "fast_strategy": {"primary": "qwen", "fallback": "deepseek", "label": "MMN快速策略"},
-        "complex_strategy": {"primary": "deepseek", "fallback": "qwen", "label": "MMN深度策略"},
-        "content_generation": {"primary": "qwen", "fallback": "deepseek", "label": "MMN内容生成模型"},
-        "quality_review": {"primary": "deepseek", "fallback": "qwen", "label": "MMN策略质检模型"},
-        "data_summary": {"primary": "qwen", "fallback": "deepseek", "label": "MMN数据归纳模型"}
+        "strategy_reasoning": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN策略推理模型"},
+        "content_delivery": {"primary": "qwen", "reviewer": "deepseek", "label": "MMN中文交付模型"},
+        "fact_explanation": {"primary": "rag", "reviewer": "qwen", "label": "MMN事实解释模型"},
+        "data_summary": {"primary": "qwen", "reviewer": "deepseek", "label": "MMN数据归纳模型"},
+        "fast_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN快速策略"},
+        "complex_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN深度策略"}
     }
 }
 DONGCHEDI_SALES_BASE = "https://www.dongchedi.com"
@@ -70,6 +71,12 @@ SOCIAL_PLUGIN_URLS = {
     "douyin": "https://www.douyin.com/search/%E6%B1%BD%E8%BD%A6%E8%AF%84%E6%B5%8B",
     "xiaohongshu": "https://www.xiaohongshu.com/search_result?keyword=%E6%B1%BD%E8%BD%A6%E8%AF%84%E6%B5%8B"
 }
+BLOGGER_SKILL_IMPORT_ROOT = Path(os.getenv("MMN_BLOGGER_SKILL_IMPORT_ROOT", str(ROOT / "imports" / "chassis_reviews"))).expanduser().resolve()
+BLOGGER_SKILL_TAGS = [
+    "滤震", "支撑", "侧倾", "转向手感", "车身收敛", "后桥跟随", "制动姿态", "NVH", "轮胎匹配",
+    "平台架构", "空气悬挂", "CDC", "后轮转向", "机械素质", "电控底盘", "高速稳定性", "低速舒适性",
+    "弯道表现", "麋鹿表现", "赛道表现"
+]
 NODE_CANDIDATES = [
     os.getenv("NODE_BINARY"),
     shutil.which("node"),
@@ -260,6 +267,152 @@ def init_db():
             error_json text not null default '[]',
             started_at text not null,
             finished_at text
+        );
+        create table if not exists blogger_skill_sources (
+            id text primary key,
+            edition text not null default 'china',
+            skill_name text not null,
+            vertical_domain text not null,
+            platform text,
+            author text,
+            source_url text,
+            source_file text,
+            title text,
+            publish_time text,
+            ingest_time text not null,
+            status text not null,
+            failure_reason text,
+            raw_payload_hash text not null,
+            raw_payload_json text not null default '{}',
+            unique(edition, raw_payload_hash)
+        );
+        create table if not exists blogger_skill_samples (
+            id text primary key,
+            source_id text not null,
+            edition text not null default 'china',
+            blogger_name text,
+            platform text,
+            vertical_domain text,
+            original_topic text,
+            brand text,
+            model text,
+            professional_dimensions_json text not null default '[]',
+            phenomenon_description text,
+            engineering_reasoning text,
+            subjective_judgment text,
+            objective_evidence text,
+            user_translation text,
+            marketing_expression text,
+            risk_expression text,
+            reusable_judgment_rule text,
+            rag_chunk text,
+            source_url text,
+            ingest_time text not null,
+            created_at text not null,
+            unique(edition, source_id)
+        );
+        create table if not exists blogger_skill_profiles (
+            id text primary key,
+            edition text not null default 'china',
+            blogger_name text not null,
+            platform text,
+            vertical_domain text not null,
+            professional_background text,
+            content_topics_json text not null default '[]',
+            evaluation_framework_json text not null default '[]',
+            terminology_system_json text not null default '[]',
+            judgment_rules_json text not null default '[]',
+            comparison_logic text,
+            evidence_preference text,
+            positive_judgment_patterns_json text not null default '[]',
+            negative_judgment_patterns_json text not null default '[]',
+            content_structure_patterns_json text not null default '[]',
+            marketing_translation_patterns_json text not null default '[]',
+            risk_expression_patterns_json text not null default '[]',
+            reusable_agent_instruction text,
+            agent_few_shot_json text not null default '[]',
+            script_template text,
+            report_template text,
+            updated_at text not null,
+            unique(edition, blogger_name, vertical_domain)
+        );
+        create table if not exists agent_runs (
+            id text primary key,
+            org_id text,
+            user_id text,
+            edition text not null default 'china',
+            task_type text not null,
+            brand text,
+            model text,
+            competitors_json text not null default '[]',
+            platforms_json text not null default '[]',
+            time_window_json text not null default '{}',
+            status text not null,
+            final_output_json text not null default '{}',
+            qa_summary_json text not null default '{}',
+            created_at text not null,
+            updated_at text not null
+        );
+        create table if not exists agent_steps (
+            id text primary key,
+            run_id text not null,
+            agent_name text not null,
+            step_order integer not null,
+            status text not null,
+            input_summary text,
+            output_json text not null default '{}',
+            confidence real,
+            error text,
+            started_at text not null,
+            completed_at text
+        );
+        create table if not exists agent_reviews (
+            id text primary key,
+            run_id text not null,
+            step_id text,
+            reviewer_name text not null,
+            verdict text not null,
+            severity text,
+            findings_json text not null default '[]',
+            evidence_json text not null default '[]',
+            retry_instruction text,
+            created_at text not null
+        );
+        create table if not exists model_router_decisions (
+            id text primary key,
+            edition text not null default 'china',
+            task_type text not null,
+            route_key text not null,
+            question text,
+            project_json text not null default '{}',
+            references_json text not null default '[]',
+            primary_provider text,
+            reviewer_provider text,
+            primary_output text,
+            reviewer_output text,
+            conflict_status text not null default 'aligned',
+            confidence real not null default 0.5,
+            human_status text not null default 'pending',
+            human_choice text,
+            human_final_text text,
+            knowledge_json text not null default '{}',
+            created_at text not null,
+            updated_at text not null
+        );
+        create table if not exists evidence_bundles (
+            id text primary key,
+            run_id text not null,
+            source_type text not null,
+            source_ref text not null,
+            platform text,
+            brand text,
+            model text,
+            competitor text,
+            published_at text,
+            claim text not null,
+            confidence real,
+            payload_json text not null default '{}',
+            created_at text not null
         );
         """)
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
@@ -1288,6 +1441,209 @@ def call_mmn_strategy_engine(question, project, references, mode="fast"):
     if not text:
         text = local_rag_strategy_answer(question, project, references)
     return text, used_model, errors, route
+
+def infer_mmn_task_type(question="", mode="fast", explicit=""):
+    text = str(question or "")
+    explicit = str(explicit or "").strip()
+    if explicit:
+        return explicit
+    fact_terms = ["参数", "销量", "价格", "售价", "配置", "上市时间", "发布时间", "交付", "尺寸", "续航", "电池", "功率", "扭矩"]
+    content_terms = ["短视频", "脚本", "PPT", "文案", "报告", "长文档", "周报", "发布会", "口播", "微博", "小红书"]
+    strategy_terms = ["策略", "竞品", "拆解", "压力测试", "反方", "逻辑", "打法", "营销", "怎么打", "规划"]
+    if any(x in text for x in fact_terms):
+        return "fact_explanation"
+    if any(x in text for x in content_terms):
+        return "content_delivery"
+    if mode == "deep" or any(x in text for x in strategy_terms):
+        return "strategy_reasoning"
+    return "data_summary"
+
+def route_for_task(task_type, mode="fast"):
+    if task_type == "strategy_reasoning":
+        return MMN_STRATEGY_MODEL["router"]["complex_strategy" if mode == "deep" else "strategy_reasoning"]
+    if task_type == "content_delivery":
+        return MMN_STRATEGY_MODEL["router"]["content_delivery"]
+    if task_type == "fact_explanation":
+        return MMN_STRATEGY_MODEL["router"]["fact_explanation"]
+    return MMN_STRATEGY_MODEL["router"]["data_summary"]
+
+def compact_reference_sources(references):
+    items = []
+    for ref in (references or [])[:8]:
+        items.append({
+            "title": ref.get("title") or "",
+            "source": ref.get("source") or "",
+            "url": ref.get("metadata", {}).get("source_url") or ref.get("url") or "",
+            "confidence": ref.get("metadata", {}).get("confidence") or ref.get("confidence") or "",
+            "reason": ref.get("reason") or ""
+        })
+    return items
+
+def model_task_prompt(question, project, references, task_type, role):
+    refs = compact_reference_sources(references)
+    if task_type == "fact_explanation":
+        system = "你是MMN事实解释助手。事实只能来自给定结构化数据、RAG引用或官方来源；不得把模型常识当事实裁判。引用不足时必须明确写“需人工复核”。"
+    elif task_type == "content_delivery":
+        system = "你是MMN中文业务交付助手。输出要符合汽车营销咨询语气，适合客户报告、PPT、长文档或短视频脚本。"
+    else:
+        system = "你是MMN策略推理助手。按本品、竞品、用户情绪、产品属性、身份认同、认知空位、传播动作的流程输出。"
+    if role == "reviewer":
+        system += " 你的任务是复核主分析：检查中文业务语境、逻辑漏洞、反方观点、事实边界和需人工复核项，不要重写整份方案。"
+    return [
+        {"role": "system", "content": system + MMN_OUTPUT_STYLE},
+        {"role": "user", "content": json.dumps({
+            "任务类型": task_type,
+            "角色": role,
+            "用户问题": question,
+            "当前项目": project or {},
+            "引用来源": refs,
+            "RAG召回资料": [
+                {"标题": x.get("title", ""), "内容": (x.get("body") or "")[:900], "来源": x.get("source", ""), "原因": x.get("reason", "")}
+                for x in (references or [])[:8]
+            ],
+            "输出要求": [
+                "先给明确结论",
+                "说明依据来自哪里",
+                "事实不足必须标记需人工复核",
+                "保留可执行动作"
+            ]
+        }, ensure_ascii=False)}
+    ]
+
+def call_provider(provider, messages, task_type, mode="fast", reviewer=False):
+    profile = "deep" if mode == "deep" or task_type == "strategy_reasoning" else "fast"
+    temperature = .18 if reviewer or task_type == "fact_explanation" else .28
+    if provider == "deepseek":
+        return call_deepseek(messages, temperature=temperature, profile=profile, timeout=120 if profile == "deep" else 70, max_tokens=1200)
+    if provider == "qwen":
+        return call_qwen(messages, temperature=temperature, profile=profile, timeout=120 if profile == "deep" else 70)
+    raise ValueError(f"不支持的模型路由：{provider}")
+
+def output_similarity(a, b):
+    def tokens(s):
+        return {x for x in re.split(r"[\s,，。；;、/｜|：:（）()]+", str(s or "")) if len(x) >= 2}
+    ta, tb = tokens(a), tokens(b)
+    if not ta or not tb:
+        return 0
+    return len(ta & tb) / max(1, len(ta | tb))
+
+def detect_router_conflict(primary_text, reviewer_text, task_type, references):
+    review = str(reviewer_text or "")
+    conflict_words = ["不同意", "存在漏洞", "不成立", "缺少依据", "需要复核", "需人工复核", "事实不足", "过度推断", "风险"]
+    similarity = output_similarity(primary_text, reviewer_text)
+    conflict = any(x in review for x in conflict_words) or similarity < .08
+    if task_type == "fact_explanation" and not references:
+        conflict = True
+    return {
+        "status": "needs_human_review" if conflict else "aligned",
+        "label": "需人工复核" if conflict else "双模型一致",
+        "confidence": .48 if conflict else min(.88, .62 + similarity),
+        "similarity": round(similarity, 3)
+    }
+
+def local_fact_explanation(question, project, references):
+    if not references:
+        return "事实判断：当前没有可追溯的结构化数据、RAG资料或官方来源支撑，必须标记为需人工复核。模型不能代替事实裁判。"
+    titles = "、".join([x.get("title", "") for x in references[:5] if x.get("title")]) or "已召回资料"
+    return f"事实解释：本次只基于已召回来源解释，不新增事实判断。可用依据包括：{titles}。正式交付前请核对原始来源、发布时间、统计口径和适用车型。"
+
+def save_router_decision(record):
+    item_id = record.get("id") or str(uuid.uuid4())
+    stamp = now()
+    with db() as conn:
+        conn.execute("""
+            insert into model_router_decisions
+            (id, edition, task_type, route_key, question, project_json, references_json, primary_provider, reviewer_provider,
+             primary_output, reviewer_output, conflict_status, confidence, human_status, human_choice, human_final_text,
+             knowledge_json, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(id) do update set
+              conflict_status=excluded.conflict_status,
+              confidence=excluded.confidence,
+              human_status=excluded.human_status,
+              human_choice=excluded.human_choice,
+              human_final_text=excluded.human_final_text,
+              knowledge_json=excluded.knowledge_json,
+              updated_at=excluded.updated_at
+        """, (
+            item_id, record.get("edition", "china"), record.get("task_type", ""), record.get("route_key", ""),
+            record.get("question", ""), json.dumps(record.get("project") or {}, ensure_ascii=False),
+            json.dumps(record.get("references") or [], ensure_ascii=False), record.get("primary_provider", ""),
+            record.get("reviewer_provider", ""), record.get("primary_output", ""), record.get("reviewer_output", ""),
+            record.get("conflict_status", "aligned"), float(record.get("confidence") or .5),
+            record.get("human_status", "pending"), record.get("human_choice", ""), record.get("human_final_text", ""),
+            json.dumps(record.get("knowledge") or {}, ensure_ascii=False), record.get("created_at") or stamp, stamp
+        ))
+    return item_id
+
+def run_mmn_task_router(question, project=None, references=None, mode="fast", task_type="", edition="china"):
+    project = project or {}
+    references = references or []
+    task_type = infer_mmn_task_type(question, mode, task_type)
+    route = route_for_task(task_type, mode)
+    primary = route.get("primary")
+    reviewer = route.get("reviewer")
+    errors = {}
+    if primary == "rag":
+        primary_text = local_fact_explanation(question, project, references)
+        used_primary = "MMN结构化数据/RAG"
+    else:
+        try:
+            primary_text = call_provider(primary, model_task_prompt(question, project, references, task_type, "primary"), task_type, mode)
+            used_primary = primary
+        except Exception as exc:
+            errors[primary] = str(exc)
+            primary_text = local_rag_strategy_answer(question, project, references) if task_type != "fact_explanation" else local_fact_explanation(question, project, references)
+            used_primary = "local-rag"
+    reviewer_text = ""
+    used_reviewer = reviewer or ""
+    if reviewer in {"qwen", "deepseek"}:
+        try:
+            review_prompt = model_task_prompt(question, {**project, "主分析输出": primary_text}, references, task_type, "reviewer")
+            reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
+        except Exception as exc:
+            errors[reviewer] = str(exc)
+            reviewer_text = "复核未完成：请人工检查事实依据、逻辑漏洞和表达风险。"
+            used_reviewer = "manual-required"
+    conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
+    final_text = "\n\n".join([
+        primary_text,
+        f"MMN复核结论：{reviewer_text}" if reviewer_text else "",
+        f"复核状态：{conflict['label']}"
+    ]).strip()
+    decision_id = save_router_decision({
+        "edition": edition,
+        "task_type": task_type,
+        "route_key": route.get("label", ""),
+        "question": question,
+        "project": project,
+        "references": compact_reference_sources(references),
+        "primary_provider": used_primary,
+        "reviewer_provider": used_reviewer,
+        "primary_output": primary_text,
+        "reviewer_output": reviewer_text,
+        "conflict_status": conflict["status"],
+        "confidence": conflict["confidence"],
+        "human_status": "pending" if conflict["status"] == "needs_human_review" else "not_required",
+        "knowledge": {"source": "mmn_task_router", "task_type": task_type, "status": conflict["status"]}
+    })
+    return {
+        "ok": True,
+        "id": decision_id,
+        "text": final_text,
+        "primaryText": primary_text,
+        "reviewText": reviewer_text,
+        "taskType": task_type,
+        "model": used_primary,
+        "reviewer": used_reviewer,
+        "mode": mode,
+        "modelLabel": route.get("label", "MMN多模型引擎"),
+        "route": route,
+        "conflict": conflict,
+        "references": references[:8],
+        "sourceTrace": compact_reference_sources(references),
+        "errors": errors
+    }
 
 def openai_config():
     api_key = env_value("OPENAI_API_KEY")
@@ -2854,6 +3210,311 @@ def local_rag_strategy_answer(question, project, references):
         "还缺什么数据：正式给客户前，需要补平台声量、达人质量、竞品正反向变化和转化线索。"
     ])
 
+def agent_source_ref(item):
+    metadata = item.get("metadata") or {}
+    return str(item.get("id") or metadata.get("doc_id") or item.get("source") or item.get("title") or "local")
+
+def build_evidence_bundle(references, project=None, run_id=""):
+    project = project or {}
+    evidence = []
+    for item in (references or [])[:12]:
+        metadata = item.get("metadata") or {}
+        source_type = "rag"
+        source = str(item.get("source") or "")
+        if source.startswith("http"):
+            source_type = "public_url"
+        elif source in {"vertical_rank_assets", "qwen_vertical_learning"} or metadata.get("module"):
+            source_type = "vertical_asset"
+        elif source == "founder_distillation":
+            source_type = "founder_archive"
+        claim = item.get("reason") or item.get("title") or item.get("body", "")[:80] or "RAG召回依据"
+        evidence.append({
+            "id": stable_id("evidence", run_id, agent_source_ref(item), claim),
+            "source_type": source_type,
+            "source_ref": agent_source_ref(item),
+            "platform": metadata.get("platform") or item.get("platform") or "",
+            "brand": metadata.get("brand") or project.get("brand") or "",
+            "model": metadata.get("entity") or project.get("model") or "",
+            "competitor": metadata.get("competitor") or "",
+            "published_at": metadata.get("published_at") or metadata.get("period") or item.get("createdAt") or "",
+            "claim": str(claim)[:280],
+            "confidence": min(0.95, max(0.35, (float(item.get("score") or 45) / 100))),
+            "payload": item
+        })
+    return evidence
+
+def build_signal_summary(signal):
+    signal = signal or {}
+    diagnostics = signal.get("diagnostics") or []
+    metrics = signal.get("metrics") or {}
+    return {
+        "metrics": metrics,
+        "diagnostics": diagnostics[:10],
+        "diagnostic_count": len(diagnostics),
+        "top_risks": [x for x in diagnostics if x.get("diagnosis") == "优先修复"][:3],
+        "top_assets": [x for x in diagnostics if x.get("diagnosis") == "持续放大"][:3]
+    }
+
+def review_agent_strategy(text, evidence, signal_summary, question):
+    findings = []
+    if not evidence:
+        findings.append({
+            "severity": "high",
+            "category": "evidence",
+            "message": "本次策略没有绑定任何RAG或数据证据，不能作为高置信结论交付。",
+            "fix": "补充RAG材料、垂媒资产或人工学习案例后重跑。"
+        })
+    if not signal_summary.get("diagnostic_count"):
+        findings.append({
+            "severity": "medium",
+            "category": "signal",
+            "message": "本次策略没有携带NSR/Emotion/Gap诊断摘要，行动优先级依据较弱。",
+            "fix": "从当前项目仪表盘传入诊断排序或先完成数据导入。"
+        })
+    if re.search(r"高热度|高声量|爆款|全网", text or "") and not any(x.get("platform") or str(x.get("published_at") or "").strip() for x in evidence):
+        findings.append({
+            "severity": "medium",
+            "category": "claim",
+            "message": "策略中出现热度/声量类表达，但证据缺少平台或时间标记。",
+            "fix": "补充平台、日期、公开可检索依据，或改写为低置信假设。"
+        })
+    if re.search(r"第一|唯一|绝对|100%", text or ""):
+        findings.append({
+            "severity": "medium",
+            "category": "compliance",
+            "message": "策略中可能存在绝对化表达，正式对外前需要人工复核。",
+            "fix": "改为可验证、可限定范围的表达。"
+        })
+    if not str(question or "").strip():
+        findings.append({
+            "severity": "high",
+            "category": "input",
+            "message": "缺少策略问题，无法判断输出是否回答了任务。",
+            "fix": "补充明确问题后重跑。"
+        })
+    has_high = any(x["severity"] == "high" for x in findings)
+    has_medium = any(x["severity"] == "medium" for x in findings)
+    verdict = "fail" if has_high else "needs_review" if has_medium else "pass"
+    return {
+        "reviewer": "Evidence QA",
+        "verdict": verdict,
+        "severity": "high" if has_high else "medium" if has_medium else "info",
+        "findings": findings or [{
+            "severity": "info",
+            "category": "qa",
+            "message": "Evidence QA通过：策略有可追溯依据，未发现高风险证据缺口。",
+            "fix": ""
+        }],
+        "evidence_count": len(evidence),
+        "diagnostic_count": signal_summary.get("diagnostic_count", 0)
+    }
+
+def save_agent_run_record(run, steps, reviews, evidence):
+    with db() as conn:
+        conn.execute(
+            """insert into agent_runs
+            (id, org_id, user_id, edition, task_type, brand, model, competitors_json, platforms_json,
+             time_window_json, status, final_output_json, qa_summary_json, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run["id"], run.get("org_id", ""), run.get("user_id", ""), run.get("edition", "china"),
+                run.get("task_type", "strategy"), run.get("brand", ""), run.get("model", ""),
+                json.dumps(run.get("competitors", []), ensure_ascii=False),
+                json.dumps(run.get("platforms", []), ensure_ascii=False),
+                json.dumps(run.get("time_window", {}), ensure_ascii=False),
+                run.get("status", "completed"),
+                json.dumps(run.get("final_output", {}), ensure_ascii=False),
+                json.dumps(run.get("qa_summary", {}), ensure_ascii=False),
+                run.get("created_at") or now(), run.get("updated_at") or now()
+            )
+        )
+        for step in steps:
+            conn.execute(
+                """insert into agent_steps
+                (id, run_id, agent_name, step_order, status, input_summary, output_json, confidence, error, started_at, completed_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    step["id"], run["id"], step["agent_name"], step["step_order"], step["status"],
+                    step.get("input_summary", ""), json.dumps(step.get("output", {}), ensure_ascii=False),
+                    step.get("confidence"), step.get("error", ""), step.get("started_at") or run["created_at"],
+                    step.get("completed_at") or run["updated_at"]
+                )
+            )
+        for item in evidence:
+            conn.execute(
+                """insert into evidence_bundles
+                (id, run_id, source_type, source_ref, platform, brand, model, competitor, published_at,
+                 claim, confidence, payload_json, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    item["id"], run["id"], item["source_type"], item["source_ref"], item.get("platform", ""),
+                    item.get("brand", ""), item.get("model", ""), item.get("competitor", ""), item.get("published_at", ""),
+                    item.get("claim", ""), item.get("confidence"), json.dumps(item.get("payload", {}), ensure_ascii=False),
+                    run["created_at"]
+                )
+            )
+        for review in reviews:
+            conn.execute(
+                """insert into agent_reviews
+                (id, run_id, step_id, reviewer_name, verdict, severity, findings_json, evidence_json, retry_instruction, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    review["id"], run["id"], review.get("step_id", ""), review["reviewer_name"], review["verdict"],
+                    review.get("severity", ""), json.dumps(review.get("findings", []), ensure_ascii=False),
+                    json.dumps(review.get("evidence", []), ensure_ascii=False), review.get("retry_instruction", ""),
+                    review.get("created_at") or run["updated_at"]
+                )
+            )
+
+def agent_run_payload(run_id):
+    with db() as conn:
+        run = conn.execute("select * from agent_runs where id=?", (run_id,)).fetchone()
+        if not run:
+            return None
+        steps = [rowdict(r) for r in conn.execute("select * from agent_steps where run_id=? order by step_order", (run_id,)).fetchall()]
+        reviews = [rowdict(r) for r in conn.execute("select * from agent_reviews where run_id=? order by created_at", (run_id,)).fetchall()]
+        evidence = [rowdict(r) for r in conn.execute("select * from evidence_bundles where run_id=? order by confidence desc", (run_id,)).fetchall()]
+    out = rowdict(run)
+    for key in ["competitors_json", "platforms_json", "time_window_json", "final_output_json", "qa_summary_json"]:
+        out[key.replace("_json", "")] = json.loads(out.pop(key) or ("[]" if key.endswith("s_json") else "{}"))
+    for step in steps:
+        step["output"] = json.loads(step.pop("output_json") or "{}")
+    for review in reviews:
+        review["findings"] = json.loads(review.pop("findings_json") or "[]")
+        review["evidence"] = json.loads(review.pop("evidence_json") or "[]")
+    for item in evidence:
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+    out.update({"steps": steps, "reviews": reviews, "evidence": evidence})
+    return out
+
+def run_mmn_marketing_agent(body):
+    started = now()
+    run_id = str(uuid.uuid4())
+    project = body.get("project") or {}
+    question = str(body.get("question") or "").strip()
+    references = body.get("references") or []
+    mode = "deep" if body.get("mode") == "deep" else "fast"
+    edition = edition_from(body.get("edition") or project.get("edition") or "china")
+    competitors = body.get("competitors")
+    if competitors is None:
+        competitors = [x.strip() for x in str(project.get("competitor") or "").split("/") if x.strip()]
+    platforms = body.get("platforms") or []
+    signal_summary = build_signal_summary(body.get("signal") or {})
+    evidence = build_evidence_bundle(references, project=project, run_id=run_id)
+    routed = run_mmn_task_router(
+        question,
+        project=project,
+        references=references,
+        mode=mode,
+        task_type=body.get("task_type") or body.get("taskType") or "",
+        edition=edition
+    )
+    text = routed["text"]
+    used_model = routed["model"]
+    errors = routed["errors"]
+    route = routed["route"]
+    qa = review_agent_strategy(text, evidence, signal_summary, question)
+    completed = now()
+    final_output = {
+        "text": text,
+        "model": used_model,
+        "mode": mode,
+        "modelLabel": route["label"],
+        "references": references[:8],
+        "errors": errors,
+        "signal": signal_summary,
+        "routerDecision": routed
+    }
+    status = "completed" if qa["verdict"] == "pass" else "needs_review" if qa["verdict"] == "needs_review" else "degraded"
+    steps = [
+        {
+            "id": str(uuid.uuid4()),
+            "agent_name": "Intake Agent",
+            "step_order": 1,
+            "status": "pass",
+            "input_summary": question[:180],
+            "output": {"task_type": "strategy", "edition": edition, "project": project, "mode": mode},
+            "confidence": 0.9,
+            "started_at": started,
+            "completed_at": completed
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "agent_name": "Evidence Retrieval Agent",
+            "step_order": 2,
+            "status": "pass" if evidence else "degraded",
+            "input_summary": f"references={len(references)}",
+            "output": {"evidence_count": len(evidence), "top_claims": [x["claim"] for x in evidence[:5]]},
+            "confidence": 0.85 if evidence else 0.35,
+            "started_at": started,
+            "completed_at": completed
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "agent_name": "Signal Analyst Agent",
+            "step_order": 3,
+            "status": "pass" if signal_summary.get("diagnostic_count") else "degraded",
+            "input_summary": f"diagnostics={signal_summary.get('diagnostic_count', 0)}",
+            "output": signal_summary,
+            "confidence": 0.82 if signal_summary.get("diagnostic_count") else 0.4,
+            "started_at": started,
+            "completed_at": completed
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "agent_name": "Strategy Generator Agent",
+            "step_order": 4,
+            "status": "pass" if text else "fail",
+            "input_summary": f"mode={mode}, model={project.get('model', '')}",
+            "output": {"model": used_model, "reviewer": routed.get("reviewer"), "route": route, "task_type": routed.get("taskType"), "conflict": routed.get("conflict"), "text_preview": text[:260], "errors": errors},
+            "confidence": routed.get("conflict", {}).get("confidence", 0.55),
+            "started_at": started,
+            "completed_at": completed
+        }
+    ]
+    qa_step = steps[-1]["id"]
+    reviews = [{
+        "id": str(uuid.uuid4()),
+        "step_id": qa_step,
+        "reviewer_name": qa["reviewer"],
+        "verdict": qa["verdict"],
+        "severity": qa["severity"],
+        "findings": qa["findings"],
+        "evidence": [{"source_ref": x["source_ref"], "claim": x["claim"], "confidence": x["confidence"]} for x in evidence[:8]],
+        "retry_instruction": "补充证据后重跑" if qa["verdict"] == "fail" else "",
+        "created_at": completed
+    }]
+    run = {
+        "id": run_id,
+        "org_id": body.get("org_id") or "",
+        "user_id": body.get("user_id") or "",
+        "edition": edition,
+        "task_type": "strategy",
+        "brand": project.get("brand", ""),
+        "model": project.get("model", ""),
+        "competitors": competitors,
+        "platforms": platforms,
+        "time_window": body.get("time_window") or {},
+        "status": status,
+        "final_output": final_output,
+        "qa_summary": qa,
+        "created_at": started,
+        "updated_at": completed
+    }
+    save_agent_run_record(run, steps, reviews, evidence)
+    payload = agent_run_payload(run_id)
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "status": status,
+        **final_output,
+        "agentRun": payload,
+        "qa": qa,
+        "evidence": evidence,
+        "qwen": qwen_config(mode),
+        "deepseek": deepseek_config(mode)
+    }
+
 def save_vertical_ai_learning(context, summary_text):
     platform = context.get("platform") or ""
     model = context.get("model") or ""
@@ -3028,6 +3689,458 @@ def bundled_rag_package():
     if not path.exists():
         raise ValueError("未找到内置MMN RAG训练包。")
     return parse_rag_file(path.read_bytes(), path.name)
+
+def decode_text_data(data):
+    for enc in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return data.decode(enc)
+        except Exception:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+def normalized_key(text):
+    return re.sub(r"[\s_·:：｜|/（）()【】\\-]+", "", str(text or "").strip().lower())
+
+def generic_header_index(headers, aliases):
+    normalized = [normalized_key(h) for h in headers]
+    for alias in aliases:
+        key = normalized_key(alias)
+        for i, value in enumerate(normalized):
+            if value == key or key in value or value in key and len(value) >= 2:
+                return i
+    return None
+
+def generic_rows_from_file(data, filename):
+    lower = (filename or "").lower()
+    if lower.endswith(".xlsx"):
+        records = []
+        for sheet, cells in read_xlsx_cells(data).items():
+            rows = sheet_rows(cells)
+            if not rows:
+                continue
+            hidx = find_header(rows)
+            headers = [str(x or "").strip() for x in rows[hidx]]
+            for row in rows[hidx + 1:]:
+                if not any(str(x or "").strip() for x in row):
+                    continue
+                records.append({"_sheet": sheet, **{headers[i] or f"col_{i+1}": row[i] if i < len(row) else "" for i in range(len(headers))}})
+        return records
+    if lower.endswith(".csv"):
+        return list(csv.DictReader(io.StringIO(decode_text_data(data))))
+    if lower.endswith(".json"):
+        obj = json.loads(decode_text_data(data))
+        if isinstance(obj, list):
+            return obj
+        return obj.get("items") or obj.get("records") or [obj]
+    text = decode_text_data(data)
+    return [{"title": Path(filename or "文本样本").stem, "content": text}]
+
+def field_value(row, aliases, default=""):
+    if not isinstance(row, dict):
+        return default
+    idx = generic_header_index(list(row.keys()), aliases)
+    if idx is None:
+        return default
+    key = list(row.keys())[idx]
+    value = row.get(key)
+    if value is None:
+        return default
+    return str(value).strip()
+
+def infer_blogger_platform(row, filename):
+    hay = " ".join(str(x or "") for x in [filename, row.get("source_url"), row.get("url"), row.get("笔记链接"), row.get("平台"), row.get("source_platform")])
+    return infer_platform(hay) or field_value(row, ["平台", "来源平台", "source_platform", "platform"], "公开内容")
+
+def infer_skill_domain(text):
+    if re.search(r"底盘|悬架|滤震|支撑|侧倾|转向|后桥|制动|NVH|轮胎|CDC|空气悬挂|麋鹿|赛道", text, re.I):
+        return "底盘"
+    if re.search(r"三电|电池|电机|电控|续航|补能|快充", text, re.I):
+        return "三电"
+    if re.search(r"智驾|辅助驾驶|NOA|自动驾驶|激光雷达", text, re.I):
+        return "智驾"
+    if re.search(r"座舱|车机|屏幕|语音|交互", text, re.I):
+        return "座舱"
+    return "汽车垂直内容"
+
+def extract_chassis_tags(text):
+    patterns = {
+        "滤震": r"滤震|隔振|减振|避震|过坎|烂路|井盖|冲击",
+        "支撑": r"支撑|侧向支撑|抗侧倾",
+        "侧倾": r"侧倾|侧翻感|摇晃",
+        "转向手感": r"转向|方向盘|手感|中位|回正|指向",
+        "车身收敛": r"收敛|车身运动|俯仰|抛跳|余震",
+        "后桥跟随": r"后桥|后轴|跟随|尾部",
+        "制动姿态": r"制动|刹车|点头",
+        "NVH": r"NVH|路噪|风噪|胎噪|静谧|共振",
+        "轮胎匹配": r"轮胎|胎宽|胎壁|米其林|倍耐力|固特异|马牌",
+        "平台架构": r"平台|架构|白车身|轴距|前后配重",
+        "空气悬挂": r"空簧|空气悬挂",
+        "CDC": r"\bCDC\b|连续阻尼",
+        "后轮转向": r"后轮转向|后轮随动",
+        "机械素质": r"机械素质|机械结构|硬件基础",
+        "电控底盘": r"电控底盘|魔毯|主动悬架|线控",
+        "高速稳定性": r"高速|稳定性|并线|巡航",
+        "低速舒适性": r"低速|城市|舒适",
+        "弯道表现": r"弯道|山路|劈弯",
+        "麋鹿表现": r"麋鹿",
+        "赛道表现": r"赛道|圈速"
+    }
+    return [tag for tag, pattern in patterns.items() if re.search(pattern, text or "", re.I)] or ["底盘综合评价"]
+
+def excerpt_sentences(text, pattern="", limit=180):
+    sentences = re.split(r"(?<=[。！？!?；;])", re.sub(r"\s+", " ", str(text or "")).strip())
+    if pattern:
+        picked = [s.strip() for s in sentences if re.search(pattern, s, re.I)]
+    else:
+        picked = [s.strip() for s in sentences if len(s.strip()) >= 8]
+    return " ".join(picked[:2])[:limit] or str(text or "")[:limit]
+
+def infer_sample_model(title, content):
+    text = f"{title} {content}"
+    model = infer_model(text)
+    if model:
+        return model
+    m = re.search(r"(?:评测|体验|拆解|分析|聊聊|——|-|：|:)\s*([A-Za-z一-龥0-9 ]{2,24})(?:的|底盘|悬架|试驾|，|,|。|$)", text)
+    if m:
+        candidate = re.sub(r"^(一下|这台|全新|新款|聊聊)", "", m.group(1)).strip()
+        if candidate and not re.search(r"底盘|悬架|工程师|评测|内容", candidate):
+            return candidate[:24]
+    return ""
+
+def normalize_blogger_source(row, filename, file_digest, edition="china"):
+    title = field_value(row, ["笔记标题", "标题", "视频标题", "作品标题", "内容标题", "title"], Path(filename).stem)
+    content = field_value(row, ["笔记内容", "正文", "内容", "文案", "描述", "text", "content", "desc"], "")
+    source_url = field_value(row, ["笔记链接", "内容链接", "链接", "source_url", "url", "URL"], "")
+    author = field_value(row, ["博主昵称", "作者", "账号名", "博主", "达人", "author", "source_account_name"], "")
+    publish_time = field_value(row, ["发布时间", "发布日期", "publish_time", "published_at", "date"], "")
+    content_id = field_value(row, ["笔记ID", "内容ID", "作品ID", "id", "content_id"], "")
+    platform = infer_blogger_platform({**row, "source_url": source_url}, filename)
+    text = f"{title}\n{content}"
+    vertical_domain = infer_skill_domain(text)
+    digest = stable_id("blogger-skill", edition, source_url, title, author, publish_time, content_id, file_digest)
+    return {
+        "id": digest,
+        "edition": edition,
+        "skill_name": "底盘工程蒸馏 Skill" if vertical_domain == "底盘" else f"{vertical_domain}蒸馏 Skill",
+        "vertical_domain": vertical_domain,
+        "platform": platform,
+        "author": author or "待确认博主",
+        "source_url": source_url or f"local://blogger-skill/{quote(filename)}/{digest}",
+        "source_file": filename,
+        "title": title,
+        "content": content,
+        "publish_time": publish_time,
+        "content_id": content_id,
+        "ingest_time": now(),
+        "status": "fetched" if content else "manual_required",
+        "raw_payload_hash": digest,
+        "raw_payload": row
+    }
+
+def distill_blogger_sample(source):
+    title = source.get("title") or "未命名内容"
+    content = source.get("content") or ""
+    text = f"{title}\n{content}"
+    tags = extract_chassis_tags(text) if source.get("vertical_domain") == "底盘" else [source.get("vertical_domain") or "汽车垂直内容"]
+    model = infer_sample_model(title, content)
+    brand = infer_brand_from_model(model) if model else ""
+    phenomenon = excerpt_sentences(text, r"感觉|表现|问题|优势|短板|现象|体验|明显|不够|很好|一般", 190)
+    reasoning = excerpt_sentences(text, r"因为|原因|可能|来自|取决于|结构|调校|悬架|轮胎|平台|电控", 190)
+    evidence = excerpt_sentences(text, r"数据|实测|对比|视频|试驾|路面|弯道|高速|麋鹿|赛道|制动", 160)
+    judgment = excerpt_sentences(text, r"好|强|弱|差|优秀|一般|不够|建议|值得|不适合|风险", 180)
+    user_translation = f"把{model or '这台车'}的{tags[0]}问题翻译成用户体感：坐起来、开起来是否稳定、舒服、可信。"
+    marketing_expression = f"可传播表达：用公开专业内容中的{tags[0]}判断，转译成用户能感知的试驾场景和对比证据。"
+    risk_expression = "风险表达：不得把外部评价包装成MMN原创结论；不得完整复刻原文；正式报告需保留来源。"
+    rule = f"判断规则：讨论{tags[0]}时，先描述现象，再追问工程原因，最后翻译成用户体感和营销证据。"
+    rag_chunk = (
+        f"根据外部公开内容归纳，{model or '相关车型'}在{source.get('vertical_domain')}维度涉及{', '.join(tags[:5])}。"
+        f"核心判断：{judgment or phenomenon or '需要结合原文人工复核'}。工程原因推测：{reasoning or '待补充结构、调校和实测证据'}。"
+        f"用户体感翻译：{user_translation} 可传播表达：{marketing_expression} 风险表达：{risk_expression}"
+    )[:520]
+    return {
+        "id": stable_id("blogger-sample", source["edition"], source["id"]),
+        "source_id": source["id"],
+        "edition": source["edition"],
+        "blogger_name": source.get("author") or "待确认博主",
+        "platform": source.get("platform"),
+        "vertical_domain": source.get("vertical_domain"),
+        "original_topic": title,
+        "brand": brand,
+        "model": model,
+        "professional_dimensions": tags,
+        "phenomenon_description": phenomenon,
+        "engineering_reasoning": reasoning,
+        "subjective_judgment": judgment,
+        "objective_evidence": evidence,
+        "user_translation": user_translation,
+        "marketing_expression": marketing_expression,
+        "risk_expression": risk_expression,
+        "reusable_judgment_rule": rule,
+        "rag_chunk": rag_chunk,
+        "source_url": source.get("source_url"),
+        "ingest_time": source.get("ingest_time"),
+        "created_at": now()
+    }
+
+def blogger_skill_profile_from_samples(samples, blogger_name="冷静的饺子", edition="china", vertical_domain="底盘"):
+    relevant = [s for s in samples if (s.get("blogger_name") or blogger_name) == blogger_name or blogger_name == "冷静的饺子"]
+    tags = sorted({t for s in relevant for t in (s.get("professional_dimensions") or [])}) or BLOGGER_SKILL_TAGS
+    topics = [s.get("original_topic") for s in relevant if s.get("original_topic")][:18]
+    rules = sorted({s.get("reusable_judgment_rule") for s in relevant if s.get("reusable_judgment_rule")})
+    return {
+        "id": stable_id("blogger-profile", edition, blogger_name, vertical_domain),
+        "edition": edition,
+        "blogger_name": blogger_name,
+        "platform": "小红书 / 公开垂直内容",
+        "vertical_domain": vertical_domain,
+        "professional_background": "底盘工程方向公开内容样本源；MMN仅蒸馏专业判断框架，不复刻个人口吻。",
+        "content_topics": topics,
+        "evaluation_framework": ["现象描述", "工程原因推测", "主观判断", "客观证据", "用户感知翻译", "营销可用表达", "风险表达"],
+        "terminology_system": tags,
+        "judgment_rules": rules[:20] or ["先描述车辆动态现象，再拆解悬架/轮胎/电控/平台原因，最后翻译为用户可感知价值。"],
+        "comparison_logic": "同级车型对比时优先比较体感差异、结构差异、调校取向和可验证路况，不只比较配置表。",
+        "evidence_preference": "偏好试驾场景、路况描述、结构参数、轮胎/悬架信息、横向对比和可复验体感证据。",
+        "positive_judgment_patterns": ["稳定、收敛、支撑足、滤震干净、转向可信、后桥跟随自然"],
+        "negative_judgment_patterns": ["余震多、支撑弱、侧倾大、转向虚、制动点头明显、NVH暴露"],
+        "content_structure_patterns": ["先抛用户可感知问题", "再讲工程结构或调校逻辑", "给车型对比", "最后给购买或传播建议"],
+        "marketing_translation_patterns": ["把专业术语变成乘坐舒适、驾驶信心、家庭安心、长途不累、试驾可验证"],
+        "risk_expression_patterns": ["避免绝对化攻击竞品", "避免替外部作者下结论", "避免把主观体感包装成实验事实"],
+        "reusable_agent_instruction": (
+            "你是MMN底盘工程蒸馏Skill。基于公开专业内容样本归纳，不模仿博主个人身份。"
+            "输出必须按：车型对象、底盘维度、现象、工程原因推测、用户体感翻译、营销可用表达、风险提示。"
+        ),
+        "agent_few_shot": [
+            {"input": "某车滤震被质疑", "output": "先区分低速小震动、连续起伏和大冲击，再看悬架形式、阻尼调校、轮胎匹配，最后转译成用户是否觉得颠、晃、稳。"}
+        ],
+        "script_template": "短视频脚本：开头抛体感问题 → 10秒讲现象 → 20秒讲工程原因 → 15秒讲同级对比 → 结尾给试驾验证点。",
+        "report_template": "客户报告：车型结论 / 底盘维度 / 证据依据 / 用户感知 / 传播建议 / 风险边界。",
+        "updated_at": now()
+    }
+
+def parse_json_object(text):
+    raw = str(text or "").strip()
+    raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if m:
+        raw = m.group(0)
+    return json.loads(raw)
+
+def blogger_skill_model_distill(profile, samples):
+    sample_pack = [{
+        "title": s.get("original_topic"),
+        "model": s.get("model"),
+        "dimensions": s.get("professional_dimensions"),
+        "phenomenon": s.get("phenomenon_description"),
+        "reasoning": s.get("engineering_reasoning"),
+        "judgment": s.get("subjective_judgment")
+    } for s in samples[:12]]
+    errors = {}
+    qwen_result = {}
+    deepseek_review = ""
+    try:
+        qwen_result = parse_json_object(call_qwen([
+            {"role": "system", "content": (
+                "你是MMN博主能力蒸馏Skill的主控执行模型。只返回JSON，不要Markdown。"
+                "任务不是复刻博主原文或模仿个人口吻，而是把公开内容样本归纳为MMN可调用的专业能力。"
+                "返回字段：content_topics, evaluation_framework, terminology_system, judgment_rules, "
+                "comparison_logic, evidence_preference, positive_judgment_patterns, negative_judgment_patterns, "
+                "content_structure_patterns, marketing_translation_patterns, risk_expression_patterns, "
+                "reusable_agent_instruction, script_template, report_template。"
+                "语言必须是MMN汽车营销咨询语气，清晰、专业、可交付。"
+            )},
+            {"role": "user", "content": json.dumps({"profile": profile, "samples": sample_pack}, ensure_ascii=False)}
+        ], temperature=.2, profile="fast", timeout=75))
+    except Exception as exc:
+        errors["qwen"] = str(exc)
+    if qwen_result:
+        for key in [
+            "content_topics", "evaluation_framework", "terminology_system", "judgment_rules",
+            "positive_judgment_patterns", "negative_judgment_patterns", "content_structure_patterns",
+            "marketing_translation_patterns", "risk_expression_patterns"
+        ]:
+            if isinstance(qwen_result.get(key), list) and qwen_result[key]:
+                profile[key] = qwen_result[key]
+        for key in ["comparison_logic", "evidence_preference", "reusable_agent_instruction", "script_template", "report_template"]:
+            if qwen_result.get(key):
+                profile[key] = str(qwen_result[key])
+    try:
+        deepseek_review = call_deepseek([
+            {"role": "system", "content": (
+                "你是MMN策略推理与质检模型。请对博主能力蒸馏结果做质检，检查是否存在："
+                "原文搬运、过度模仿个人身份、证据不足、工程归因跳跃、营销表达风险。"
+                "输出不超过220字，必须给出可执行修正建议。"
+            )},
+            {"role": "user", "content": json.dumps({"distilled_profile": profile, "sample_count": len(samples)}, ensure_ascii=False)}
+        ], temperature=.15, profile="fast", timeout=90, max_tokens=500)
+    except Exception as exc:
+        errors["deepseek"] = str(exc)
+    profile["professional_background"] = (
+        f"{profile.get('professional_background','')} MMN模型链路：主控蒸馏"
+        f"{'已完成' if qwen_result else '未完成'}，策略质检{'已完成' if deepseek_review else '未完成'}。"
+    ).strip()
+    if deepseek_review:
+        profile["risk_expression_patterns"] = list(dict.fromkeys([*profile.get("risk_expression_patterns", []), deepseek_review]))
+    profile["updated_at"] = now()
+    profile["model_trace"] = {"qwen": bool(qwen_result), "deepseek": bool(deepseek_review), "errors": errors}
+    return profile
+
+def save_blogger_skill_items(sources, edition="china"):
+    samples = [distill_blogger_sample(x) for x in sources]
+    saved_sources, saved_samples = [], []
+    profile = blogger_skill_profile_from_samples(samples, blogger_name=next((s.get("author") for s in sources if s.get("author")), "冷静的饺子"), edition=edition)
+    profile = blogger_skill_model_distill(profile, samples)
+    with db() as conn:
+        for source, sample in zip(sources, samples):
+            conn.execute("""
+                insert into blogger_skill_sources
+                (id, edition, skill_name, vertical_domain, platform, author, source_url, source_file, title, publish_time, ingest_time, status, failure_reason, raw_payload_hash, raw_payload_json)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(edition, raw_payload_hash) do update set
+                  skill_name=excluded.skill_name, vertical_domain=excluded.vertical_domain, platform=excluded.platform, author=excluded.author,
+                  source_url=excluded.source_url, source_file=excluded.source_file, title=excluded.title, publish_time=excluded.publish_time,
+                  ingest_time=excluded.ingest_time, status=excluded.status, failure_reason=excluded.failure_reason,
+                  raw_payload_json=excluded.raw_payload_json
+            """, (
+                source["id"], edition, source["skill_name"], source["vertical_domain"], source["platform"], source["author"],
+                source["source_url"], source["source_file"], source["title"], source["publish_time"], source["ingest_time"],
+                source["status"], source.get("failure_reason", ""), source["raw_payload_hash"],
+                json.dumps(source.get("raw_payload") or {}, ensure_ascii=False)
+            ))
+            conn.execute("""
+                insert into blogger_skill_samples
+                (id, source_id, edition, blogger_name, platform, vertical_domain, original_topic, brand, model, professional_dimensions_json,
+                 phenomenon_description, engineering_reasoning, subjective_judgment, objective_evidence, user_translation,
+                 marketing_expression, risk_expression, reusable_judgment_rule, rag_chunk, source_url, ingest_time, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(edition, source_id) do update set
+                  blogger_name=excluded.blogger_name, platform=excluded.platform, vertical_domain=excluded.vertical_domain,
+                  original_topic=excluded.original_topic, brand=excluded.brand, model=excluded.model,
+                  professional_dimensions_json=excluded.professional_dimensions_json, phenomenon_description=excluded.phenomenon_description,
+                  engineering_reasoning=excluded.engineering_reasoning, subjective_judgment=excluded.subjective_judgment,
+                  objective_evidence=excluded.objective_evidence, user_translation=excluded.user_translation,
+                  marketing_expression=excluded.marketing_expression, risk_expression=excluded.risk_expression,
+                  reusable_judgment_rule=excluded.reusable_judgment_rule, rag_chunk=excluded.rag_chunk
+            """, (
+                sample["id"], sample["source_id"], edition, sample["blogger_name"], sample["platform"], sample["vertical_domain"],
+                sample["original_topic"], sample["brand"], sample["model"],
+                json.dumps(sample["professional_dimensions"], ensure_ascii=False),
+                sample["phenomenon_description"], sample["engineering_reasoning"], sample["subjective_judgment"],
+                sample["objective_evidence"], sample["user_translation"], sample["marketing_expression"],
+                sample["risk_expression"], sample["reusable_judgment_rule"], sample["rag_chunk"], sample["source_url"],
+                sample["ingest_time"], sample["created_at"]
+            ))
+            saved_sources.append(source)
+            saved_samples.append(sample)
+        conn.execute("""
+            insert into blogger_skill_profiles
+            (id, edition, blogger_name, platform, vertical_domain, professional_background, content_topics_json,
+             evaluation_framework_json, terminology_system_json, judgment_rules_json, comparison_logic, evidence_preference,
+             positive_judgment_patterns_json, negative_judgment_patterns_json, content_structure_patterns_json,
+             marketing_translation_patterns_json, risk_expression_patterns_json, reusable_agent_instruction,
+             agent_few_shot_json, script_template, report_template, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(edition, blogger_name, vertical_domain) do update set
+              platform=excluded.platform, professional_background=excluded.professional_background,
+              content_topics_json=excluded.content_topics_json, evaluation_framework_json=excluded.evaluation_framework_json,
+              terminology_system_json=excluded.terminology_system_json, judgment_rules_json=excluded.judgment_rules_json,
+              comparison_logic=excluded.comparison_logic, evidence_preference=excluded.evidence_preference,
+              positive_judgment_patterns_json=excluded.positive_judgment_patterns_json,
+              negative_judgment_patterns_json=excluded.negative_judgment_patterns_json,
+              content_structure_patterns_json=excluded.content_structure_patterns_json,
+              marketing_translation_patterns_json=excluded.marketing_translation_patterns_json,
+              risk_expression_patterns_json=excluded.risk_expression_patterns_json,
+              reusable_agent_instruction=excluded.reusable_agent_instruction, agent_few_shot_json=excluded.agent_few_shot_json,
+              script_template=excluded.script_template, report_template=excluded.report_template, updated_at=excluded.updated_at
+        """, (
+            profile["id"], edition, profile["blogger_name"], profile["platform"], profile["vertical_domain"],
+            profile["professional_background"], json.dumps(profile["content_topics"], ensure_ascii=False),
+            json.dumps(profile["evaluation_framework"], ensure_ascii=False), json.dumps(profile["terminology_system"], ensure_ascii=False),
+            json.dumps(profile["judgment_rules"], ensure_ascii=False), profile["comparison_logic"], profile["evidence_preference"],
+            json.dumps(profile["positive_judgment_patterns"], ensure_ascii=False), json.dumps(profile["negative_judgment_patterns"], ensure_ascii=False),
+            json.dumps(profile["content_structure_patterns"], ensure_ascii=False), json.dumps(profile["marketing_translation_patterns"], ensure_ascii=False),
+            json.dumps(profile["risk_expression_patterns"], ensure_ascii=False), profile["reusable_agent_instruction"],
+            json.dumps(profile["agent_few_shot"], ensure_ascii=False), profile["script_template"], profile["report_template"], profile["updated_at"]
+        ))
+    return {"sources": saved_sources, "samples": saved_samples, "profile": profile}
+
+def import_blogger_skill_file(data, filename, edition="china", limit=30):
+    digest = file_hash(data)
+    rows = generic_rows_from_file(data, filename)
+    sources = []
+    for row in rows[:max(1, min(int(limit or 30), 30))]:
+        source = normalize_blogger_source(row, filename, digest, edition=edition)
+        if source.get("title") or source.get("content") or source.get("source_url"):
+            sources.append(source)
+    if not sources:
+        raise ValueError("未识别到可蒸馏的内容样本。请确认文件包含标题、正文、作者或链接字段。")
+    result = save_blogger_skill_items(sources, edition=edition)
+    return blogger_skill_payload(edition=edition, imported=len(sources), result=result)
+
+def scan_blogger_skill_imports(edition="china", limit=30):
+    allowed = {".xlsx", ".csv", ".json", ".txt", ".md", ".markdown"}
+    files = []
+    for sub in ("csv", "json", "txt", "images", ""):
+        folder = BLOGGER_SKILL_IMPORT_ROOT / sub if sub else BLOGGER_SKILL_IMPORT_ROOT
+        if folder.exists():
+            files.extend([p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in allowed])
+    imported, errors = 0, []
+    for path in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]:
+        try:
+            payload = import_blogger_skill_file(path.read_bytes(), path.name, edition=edition, limit=30)
+            imported += payload.get("imported", 0)
+        except Exception as exc:
+            errors.append({"file": str(path), "error": str(exc)})
+            break
+    data = blogger_skill_payload(edition=edition)
+    data.update({"imported": imported, "errors": errors})
+    return data
+
+def blogger_skill_payload(edition="china", imported=0, result=None):
+    with db() as conn:
+        source_rows = [rowdict(r) for r in conn.execute(
+            "select * from blogger_skill_sources where edition=? order by ingest_time desc limit 80", (edition,)
+        ).fetchall()]
+        sample_rows = [rowdict(r) for r in conn.execute(
+            "select * from blogger_skill_samples where edition=? order by created_at desc limit 80", (edition,)
+        ).fetchall()]
+        profile_rows = [rowdict(r) for r in conn.execute(
+            "select * from blogger_skill_profiles where edition=? order by updated_at desc", (edition,)
+        ).fetchall()]
+    samples = []
+    for row in sample_rows:
+        row["professional_dimensions"] = json.loads(row.pop("professional_dimensions_json") or "[]")
+        samples.append(row)
+    profiles = []
+    json_fields = [
+        "content_topics_json", "evaluation_framework_json", "terminology_system_json", "judgment_rules_json",
+        "positive_judgment_patterns_json", "negative_judgment_patterns_json", "content_structure_patterns_json",
+        "marketing_translation_patterns_json", "risk_expression_patterns_json", "agent_few_shot_json"
+    ]
+    for row in profile_rows:
+        for field in json_fields:
+            row[field.replace("_json", "")] = json.loads(row.pop(field) or "[]")
+        profiles.append(row)
+    knowledge = [{
+        "id": stable_id("blogger-rag", x["id"]),
+        "type": "博主能力蒸馏Skill",
+        "title": f"{x.get('blogger_name') or '公开样本'}｜{x.get('model') or x.get('original_topic') or '底盘工程'}",
+        "body": x.get("rag_chunk") or "",
+        "keywords": [x.get("blogger_name"), x.get("brand"), x.get("model"), *(x.get("professional_dimensions") or [])],
+        "tags": [x.get("vertical_domain"), *(x.get("professional_dimensions") or [])],
+        "targets": ["RAG知识库管理", "打法知识库", "内容资产中心", "决策驾驶舱"],
+        "source": "blogger_skill",
+        "metadata": {"domain": x.get("vertical_domain"), "entity": x.get("model"), "source_url": x.get("source_url")}
+    } for x in samples if x.get("rag_chunk")]
+    return {
+        "ok": True,
+        "imported": imported,
+        "stats": {"sources": len(source_rows), "samples": len(samples), "profiles": len(profiles), "ragChunks": len(knowledge)},
+        "sources": source_rows,
+        "samples": samples,
+        "profiles": profiles,
+        "knowledgeItems": knowledge,
+        "result": result or {}
+    }
 
 def ppt_text(text, limit=280):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -3252,6 +4365,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 }
             })
             return
+        if parsed.path == "/api/blogger-skill":
+            q = parse_qs(parsed.query)
+            edition = edition_from(q.get("edition", ["china"])[0])
+            self.send_json(blogger_skill_payload(edition=edition))
+            return
         if parsed.path == "/api/vertical-assets":
             q = parse_qs(parsed.query)
             platform = q.get("platform", ["懂车帝"])[0]
@@ -3300,6 +4418,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "snapshots": [rowdict(r) for r in snapshots]
                 }
             })
+            return
+        if parsed.path == "/api/agents/run":
+            q = parse_qs(parsed.query)
+            run_id = q.get("id", [""])[0]
+            if not run_id:
+                self.send_json({"ok": False, "error": "缺少 agent run id"}, 400)
+                return
+            payload = agent_run_payload(run_id)
+            if not payload:
+                self.send_json({"ok": False, "error": "未找到该 agent run"}, 404)
+                return
+            self.send_json({"ok": True, "agentRun": payload})
             return
         super().do_GET()
 
@@ -3394,6 +4524,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/ai/founder-talk",
                 "/api/ai/model-identities",
                 "/api/ai/model-judgment",
+                "/api/ai/router-feedback",
+                "/api/agents/run",
             }
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
@@ -3558,6 +4690,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/agents/run":
+            try:
+                body = self.read_json()
+                self.send_json(run_mmn_marketing_agent(body))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/founder-archives/seed":
             try:
                 body = self.read_json()
@@ -3573,6 +4712,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 edition = edition_from(body.get("edition", "china"))
                 result = run_founder_weekly_crawl(edition=edition, manual=True)
                 self.send_json(result)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/blogger-skill/import-file":
+            length = int(self.headers.get("Content-Length", "0"))
+            q = parse_qs(parsed.query)
+            filename = q.get("filename", ["blogger_skill_material"])[0]
+            edition = edition_from(q.get("edition", ["china"])[0])
+            try:
+                data = self.rfile.read(length)
+                self.send_json(import_blogger_skill_file(data, filename, edition=edition, limit=30))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/blogger-skill/import-url":
+            try:
+                body = self.read_json()
+                edition = edition_from(body.get("edition", "china"))
+                url = str(body.get("source_url") or body.get("url") or "").strip()
+                if not url:
+                    raise ValueError("请先填写公开内容链接。")
+                source = normalize_blogger_source({
+                    "source_url": url,
+                    "title": body.get("title") or "待人工补全文本",
+                    "content": body.get("content") or "",
+                    "author": body.get("author") or "",
+                    "platform": body.get("platform") or ""
+                }, "manual_url_import", stable_id(url), edition=edition)
+                if not source.get("content"):
+                    source["status"] = "manual_required"
+                    source["failure_reason"] = "已记录公开链接，等待人工补充正文或授权文件导入。"
+                self.send_json(blogger_skill_payload(edition=edition, imported=1, result=save_blogger_skill_items([source], edition=edition)))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/blogger-skill/scan-imports":
+            try:
+                body = self.read_json()
+                edition = edition_from(body.get("edition", "china"))
+                self.send_json(scan_blogger_skill_imports(edition=edition, limit=30))
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -3675,18 +4854,80 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 mode = "deep" if body.get("mode") == "deep" else "fast"
                 if not question:
                     raise ValueError("请输入策略问题。")
-                text, used_model, errors, route = call_mmn_strategy_engine(question, project, references, mode)
+                routed = run_mmn_task_router(
+                    question,
+                    project=project,
+                    references=references,
+                    mode=mode,
+                    task_type=body.get("task_type") or body.get("taskType") or "",
+                    edition=edition_from(body.get("edition", "china"))
+                )
                 self.send_json({
                     "ok": True,
-                    "text": text,
-                    "model": used_model,
+                    "id": routed["id"],
+                    "text": routed["text"],
+                    "primaryText": routed["primaryText"],
+                    "reviewText": routed["reviewText"],
+                    "taskType": routed["taskType"],
+                    "model": routed["model"],
+                    "reviewer": routed["reviewer"],
                     "mode": mode,
-                    "modelLabel": route["label"],
+                    "modelLabel": routed["modelLabel"],
+                    "route": routed["route"],
+                    "conflict": routed["conflict"],
+                    "sourceTrace": routed["sourceTrace"],
                     "references": references[:8],
-                    "errors": errors,
+                    "errors": routed["errors"],
                     "qwen": qwen_config(mode),
                     "deepseek": deepseek_config(mode)
                 })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/ai/router-feedback":
+            try:
+                body = self.read_json()
+                decision_id = str(body.get("id") or "").strip()
+                choice = str(body.get("choice") or "人工确认").strip()
+                final_text = str(body.get("finalText") or body.get("final_text") or "").strip()
+                if not decision_id:
+                    raise ValueError("缺少路由决策ID。")
+                with db() as conn:
+                    row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+                if not row:
+                    raise ValueError("未找到需要确认的路由结果。")
+                current = rowdict(row)
+                if not final_text:
+                    final_text = current.get("primary_output") or current.get("reviewer_output") or ""
+                knowledge = {
+                    "id": stable_id("router-feedback", decision_id, choice, final_text),
+                    "type": "MMN人工复核结论",
+                    "title": f"{current.get('task_type') or '任务路由'}｜{choice}",
+                    "body": final_text[:1600],
+                    "keywords": [current.get("task_type"), choice, "人工复核", "MMN策略模型"],
+                    "tags": [current.get("task_type"), "人工复核", choice],
+                    "targets": ["RAG知识库管理", "MMN策略", "人工结论学习"],
+                    "source": "model_router_feedback",
+                    "metadata": {"router_decision_id": decision_id, "conflict_status": current.get("conflict_status")}
+                }
+                stamp = now()
+                with db() as conn:
+                    conn.execute("""
+                        update model_router_decisions
+                        set human_status='confirmed', human_choice=?, human_final_text=?, knowledge_json=?, updated_at=?
+                        where id=?
+                    """, (choice, final_text, json.dumps(knowledge, ensure_ascii=False), stamp, decision_id))
+                    conn.execute("""
+                        insert into learning_cases
+                        (id, org_id, user_id, edition, model, label, conclusion, recommendation, evidence, platform, kpi, stage, saved_at)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        knowledge["id"], body.get("org_id") or "router-feedback", body.get("user_id") or "manual",
+                        current.get("edition") or "china", (json.loads(current.get("project_json") or "{}")).get("model", ""),
+                        "MMN任务路由人工复核", final_text, "已回流至MMN策略知识库", current.get("references_json") or "[]",
+                        "MMN多模型引擎", current.get("conflict_status") or "", current.get("task_type") or "", stamp
+                    ))
+                self.send_json({"ok": True, "knowledgeItem": knowledge, "updatedAt": stamp})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
