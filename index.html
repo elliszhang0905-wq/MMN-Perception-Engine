@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-creator-assets-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.01-semantic-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -160,6 +160,17 @@
         <div class="search"><input id="data-search" placeholder="搜索车型、标签、平台…"></div>
       </div>
       <div class="notice" id="data-source-note"></div>
+      <article class="panel semantic-panel">
+        <div class="panel-title"><div><span>MMN语义识别</span><h2>单条文本多层标签识别与人工校准</h2></div><em>车型 / 属性 / 情绪 / 阻塞点 / 竞品 / 身份 / 场景 / 动作</em></div>
+        <div class="semantic-console">
+          <textarea id="semantic-input" placeholder="粘贴一条用户评论、视频标题、弹幕或小红书正文，例如：智己LS8底盘挺稳，但我还是担心高速智驾接管和后期维修，和理想L8比到底谁更适合家用？"></textarea>
+          <div class="semantic-actions">
+            <button type="button" class="primary" id="semantic-analyze">识别语义标签</button>
+            <button type="button" class="ghost" id="semantic-clear">清空</button>
+          </div>
+        </div>
+        <div id="semantic-result" class="semantic-result"></div>
+      </article>
       <div class="model-filter" id="data-model-filter"></div>
       <div class="model-filter traffic-filter" id="data-traffic-filter"></div>
       <div class="kpis data-kpis">
@@ -737,6 +748,6 @@
   </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-creator-assets-2"></script>
+  <script src="app.js?v=beta-1.01-semantic-1"></script>
 </body>
 </html>

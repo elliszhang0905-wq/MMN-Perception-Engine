@@ -690,6 +690,108 @@ label.file-button.ghost,.file-button.ghost{
 .rule-cards b,.rule-cards span{display:block}
 .rule-cards b{font-size:13px;color:var(--ink);margin-bottom:5px}
 .rule-cards span{font-size:12px;line-height:1.5;color:var(--muted)}
+.semantic-panel{margin-bottom:16px}
+.semantic-console{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:12px;
+  align-items:stretch;
+}
+.semantic-console textarea{
+  min-height:92px;
+  resize:vertical;
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:12px;
+  font:inherit;
+  color:var(--ink);
+  background:#fff;
+}
+.semantic-actions{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:132px;
+}
+.semantic-result{margin-top:14px}
+.semantic-result:empty{display:none}
+.semantic-summary{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  padding:12px 14px;
+  border:1px solid var(--hairline);
+  border-radius:13px;
+  background:#f3f5f5;
+  margin-bottom:12px;
+}
+.semantic-summary b{font-size:14px;color:var(--ink);line-height:1.45}
+.semantic-summary span{
+  flex:0 0 auto;
+  font-size:11px;
+  color:var(--muted);
+  font-weight:850;
+}
+.semantic-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.semantic-grid article{
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#fff;
+  padding:13px;
+  display:grid;
+  gap:10px;
+}
+.semantic-grid h3{font-size:13px;margin:0;color:var(--ink)}
+.semantic-grid small{font-size:11px;color:var(--muted);line-height:1.45}
+.semantic-chips{
+  display:flex;
+  gap:7px;
+  flex-wrap:wrap;
+  min-height:28px;
+}
+.semantic-chips span{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 9px;
+  border-radius:999px;
+  background:#eef1f1;
+  color:#303840;
+  font-size:11px;
+  font-weight:850;
+}
+.semantic-chips em{
+  font-style:normal;
+  color:#7b858d;
+  font-size:10px;
+}
+.semantic-grid textarea{
+  width:100%;
+  min-height:44px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:8px 9px;
+  font:inherit;
+  font-size:12px;
+  resize:vertical;
+}
+.semantic-calibration{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  margin-top:12px;
+}
+.semantic-calibration input{
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px 11px;
+  font:inherit;
+}
 .data-kpis{margin-top:0}
 .data-visual-grid{margin-top:0}
 .data-bars{display:grid;gap:12px}

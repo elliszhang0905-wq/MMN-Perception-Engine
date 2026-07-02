@@ -417,6 +417,15 @@ def init_db():
             payload_json text not null default '{}',
             created_at text not null
         );
+        create table if not exists semantic_calibrations (
+            id text primary key,
+            edition text not null default 'china',
+            source_text text not null,
+            predicted_json text not null default '{}',
+            corrected_json text not null default '{}',
+            user_note text,
+            created_at text not null
+        );
         """)
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
@@ -1961,6 +1970,196 @@ def rule_model_identity(raw_name):
         "confidence": "medium" if brand and energy != "UNKNOWN" else "low",
         "reason": "本地规则预判，等待Qwen复核"
     }
+
+SEMANTIC_SCHEMA = {
+    "vehicle_models": "车型，可多选，包含本品、竞品或被比较车型",
+    "product_attributes": "产品属性，例如底盘、智驾、空间、价格、能耗、安全、质量、服务",
+    "emotion_tendency": "情绪倾向，不限正负，可包含兴奋、认可、信任、期待、怀疑、焦虑、失望、愤怒等",
+    "purchase_blockers": "购买阻塞点，例如价格贵、信任不足、安全疑虑、智驾边界、空间不够、服务担忧",
+    "competitor_relations": "竞品关系，例如对比、替代、反向牵引、优势、劣势、平替、同价位竞争",
+    "identity_expression": "身份表达，例如家庭用户、性能用户、科技用户、价格敏感用户、高影响力车主",
+    "scene_needs": "场景需求，例如家庭出行、城市通勤、长途、高速、露营、雨天、老人儿童、试驾",
+    "strategy_actions": "策略动作，例如风险修复、证据补强、竞品拦截、达人brief、场景种草、价格解释"
+}
+
+SEMANTIC_KEYWORDS = {
+    "product_attributes": [
+        ("底盘操控", r"底盘|悬架|滤震|侧倾|支撑|操控|转向|刹车|制动|麋鹿|赛道|后桥|CDC|空悬"),
+        ("智能驾驶", r"智驾|辅助驾驶|自动驾驶|NOA|AEB|接管|领航|城区|高速NOA"),
+        ("智能座舱", r"座舱|车机|语音|屏幕|导航|OTA|娱乐系统"),
+        ("空间舒适", r"空间|二排|后排|座椅|舒适|头部|腿部|后备箱|儿童座椅"),
+        ("安全质量", r"安全|碰撞|电池|自燃|质量|异响|品控|故障|耐久"),
+        ("价格权益", r"价格|贵|便宜|权益|优惠|金融|保值|用车成本|保险|电耗|油耗|能耗"),
+        ("品牌服务", r"品牌|服务|售后|交付|门店|补能|换电|充电|口碑"),
+        ("外观内饰", r"外观|颜值|造型|内饰|材质|豪华|设计")
+    ],
+    "emotion_tendency": [
+        ("兴奋", r"惊喜|爽|喜欢|香|真不错|很强|优秀|满意|兴奋"),
+        ("信任", r"放心|靠谱|可信|安心|有保障|稳定"),
+        ("期待", r"期待|想试|想买|关注|种草|心动"),
+        ("怀疑", r"怀疑|不确定|担心|靠谱吗|真的假的|存疑"),
+        ("焦虑", r"焦虑|怕|担心|劝退|顾虑|纠结|不敢买"),
+        ("失望", r"失望|拉胯|不行|一般|后悔|差点意思"),
+        ("愤怒", r"离谱|坑人|割韭菜|欺骗|垃圾|太差|愤怒")
+    ],
+    "purchase_blockers": [
+        ("价格门槛", r"太贵|贵了|价格高|预算不够|优惠少|性价比"),
+        ("信任不足", r"不敢买|不放心|靠谱吗|新品牌|口碑|售后担心"),
+        ("安全疑虑", r"安全|碰撞|自燃|电池|刹不住|AEB|失控"),
+        ("智驾边界", r"接管|智驾|自动驾驶|NOA|识别不了|误刹|边界"),
+        ("质量担忧", r"异响|故障|品控|小毛病|质量|维修"),
+        ("空间舒适不足", r"空间小|坐着累|后排|座椅不舒服|颠|晃"),
+        ("能耗补能焦虑", r"续航|电耗|油耗|充电|补能|冬天|高速续航")
+    ],
+    "competitor_relations": [
+        ("直接对比", r"对比|相比|横评|PK|pk|VS|vs|和.*比|比.*强|不如"),
+        ("竞品优势", r"不如|比不过|输给|差距|被.*吊打|短板"),
+        ("本品优势", r"更强|胜过|比.*好|优势|领先|不输"),
+        ("替代选择", r"平替|替代|同价位|二选一|纠结|选谁"),
+        ("反向牵引", r"都在看|反向|竞品|抢走|拦截")
+    ],
+    "identity_expression": [
+        ("家庭用户", r"家庭|孩子|老人|一家|二胎|亲子|家用|老婆|父母"),
+        ("科技用户", r"科技|智驾|车机|OTA|算法|智能|数码"),
+        ("性能用户", r"操控|性能|动力|赛道|山路|驾驶乐趣"),
+        ("价格敏感用户", r"预算|性价比|贵|便宜|优惠|成本"),
+        ("高影响力车主", r"车主|真实体验|提车|用车|长期|口碑"),
+        ("增量人群", r"颜值|生活方式|露营|城市|通勤|年轻")
+    ],
+    "scene_needs": [
+        ("城市通勤", r"通勤|市区|城区|上下班|堵车"),
+        ("家庭出行", r"家庭|孩子|老人|亲子|全家"),
+        ("长途高速", r"长途|高速|自驾|回老家|远途"),
+        ("试驾验证", r"试驾|体验|实测|现场|开起来|坐起来"),
+        ("雨雪烂路", r"雨天|雪天|烂路|坑洼|减速带|颠簸"),
+        ("露营装载", r"露营|装载|后备箱|行李|户外")
+    ],
+    "strategy_actions": [
+        ("风险修复", r"担心|怀疑|焦虑|劝退|安全|质量|不敢买|负面"),
+        ("证据补强", r"证据|实测|第三方|车主|数据|对比|验证"),
+        ("竞品拦截", r"对比|竞品|同价位|二选一|不如|优势"),
+        ("场景种草", r"家庭|通勤|长途|露营|试驾|体验"),
+        ("价格解释", r"价格|贵|权益|优惠|金融|成本|保值"),
+        ("达人brief", r"达人|KOL|KOC|测评|脚本|种草|小红书|抖音")
+    ]
+}
+
+def semantic_matches(text, layer):
+    hits = []
+    for label, pattern in SEMANTIC_KEYWORDS.get(layer, []):
+        if re.search(pattern, text, re.I):
+            hits.append({"label": label, "evidence": excerpt_sentences(text, pattern, 120) or label, "confidence": "high"})
+    return hits
+
+def infer_semantic_models(text):
+    candidates = []
+    for token in re.findall(r"[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z0-9.\- ]{1,24}", text):
+        raw = token.strip(" ，。！？、:：；;（）()[]【】")
+        if not raw or len(raw) < 2:
+            continue
+        identity = local_standard_model_identity(raw)
+        if identity:
+            candidates.append({
+                "raw": raw,
+                "brand": identity.get("brandName"),
+                "model": identity.get("normalizedName"),
+                "canonicalKey": identity.get("canonicalKey"),
+                "confidence": "high"
+            })
+    seen, out = set(), []
+    for item in candidates:
+        key = item.get("canonicalKey") or item.get("model")
+        if key and key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out[:8]
+
+def semantic_result_from_rules(text, edition="china"):
+    text = str(text or "").strip()
+    layers = {
+        "vehicle_models": infer_semantic_models(text),
+        "product_attributes": semantic_matches(text, "product_attributes"),
+        "emotion_tendency": semantic_matches(text, "emotion_tendency"),
+        "purchase_blockers": semantic_matches(text, "purchase_blockers"),
+        "competitor_relations": semantic_matches(text, "competitor_relations"),
+        "identity_expression": semantic_matches(text, "identity_expression"),
+        "scene_needs": semantic_matches(text, "scene_needs"),
+        "strategy_actions": semantic_matches(text, "strategy_actions")
+    }
+    if not layers["emotion_tendency"]:
+        layers["emotion_tendency"] = [{"label": "中性观察", "evidence": "未出现强情绪词，按中性观察处理", "confidence": "medium"}]
+    if not layers["strategy_actions"]:
+        if layers["purchase_blockers"]:
+            layers["strategy_actions"] = [{"label": "风险修复", "evidence": "文本出现购买阻塞点", "confidence": "medium"}]
+        elif layers["product_attributes"]:
+            layers["strategy_actions"] = [{"label": "证据补强", "evidence": "文本出现产品属性讨论", "confidence": "medium"}]
+    summary_parts = []
+    if layers["vehicle_models"]:
+        summary_parts.append("车型：" + "、".join(x["model"] for x in layers["vehicle_models"][:3]))
+    if layers["product_attributes"]:
+        summary_parts.append("属性：" + "、".join(x["label"] for x in layers["product_attributes"][:3]))
+    if layers["purchase_blockers"]:
+        summary_parts.append("阻塞：" + "、".join(x["label"] for x in layers["purchase_blockers"][:3]))
+    return {
+        "schemaVersion": "mmn-semantic-v1",
+        "edition": edition,
+        "sourceText": text,
+        "layers": layers,
+        "summary": "；".join(summary_parts) or "已完成多层语义识别，建议人工复核关键标签。",
+        "confidence": "high" if sum(bool(v) for v in layers.values()) >= 5 else "medium",
+        "model": "MMN本地多层语义规则"
+    }
+
+def semantic_prompt(text, rule_result):
+    return [
+        {"role": "system", "content": (
+            "你是MMN汽车营销多层语义识别模块。只返回JSON，不要Markdown。"
+            "不能只判断正负面情绪，必须输出多层标签。"
+            "根对象字段：schemaVersion, summary, confidence, layers。"
+            "layers必须包含：vehicle_models, product_attributes, emotion_tendency, purchase_blockers, "
+            "competitor_relations, identity_expression, scene_needs, strategy_actions。"
+            "每层是数组；每个标签包含label, evidence, confidence。vehicle_models还应包含brand, model, raw。"
+            "允许单条文本多标签；不确定就少量输出并标medium/low，不要编造。"
+        )},
+        {"role": "user", "content": json.dumps({"text": text, "rule_result": rule_result}, ensure_ascii=False)}
+    ]
+
+def analyze_semantic_text(text, edition="china"):
+    rule_result = semantic_result_from_rules(text, edition=edition)
+    if qwen_config()["configured"]:
+        try:
+            parsed = parse_json_object(call_qwen(semantic_prompt(text, rule_result), temperature=.1, profile="fast", timeout=45))
+            if isinstance(parsed, dict) and isinstance(parsed.get("layers"), dict):
+                parsed.setdefault("schemaVersion", "mmn-semantic-v1")
+                parsed.setdefault("sourceText", text)
+                parsed.setdefault("edition", edition)
+                parsed.setdefault("model", "MMN语义识别：Qwen + 本地规则")
+                for key in SEMANTIC_SCHEMA:
+                    parsed["layers"].setdefault(key, rule_result["layers"].get(key, []))
+                return parsed
+        except Exception as exc:
+            rule_result["modelError"] = str(exc)
+    return rule_result
+
+def save_semantic_calibration(body):
+    text = str(body.get("sourceText") or body.get("text") or "").strip()
+    if not text:
+        raise ValueError("缺少需要校准的原文")
+    predicted = body.get("predicted") or {}
+    corrected = body.get("corrected") or {}
+    edition = edition_from(body.get("edition", "china"))
+    item_id = stable_id("semantic-calibration", edition, text, json.dumps(corrected, ensure_ascii=False), now())
+    created = now()
+    with db() as conn:
+        conn.execute("""
+            insert into semantic_calibrations
+            (id, edition, source_text, predicted_json, corrected_json, user_note, created_at)
+            values (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            item_id, edition, text, json.dumps(predicted, ensure_ascii=False),
+            json.dumps(corrected, ensure_ascii=False), body.get("userNote") or "", created
+        ))
+    return {"id": item_id, "createdAt": created}
 
 def display_model_name_under_brand(brand, model):
     b = str(brand or "").strip()
@@ -4905,6 +5104,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 result["exportPath"] = str(path)
                 result["exportedAt"] = datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
                 self.send_json({"ok": True, "dataset": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/semantic/analyze":
+            try:
+                body = self.read_json()
+                text = str(body.get("text") or "").strip()
+                if not text:
+                    raise ValueError("请先输入需要识别的汽车用户原文")
+                edition = edition_from(body.get("edition", "china"))
+                self.send_json({"ok": True, "result": analyze_semantic_text(text, edition=edition), "schema": SEMANTIC_SCHEMA})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/semantic/calibrate":
+            try:
+                body = self.read_json()
+                saved = save_semantic_calibration(body)
+                self.send_json({"ok": True, **saved})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

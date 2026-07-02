@@ -50,6 +50,7 @@ let learningBrandOpen="";
 let contentAssetView="assets",creatorFilter="all",creatorSearch="";
 let socialPluginStatus=null;
 let currentDrillContext=null;
+let semanticState={result:null,schema:null};
 let aiStatus={qwen:{configured:false,model:"qwen-plus",baseUrl:"https://dashscope.aliyuncs.com/compatible-mode/v1"},deepseek:{configured:false,model:"deepseek-chat",baseUrl:"https://api.deepseek.com"},openai:{configured:false,model:"gpt-5.5",baseUrl:"https://api.openai.com/v1"},rules:{configured:true,model:"MMN规则引擎"}};
 let videoState=loadVideoState(),creatorState=loadCreatorState(),videoSearch="";
 let verticalState=loadVerticalState(),verticalSearch="",verticalPeriodPickerOpen=false;
@@ -984,8 +985,71 @@ function drillMiniBars(data){
  const max=Math.max(...data.map(x=>x.count),1);
  return `<div class="drill-bars">${data.map(x=>`<div><b>${x.key}</b><span><i style="width:${x.count/max*100}%"></i></span><em>${Math.round(x.count).toLocaleString()}</em></div>`).join("")||"<p class='empty'>暂无数据</p>"}</div>`;
 }
+const semanticLayerLabels={
+ vehicle_models:"车型",
+ product_attributes:"产品属性",
+ emotion_tendency:"情绪倾向",
+ purchase_blockers:"购买阻塞点",
+ competitor_relations:"竞品关系",
+ identity_expression:"身份表达",
+ scene_needs:"场景需求",
+ strategy_actions:"策略动作"
+};
+function semanticItemsToText(items){
+ return (items||[]).map(x=>x.model||x.label||x.raw||"").filter(Boolean).join("，");
+}
+function semanticTextToItems(text,layer){
+ return String(text||"").split(/[，,、\n]+/).map(x=>x.trim()).filter(Boolean).map(x=>layer==="vehicle_models"?{raw:x,model:x,label:x,confidence:"manual"}:{label:x,evidence:"人工校准",confidence:"manual"});
+}
+function semanticCorrectedPayload(){
+ const layers={};
+ Object.keys(semanticLayerLabels).forEach(key=>{
+  const el=document.querySelector(`[data-semantic-edit="${key}"]`);
+  layers[key]=semanticTextToItems(el?.value||"",key);
+ });
+ return{...semanticState.result,layers,calibratedAt:new Date().toISOString(),calibratedBy:"manual"};
+}
+function renderSemanticResult(){
+ const box=document.querySelector("#semantic-result");
+ if(!box)return;
+ const result=semanticState.result;
+ if(!result){box.innerHTML="";return}
+ const layers=result.layers||{};
+ const cards=Object.entries(semanticLayerLabels).map(([key,label])=>{
+  const items=layers[key]||[];
+  const chips=items.length?items.map(x=>`<span title="${escapeAttr(x.evidence||"")}"><b>${escapeAttr(x.model||x.label||x.raw)}</b><em>${escapeAttr(x.confidence||"medium")}</em></span>`).join(""):`<small>未识别，可人工补充</small>`;
+  return `<article><div><h3>${label}</h3><small>${semanticState.schema?.[key]||""}</small></div><div class="semantic-chips">${chips}</div><textarea data-semantic-edit="${key}">${escapeAttr(semanticItemsToText(items))}</textarea></article>`;
+ }).join("");
+ box.innerHTML=`<div class="semantic-summary"><b>${result.summary||"已完成多层语义识别"}</b><span>${result.model||"MMN语义识别"}｜置信度 ${result.confidence||"medium"}</span></div><div class="semantic-grid">${cards}</div><div class="semantic-calibration"><input id="semantic-note" placeholder="人工校准备注，例如：把‘家用’强制归入家庭场景，后续同类表达参考"><button type="button" class="primary" id="semantic-save-calibration">保存人工校准</button></div>`;
+ document.querySelector("#semantic-save-calibration").onclick=saveSemanticCalibration;
+}
+async function analyzeSemanticText(){
+ const input=document.querySelector("#semantic-input"),btn=document.querySelector("#semantic-analyze");
+ const text=input?.value.trim();
+ if(!text){toast("请先输入一条用户原文");return}
+ const old=btn.textContent;btn.disabled=true;btn.textContent="识别中…";
+ try{
+  const data=await api("/api/semantic/analyze",{method:"POST",body:JSON.stringify({edition:activeEdition(),text})});
+  semanticState={result:data.result,schema:data.schema};
+  renderSemanticResult();
+  toast("已输出多层语义标签，可人工校准");
+ }catch(err){toast(`语义识别失败：${err.message}`)}
+ finally{btn.disabled=false;btn.textContent=old}
+}
+async function saveSemanticCalibration(){
+ if(!semanticState.result){toast("请先完成语义识别");return}
+ try{
+  const corrected=semanticCorrectedPayload();
+  const note=document.querySelector("#semantic-note")?.value||"";
+  await api("/api/semantic/calibrate",{method:"POST",body:JSON.stringify({edition:activeEdition(),sourceText:semanticState.result.sourceText,predicted:semanticState.result,corrected,userNote:note})});
+  semanticState.result=corrected;
+  renderSemanticResult();
+  toast("人工校准已保存，后续可用于优化语义识别");
+ }catch(err){toast(`保存校准失败：${err.message}`)}
+}
 function renderData(){
  document.querySelector("#data-source-note").textContent=`${state.sourceNote||"当前数据已载入。"} 每行代表一组“车型 × 平台 × 认知标签 × 情绪 × 用户身份”的聚合数据，修改后自动重新计算。`;
+ renderSemanticResult();
  const models=dataModelOptions();if(dataModelFilter!=="all"&&!models.includes(dataModelFilter))dataModelFilter="all";
  ensureModelIdentities(models);
  const groups=brandModelGroups(models);
@@ -2071,6 +2135,15 @@ const accountButton=document.querySelector("#account-button");if(accountButton)a
 document.querySelector("#login-submit").onclick=async e=>{e.preventDefault();const f=document.querySelector("#login-form");try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({org:f.elements.org.value,name:f.elements.name.value,email:f.elements.email.value})});saveSession(data.session);document.querySelector("#login-dialog").close();await Promise.all([loadServerLearnings(),loadWorkspace()]);toast(`已进入 ${data.session.org}`)}catch(err){toast(`登录失败：${err.message}`)}};
 document.querySelector("#trend-dialog-close").onclick=()=>document.querySelector("#trend-dialog").close();
 document.querySelector("#data-drill-close").onclick=()=>document.querySelector("#data-drill-dialog").close();
+const semanticAnalyzeButton=document.querySelector("#semantic-analyze");
+if(semanticAnalyzeButton)semanticAnalyzeButton.onclick=analyzeSemanticText;
+const semanticClearButton=document.querySelector("#semantic-clear");
+if(semanticClearButton)semanticClearButton.onclick=()=>{
+ semanticState={result:null,schema:null};
+ const input=document.querySelector("#semantic-input");if(input)input.value="";
+ renderSemanticResult();
+ toast("语义识别内容已清空");
+};
 document.querySelector("#sync-project-state").onclick=()=>syncProjectSnapshot(false);
 const extendedHeaders=[...headers,"声量类型","关键词/原文"];
 const platformFieldOptions=[...new Set([...Object.keys(defaultState.platforms),...Object.keys(defaultGlobalState.platforms)])];
