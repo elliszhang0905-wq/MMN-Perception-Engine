@@ -1933,6 +1933,27 @@ def rule_strategy(context):
     negative = summary.get("negativeScore", 0)
     positive = summary.get("positiveScore", 0)
     mode = "优先修复" if negative > positive else "资产放大"
+    if context.get("drillType") == "strategy_ppt_brief":
+        project = context.get("project") or {}
+        model = project.get("model") or context.get("drillKey", "当前车型")
+        competitors = " / ".join(project.get("competitors") or ["核心竞品"])
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        relation_copy = (
+            f"{relation.get('platform','垂媒')} {relation.get('period','当前周期')}里，{model}与{relation.get('competitor','核心竞品')}形成“{relation.get('status','竞争对比')}”关系。"
+        ) if relation else "垂媒侧用于校准用户真实比较语境，避免只讲孤立卖点。"
+        return "\n\n".join([
+            "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出",
+            "### 2. 核心结论\n" + f"{model} 当前要围绕“{top_label}”建立可被用户复述的购买理由，把“{mode}”转成内容、达人和销售可执行动作。",
+            "### 3. 当前核心问题\n" + f"用户已经把 {model} 放进 {competitors} 的比较池。下一步重点不是增加噪音，而是回答为什么此刻值得试驾。",
+            "### 4. 认知资产 / 负债 / 空位\n" + f"资产是“{top_label}”；负债来自高风险疑虑；空位来自竞品没有讲清楚的真实场景。",
+            "### 5. 垂媒竞争格局\n" + relation_copy,
+            "### 6. 声量与用户情绪\n" + f"主平台是 {top_platform}。内容要用高声量平台承接核心疑虑，再用证据把讨论推向试驾和询价。",
+            "### 7. 抖音内容打法\n短视频先做“一个疑虑一个实测”，用标题直接回答用户最关心的购买问题。",
+            "### 8. 小红书内容打法\n小红书负责沉淀车主账本、场景清单和避坑问答，让用户收藏后能辅助决策。",
+            "### 9. 达人脚本与内容资产\n评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本统一采用：疑虑开场、实测证据、竞品对比、适合人群、试驾行动。",
+            "### 10. 行动节奏与KPI\n7天校准内容资产，14天上线证据内容，30天复盘达人与销售承接。KPI看核心标签正向声量、负向疑虑占比、竞品对比搜索、收藏评论质量、试驾/询价线索。"
+        ])
     if context.get("drillType") == "content_asset_strategy":
         relations = vertical.get("relations") or []
         relation = relations[0] if relations else {}
@@ -1978,7 +1999,18 @@ MMN_OUTPUT_STYLE = (
 )
 
 def llm_strategy_prompt(context, engine_name):
-    if context.get("drillType") == "content_asset_strategy":
+    if context.get("drillType") == "strategy_ppt_brief":
+        system = (
+            f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
+            "这是一份内容资产中心的策略PPT方案交付。你必须综合调用输入中的决策驾驶舱、声量数据中心、垂媒竞争格局、抖音/小红书内容资产、达人蒸馏资产、人工学习和RAG知识。"
+            "输出必须严格使用10个小标题："
+            "### 1. 封面；### 2. 核心结论；### 3. 当前核心问题；### 4. 认知资产 / 负债 / 空位；### 5. 垂媒竞争格局；"
+            "### 6. 声量与用户情绪；### 7. 抖音内容打法；### 8. 小红书内容打法；### 9. 达人脚本与内容资产；### 10. 行动节奏与KPI。"
+            "不要输出底层模型名称，不要输出“数据缺口”“依据不足”“尚未同步”“尚未创建任务”等字样。"
+            "语气要像专业汽车营销咨询方案：有判断、有依据、有动作，但必须通俗易懂。"
+            + MMN_OUTPUT_STYLE
+        )
+    elif context.get("drillType") == "content_asset_strategy":
         system = (
             f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
             "这是一份内容资产中心的外显策略交付。你必须综合调用输入中的三大上游板块：决策驾驶舱、声量数据中心、垂媒竞争格局，再结合抖音/小红书内容资产归类。"
@@ -2501,6 +2533,41 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         available.append(("规则引擎", rule_text))
     if not available:
         return "MMN融合策略暂不可用：没有可用模型或规则结果。"
+    if context.get("drillType") == "strategy_ppt_brief":
+        project = context.get("project") or {}
+        summary = context.get("summary") or {}
+        upstream = context.get("upstream") or {}
+        cockpit = upstream.get("cockpit") or {}
+        voice = upstream.get("voiceCenter") or {}
+        vertical = upstream.get("verticalCompetition") or {}
+        breakdown = context.get("breakdown") or {}
+        knowledge = context.get("knowledge") or {}
+        model = project.get("model") or context.get("drillKey") or "当前车型"
+        competitors = project.get("competitors") or ["核心竞品"]
+        competitor_text = " / ".join([x for x in competitors if x]) or "核心竞品"
+        labels = cockpit.get("priorityLabels") or voice.get("labels") or breakdown.get("categories") or []
+        top_label = (labels[0].get("label") or labels[0].get("key")) if labels else summary.get("topCategory", "核心认知")
+        risk = next((x for x in labels if x.get("diagnosis") == "优先修复"), labels[0] if labels else {})
+        risk_label = risk.get("label") or risk.get("key") or top_label
+        platforms = voice.get("platforms") or breakdown.get("platforms") or []
+        top_platform = platforms[0].get("key") if platforms else summary.get("topPlatform", "核心平台")
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        creators = (knowledge.get("creatorAssets") or []) + (knowledge.get("distilledBloggerAssets") or [])
+        creator_names = " / ".join([x.get("name") for x in creators if x.get("name")][:3]) or "评测型达人、生活方式达人、真实车主"
+        category = summary.get("topCategory") or top_label
+        return "\n\n".join([
+            "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出｜面向品牌市场、销售转化与达人合作团队",
+            "### 2. 核心结论\n" + f"{model} 的内容策略不能只看发布量，而要把“{top_label}”做成用户能理解的购买理由。下一轮传播建议采用“证据先行、场景解释、竞品校准”的打法：先修复“{risk_label}”，再放大已有正向认知。",
+            "### 3. 当前核心问题\n" + f"用户已经把 {model} 放进 {competitor_text} 的比较池。真正的问题不是用户没看到车型，而是看到之后还缺少一句稳定判断：为什么在同样预算、同样使用场景下，选择 {model} 更合理。",
+            "### 4. 认知资产 / 负债 / 空位\n" + f"资产：围绕“{top_label}”继续放大，把它变成短视频标题、垂媒解释和销售话术。\n负债：围绕“{risk_label}”先给证据，不急着喊卖点。\n空位：把竞品没有讲透的家庭、通勤、长途、补能、智能驾驶边界，转成用户能马上代入的选择题。",
+            "### 5. 垂媒竞争格局\n" + (f"{relation.get('platform','垂媒')} {relation.get('period','当前周期')}显示，{model}与{relation.get('competitor', competitor_text)}处在“{relation.get('status','竞争对比')}”关系。垂媒内容要少讲配置清单，多讲用户为什么会把两台车放在一起比。" if relation else f"垂媒格局用于校准比较语境：{model}不是孤立被讨论，而是在与{competitor_text}的真实选择关系中被评价。"),
+            "### 6. 声量与用户情绪\n" + f"主平台建议优先看 {top_platform}。当前内容资产主类为“{category}”；策略上要把高声量内容从“看热闹”改成“能帮用户做决定”。如果声量集中在争议点，就用第三方实测和真实车主回答；如果声量集中在卖点，就用场景化脚本提高转化效率。",
+            "### 7. 抖音内容打法\n" + f"抖音负责把疑虑拍成验证。建议三类脚本：第一类“一个疑虑一个实测”，第二类“一个竞品一个同场景对比”，第三类“一个场景一个车主回答”。标题不要写抽象卖点，直接写用户会搜的问题，例如“为什么这台车值得试驾”。",
+            "### 8. 小红书内容打法\n" + "小红书负责把决策材料沉淀下来。建议做家庭用车账本、通勤体验、长途补能、老人小孩乘坐、智能驾驶接管边界、真实花费清单。每篇笔记都要能被收藏，并且能被销售和达人二次复用。",
+            "### 9. 达人脚本与内容资产\n" + f"达人组合建议调用：{creator_names}。评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本资产统一沉淀为五段式：疑虑开场、实测证据、竞品对比、适合人群、试驾行动。当前内容资产可先围绕“{category}”做第一批脚本库。",
+            "### 10. 行动节奏与KPI\n" + "7天：完成自动抓取、分类和脚本方向筛选；14天：上线疑虑验证内容和达人同场景对比；30天：复盘内容质量与线索转化。\nKPI：核心标签正向声量提升、负向疑虑评论占比下降、竞品对比搜索提升、收藏/评论质量提升、试驾/询价线索提升。\n策略复核：方案已按可验证证据、竞品关系和内容资产复用价值完成校准。"
+        ])
     if context.get("drillType") == "content_asset_strategy":
         project = context.get("project") or {}
         summary = context.get("summary") or {}

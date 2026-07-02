@@ -307,7 +307,14 @@ button.permission-locked,.file-button.permission-locked{
 .content-mmn-strategy-panel{
   margin-top:16px;
 }
+.content-ppt-planner-panel{
+  margin-top:16px;
+}
 .content-mmn-strategy{
+  display:grid;
+  gap:12px;
+}
+.content-ppt-planner{
   display:grid;
   gap:12px;
 }
@@ -339,6 +346,39 @@ button.permission-locked,.file-button.permission-locked{
   background:#fff;
   color:#20252a;
 }
+.content-ppt-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  justify-content:flex-end;
+}
+.content-ppt-actions button{
+  min-width:128px;
+}
+.content-ppt-meta{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+.content-ppt-meta div{
+  border:1px solid var(--hairline);
+  border-radius:12px;
+  background:#f7f8f8;
+  padding:12px;
+}
+.content-ppt-meta span,.content-ppt-meta b{
+  display:block;
+}
+.content-ppt-meta span{
+  font-size:11px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.content-ppt-meta b{
+  font-size:16px;
+  color:var(--ink);
+  line-height:1.35;
+}
 .content-mmn-output{
   border:1px solid var(--line);
   border-radius:14px;
@@ -368,6 +408,18 @@ button.permission-locked,.file-button.permission-locked{
 .content-mmn-trace section p{
   font-size:12px;
   line-height:1.6;
+}
+@media(max-width:900px){
+  .content-ppt-meta{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .content-mmn-head{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+  .content-ppt-actions{
+    justify-content:flex-start;
+  }
 }
 .cognition-control-panel,.cognition-mmn-panel{
   margin-bottom:16px;

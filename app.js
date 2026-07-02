@@ -50,6 +50,7 @@ let learningBrandOpen="";
 let cognitionBrandOpen="";
 let contentAssetView="assets",creatorFilter="all",creatorSearch="";
 let contentStrategyState={loading:false,result:null,error:""};
+let contentPptState={loading:false,result:null,error:""};
 let cognitionStrategyState={loading:false,result:null,error:""};
 let socialPluginStatus=null;
 let currentDrillContext=null;
@@ -168,7 +169,7 @@ const editions={
  }
 };
 const headers=["车型","类型","平台","一级赛道","认知标签","情绪","用户身份","购买意向","有效评论","Impact","Growth","Competition"];
-const pageNames={dashboard:"决策驾驶舱",data:"声量数据中心",cognition:"认知赛道诊断",vertical:"垂媒竞争格局",videos:"内容资产中心",actions:"结果与预算",knowhow:"打法知识库",strategykb:"RAG知识库管理",learning:"人工结论学习",architecture:"版本架构",workspace:"空间与权限",config:"项目与权重"};
+const pageNames={dashboard:"决策驾驶舱",data:"声量数据中心",cognition:"认知赛道诊断",vertical:"垂媒竞争格局",videos:"内容资产中心",contentstrategy:"MMN策略输出",actions:"结果与预算",knowhow:"打法知识库",strategykb:"RAG知识库管理",learning:"人工结论学习",architecture:"版本架构",workspace:"空间与权限",config:"项目与权重"};
 function activeEdition(){try{return typeof edition==="string"?edition:loadEdition()}catch{return"china"}}
 function defaultStateForEdition(ed=activeEdition()){return structuredClone(ed==="global"?defaultGlobalState:defaultState)}
 function storageKey(base,ed=activeEdition()){return `${base}:${ed}`}
@@ -1418,6 +1419,7 @@ function renderVideos(){
  renderPlatformBoard("xiaohongshu","#xhs-category-chart","#xhs-board-note");
  renderModelBoard(all);
  renderContentMmnStrategy();
+ renderContentPptPlanner();
  document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产角色</th><th>车型</th><th>标题</th><th>作者</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${x.author||""}</td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
  renderCreatorLibrary();
 }
@@ -1479,6 +1481,7 @@ async function startAssetCrawl(platformKey,slot){
   toast(`正在自动驱动${assetPlatformName(platformKey)}插件抓取：${query}`);
   const data=await api("/api/social-plugin/auto-crawl",{method:"POST",body:JSON.stringify({platform:platformKey,query,limit:50})});
   videoState.files[platformKey][slot]={...(videoState.files?.[platformKey]?.[slot]||{}),source:"自动抓取任务",count:0,items:videoState.files?.[platformKey]?.[slot]?.items||[],crawlTask:{...data.task,platform:platformKey,slot,role,model,startedAt:new Date().toISOString()},taskStatus:"driving"};
+  resetContentPptPlan();
   saveVideoState();
   renderVideos();
   runContentMmnStrategy(true);
@@ -1495,6 +1498,7 @@ async function syncAssetCrawl(platformKey,slot){
   const creatorCount=mergePluginCreators(platformKey,data.dataset.creators||[]);
   if(!items.length&&creatorCount)toast("最新导出只识别到达人画像，未识别到内容明细");
   videoState.files[platformKey][slot]={source:data.dataset.source||"插件自动抓取",count:items.length,syncedAt:new Date().toISOString(),items,pluginExportPath:data.dataset.exportPath||"",exportedAt:data.dataset.exportedAt||"",crawlTask:{query:`${model} 汽车评测`,platform:platformKey,slot,role,model},taskStatus:"synced"};
+  resetContentPptPlan();
   saveVideoState();saveCreatorState();await loadSocialPluginStatus();renderVideos();runContentMmnStrategy(true);
   toast(`已同步 ${model} ${assetPlatformName(platformKey)}内容 ${items.length} 条${creatorCount?`，并沉淀达人 ${creatorCount} 位`:""}`);
  }catch(e){toast(`同步抓取结果失败：${e.message}`)}
@@ -1688,7 +1692,7 @@ async function analyzeCreatorWithQwen(platform,id,button){
 function renderAssetConfig(){
  const el=document.querySelector("#content-asset-config");if(!el)return;
  el.innerHTML=assetSlots.map(s=>`<div class="field"><label>${s.label}车型</label><input data-asset-model="${s.field}" value="${videoState.config?.[s.field]||""}" placeholder="${s.key==="own"?"例如：智己LS8":"可留空"}"></div>`).join("");
- document.querySelectorAll("[data-asset-model]").forEach(input=>input.onchange=input.oninput=()=>{videoState.config[input.dataset.assetModel]=input.value.trim();saveVideoState();renderUploadMatrix();renderModelBoard(allVideoItems());renderContentMmnStrategy()});
+ document.querySelectorAll("[data-asset-model]").forEach(input=>input.onchange=input.oninput=()=>{videoState.config[input.dataset.assetModel]=input.value.trim();resetContentPptPlan();saveVideoState();renderUploadMatrix();renderModelBoard(allVideoItems());renderContentMmnStrategy();renderContentPptPlanner()});
 }
 function renderUploadMatrix(){
  const el=document.querySelector("#content-upload-matrix");if(!el)return;
@@ -1796,6 +1800,107 @@ async function runContentMmnStrategy(silent=false){
   if(!silent)toast("MMN策略暂用本地规则兜底");
  }
  renderContentMmnStrategy();
+ renderContentPptPlanner();
+}
+function strategyPptContext(){
+ const base=contentAssetStrategyContext(),model=base.project?.model||state.config.model,competitors=base.project?.competitors||[];
+ const creatorAssets=["douyin","xiaohongshu"].flatMap(platform=>(creatorState.creators?.[platform]||[]).slice(0,8).map(x=>({platform:assetPlatformName(platform),name:x.name,type:x.type,categories:x.categories||[],strengths:x.strengths||[],fitStages:x.fitStages||[],strategyAssets:x.strategyAssets||[],scriptAssets:x.scriptAssets||[],summary:x.summary||x.publicProfile||""})));
+ const distilledBloggerAssets=(bloggerSkillState.profiles||[]).slice(0,8).map(x=>({name:x.name,platform:x.platform||"",categories:x.categories||[],strengths:x.strengths||[],strategyAssets:x.strategyAssets||[],scriptAssets:x.scriptAssets||[],summary:x.summary||""}));
+ const manual=learnings().filter(x=>x.model===model||competitors.includes(x.model)).slice(-10);
+ return{
+  ...base,
+  drillType:"strategy_ppt_brief",
+  question:"请综合决策驾驶舱、垂媒竞争格局、声量数据中心、抖音/小红书自动抓取内容资产、达人蒸馏和RAG知识，为选中车型输出可直接生成专业PPT的策略方案。外显只呈现MMN多模态策略输出。",
+  presentation:{
+   title:`${model} 内容资产与营销策略方案`,
+   audience:"汽车品牌市场负责人 / 管理层 / MCN内容合作负责人",
+   format:"10页中文策略PPT，咨询腔但通俗易懂",
+   sections:["封面","核心结论","当前核心问题","认知资产 / 负债 / 空位","垂媒竞争格局","声量与用户情绪","抖音内容打法","小红书内容打法","达人脚本与内容资产","行动节奏与KPI"]
+  },
+  knowledge:{
+   manual,
+   strategyKb:strategyKb.slice(-12),
+   creatorAssets,
+   distilledBloggerAssets,
+   modelJudgments:modelJudgmentsFor(model).slice(-10)
+  },
+  outputPolicy:{hideProviders:true,hideDataGaps:true,visibleBrand:"MMN多模态策略输出",gammaReady:true,pptReady:true}
+ };
+}
+function localStrategyPptBrief(ctx){
+ const model=ctx.project?.model||"当前车型",competitors=(ctx.project?.competitors||[]).filter(Boolean),competitorText=competitors.join(" / ")||"核心竞品";
+ const cockpit=ctx.upstream?.cockpit||{},voice=ctx.upstream?.voiceCenter||{},vertical=ctx.upstream?.verticalCompetition||{};
+ const topLabel=(cockpit.priorityLabels?.[0]?.label||ctx.summary?.topCategory||"核心认知"),risk=(cockpit.priorityLabels||[]).find(x=>x.diagnosis==="优先修复")?.label||topLabel;
+ const platform=voice.platforms?.[0]?.key||ctx.summary?.topPlatform||"核心平台",relation=vertical.relations?.[0]||{};
+ const dy=ctx.breakdown?.platforms?.find(x=>/抖音/.test(x.key))?.count||0,xhs=ctx.breakdown?.platforms?.find(x=>/小红书/.test(x.key))?.count||0;
+ const creators=[...(ctx.knowledge?.creatorAssets||[]),...(ctx.knowledge?.distilledBloggerAssets||[])].slice(0,3).map(x=>x.name).filter(Boolean).join(" / ")||"评测型达人、生活方式达人、真实车主";
+ return[`### 1. 封面`,`${model} 内容资产与营销策略方案\nMMN多模态策略输出｜面向品牌市场与内容增长团队`,`### 2. 核心结论`,`${model} 现在最需要的不是再多铺一层内容，而是围绕“${topLabel}”建立一个能被用户听懂、能被达人复述、能被销售承接的购买理由。策略主线建议锁定：用证据修复“${risk}”，用场景放大已有正向资产。`,`### 3. 当前核心问题`,`用户讨论已经把 ${model} 放进 ${competitorText} 的比较池。问题不只是声量大小，而是用户在比较时还缺少一句稳定答案：为什么在同样预算和同样场景下选择 ${model}。`,`### 4. 认知资产 / 负债 / 空位`,`资产：${topLabel} 可以继续放大。\n负债：${risk} 必须用第三方实测、车主证词和销售FAQ优先处理。\n空位：把竞品对比从参数表改成家庭、通勤、长途、补能、智能驾驶等真实选择题。`,`### 5. 垂媒竞争格局`,relation.competitor?`${relation.platform||"垂媒"} ${relation.period||"当前周期"}里，${model} 与 ${relation.competitor} 形成“${relation.status||"竞争对比"}”关系。垂媒内容要少讲配置清单，多讲用户为什么会把两台车放在一起比。`:`垂媒侧的任务是校准竞品语境：用户不是在看孤立卖点，而是在用同价位、同场景、同风险感知做选择。`,`### 6. 声量与用户情绪`,`主平台建议优先看 ${platform}。抖音更适合把疑虑拍成短视频验证，小红书更适合沉淀车主账本、场景清单和避坑问答。当前内容资产中抖音与小红书都应服务同一条购买逻辑，而不是各讲各的。`,`### 7. 抖音内容打法`,`${dy?"已有抖音内容可直接归类复用。":"抖音先按自动抓取任务补齐内容资产。"}建议做三类短视频：一个疑虑一个实测、一个竞品一个同场景对比、一个场景一个车主回答。标题要直接回答“值不值得试驾”。`,`### 8. 小红书内容打法`,`${xhs?"已有小红书笔记可进入脚本拆解。":"小红书先围绕真实车主和场景关键词抓取。"}建议做清单型内容：家庭用车账本、通勤体验、长途补能、老人小孩乘坐、智能驾驶接管边界。重点是让用户收藏后能拿去做购买决策。`,`### 9. 达人脚本与内容资产`,`达人组合建议用：${creators}。评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本资产要沉淀成可复用结构：开场疑虑、实测证据、竞品对比、适合人群、试驾行动。`,`### 10. 行动节奏与KPI`,`7天内完成内容资产抓取与分类；14天内上线疑虑验证内容；30天内形成达人脚本库和销售FAQ。\nKPI看五个指标：核心标签正向声量、负向疑虑占比、竞品对比搜索、收藏/评论质量、试驾/询价线索。`].join("\n\n");
+}
+function resetContentPptPlan(){
+ contentPptState={loading:false,result:null,error:""};
+}
+function strategyPptResult(){
+ const ctx=strategyPptContext();
+ return contentPptState.result||{text:localStrategyPptBrief(ctx),parts:{rules:localStrategyPptBrief(ctx)},context:ctx};
+}
+function strategyPptBriefText(){
+ const result=strategyPptResult(),ctx=result.context||strategyPptContext();
+ return publicMmnText([`# ${ctx.presentation?.title||"MMN策略PPT方案"}`,"","请基于以下MMN策略方案生成一份中文汽车营销策略PPT。风格：专业、克制、有咨询感，但表达要让非数据团队也能听懂。","建议比例：16:9；建议页数：10页；每页保留一个核心判断、一个依据、一个动作。","",result.text||localStrategyPptBrief(ctx)].join("\n"));
+}
+function strategyPptPayload(){
+ const result=strategyPptResult(),ctx=result.context||strategyPptContext(),a=analysis(),text=publicMmnText(result.text||"");
+ const sections=text.split(/\n###\s+/).map(x=>x.trim()).filter(Boolean);
+ const manual=(ctx.knowledge?.manual||[]).map(x=>({label:x.label||"人工判断",conclusion:x.conclusion||x.body||"",recommendation:x.recommendation||"",evidence:x.evidence||"",platform:x.platform||"",kpi:x.kpi||""}));
+ return{title:ctx.presentation?.title||`${ctx.project?.model||state.config.model} MMN策略方案`,model:ctx.project?.model||state.config.model,competitor:(ctx.project?.competitors||[]).join(" / ")||state.config.competitor,account:"MMN多模态策略输出",metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString()},diagnostics:(a.labels||[]).slice(0,8).map(x=>({label:x.label,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),manual:manual.length?manual:sections.slice(1,6).map((x,i)=>({label:`策略页 ${i+1}`,conclusion:x.slice(0,160),recommendation:x.slice(160,330)})),knowhow:sections.slice(0,6).map((x,i)=>({label:`P${i+1}`,message:x.slice(0,180),evidence:"MMN融合决策驾驶舱、声量数据中心、垂媒竞争格局与内容资产",kpi:"按核心标签、疑虑占比、竞品对比搜索、试驾/询价线索复盘"})),calendar:[{week:"第1周",theme:"内容资产校准",task:"完成抖音/小红书抓取、分类、达人脚本方向筛选"},{week:"第2周",theme:"证据内容上线",task:"围绕核心疑虑发布实测、车主证词和竞品同场景对比"},{week:"第3-4周",theme:"策略复盘",task:"按标签声量、评论质量、询价/试驾线索调整投放与达人组合"}]};
+}
+function renderContentPptPlanner(){
+ const box=document.querySelector("#content-ppt-planner"),status=document.querySelector("#content-ppt-status");
+ if(!box)return;
+ const result=strategyPptResult(),ctx=result.context||strategyPptContext(),summary=ctx.summary||{},creators=[...(ctx.knowledge?.creatorAssets||[]),...(ctx.knowledge?.distilledBloggerAssets||[])];
+ if(status)status.textContent=contentPptState.loading?"MMN正在交叉验证":mmnTraceLabel(result);
+ const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||k}</b>${consultingMarkdown(String(v))}</section>`).join("")}</details>`:"";
+ box.innerHTML=`<div class="content-mmn-head"><div><b>${contentPptState.loading?"MMN正在生成策略PPT方案":"MMN策略PPT方案"}</b><span>决策驾驶舱 + 垂媒竞争格局 + 声量数据中心 + 抖音/小红书内容资产 + 达人蒸馏｜外显为MMN多模态策略输出</span></div><div class="content-ppt-actions"><button type="button" class="primary" id="run-content-ppt-plan" ${contentPptState.loading?"disabled":""}>${contentPptState.loading?"生成中…":"生成/刷新方案"}</button><button type="button" class="ghost" id="copy-content-ppt-brief">复制Gamma Brief</button><button type="button" class="ghost" id="download-content-ppt-brief">下载PPT素材</button><button type="button" class="ghost" id="download-content-pptx">下载PPTX</button></div></div><div class="content-ppt-meta"><div><span>策略对象</span><b>${ctx.project?.model||state.config.model}</b></div><div><span>核心竞品</span><b>${(ctx.project?.competitors||[]).join(" / ")||state.config.competitor||"待选择"}</b></div><div><span>内容资产</span><b>${summary.contentSamples?`${summary.topCategory}`:"自动抓取中"}</b></div><div><span>达人资产</span><b>${creators.length?`${creators.length}类可调用资产`:"待蒸馏沉淀"}</b></div></div><div class="content-mmn-output">${consultingMarkdown(String(result.text||""))}</div>${contentPptState.error?`<p class="empty">方案生成失败，已使用MMN本地策略输出：${contentPptState.error}</p>`:""}${parts}`;
+ document.querySelector("#run-content-ppt-plan").onclick=()=>runContentPptPlan();
+ document.querySelector("#copy-content-ppt-brief").onclick=copyContentPptBrief;
+ document.querySelector("#download-content-ppt-brief").onclick=downloadContentPptBrief;
+ document.querySelector("#download-content-pptx").onclick=downloadContentPptx;
+}
+async function runContentPptPlan(){
+ const ctx=strategyPptContext();
+ contentPptState={loading:true,result:{text:localStrategyPptBrief(ctx),parts:{rules:localStrategyPptBrief(ctx)},context:ctx},error:""};
+ renderContentPptPlanner();
+ try{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+  const res=await fetch("/api/ai/fusion-strategy",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({context:ctx}),signal:controller.signal});
+  clearTimeout(timer);
+  const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
+  if(!res.ok||!data.ok)throw new Error(data.error||"MMN策略PPT方案生成失败");
+  contentPptState={loading:false,result:{...data,context:ctx,text:publicMmnText(data.text)},error:""};
+  toast("MMN已完成策略PPT方案交叉验证");
+ }catch(err){
+  contentPptState={loading:false,result:{text:localStrategyPptBrief(ctx),parts:{rules:localStrategyPptBrief(ctx)},context:ctx},error:err.name==="AbortError"?"模型生成超过90秒":err.message};
+  toast("MMN策略PPT方案暂用本地规则兜底");
+ }
+ renderContentPptPlanner();
+}
+async function copyContentPptBrief(){
+ const text=strategyPptBriefText();
+ try{await navigator.clipboard.writeText(text);toast("Gamma Brief 已复制")}
+ catch{downloadContentPptBrief();toast("浏览器不允许直接复制，已下载PPT素材")}
+}
+function downloadContentPptBrief(){
+ const ctx=strategyPptContext();
+ download(`${ctx.presentation?.title||"MMN策略PPT方案"}_GammaBrief.md`,strategyPptBriefText(),"text/markdown");
+}
+async function downloadContentPptx(){
+ try{
+  toast("正在生成策略PPTX…");
+  const res=await fetch("/api/export-pptx",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(strategyPptPayload())});
+  if(!res.ok){const err=await res.json().catch(()=>({error:"PPTX生成失败"}));throw new Error(err.error)}
+  const blob=await res.blob(),a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=`${strategyPptPayload().title}.pptx`;a.click();URL.revokeObjectURL(a.href);
+  toast("策略PPTX已导出");
+ }catch(err){toast(`PPTX导出失败：${err.message}`)}
 }
 async function handleAssetUpload(e){
  const file=e.target.files[0],platformKey=e.target.dataset.platform,slot=e.target.dataset.slot,model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
@@ -1806,6 +1911,7 @@ async function handleAssetUpload(e){
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
   const items=json.dataset.items.map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:file.name}));
   videoState.files[platformKey][slot]={source:file.name,count:items.length,uploadedAt:new Date().toISOString(),items};
+  resetContentPptPlan();
   saveVideoState();renderVideos();runContentMmnStrategy(true);toast(`已导入 ${model} ${assetPlatformName(platformKey)} ${items.length} 条`);
  }catch(err){toast(`内容资产导入失败：${err.message}`)}
  finally{e.target.value=""}
@@ -2468,7 +2574,7 @@ const dashboardTemplateButton=document.querySelector("#dashboard-template");if(d
 document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入数据…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#clear-vertical-data").onclick=()=>{if(confirm("确认清空当前垂媒看板数据？已沉淀的车型资产库不会删除。")){verticalState={sources:[],items:[],assetSummary:verticalState.assetSummary||null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};verticalSearch="";verticalPeriodPickerOpen=false;document.querySelector("#vertical-search").value="";saveVerticalState();renderVertical();toast("当前看板已清空，车型资产库已保留")}};
-document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已同步的抖音/小红书抓取结果会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
+document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已同步的抖音/小红书抓取结果会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";resetContentPptPlan();document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
 document.querySelector("#csv-file").onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const lines=reader.result.trim().split(/\r?\n/).slice(1);const parsed=lines.map(line=>line.split(",").map(x=>x.trim())).filter(r=>r.length>=12).map(r=>r.map((v,i)=>i>=8&&i<=11?+v:v));if(parsed.length){state.rows.push(...parsed);save();render();toast(`已导入 ${parsed.length} 行数据`)}else toast("未识别到有效数据")};reader.readAsText(file,"utf-8")};
 document.querySelector("#learning-form").onsubmit=async e=>{e.preventDefault();const f=e.target,item={edition:activeEdition(),model:f.elements.model.value||state.config.model,label:f.elements.label.value,conclusion:f.elements.conclusion.value.trim(),recommendation:f.elements.recommendation.value.trim(),evidence:f.elements.evidence.value.trim(),platform:f.elements.platform.value.trim(),kpi:f.elements.kpi.value.trim(),stage:f.elements.stage.value,savedAt:new Date().toISOString()};if(!item.conclusion&&!item.recommendation){toast("请先填写结论或建议");return}try{if(session){const data=await api("/api/learnings",{method:"POST",body:JSON.stringify({...item,org_id:session.org_id,user_id:session.user_id})});serverLearnings.unshift({...data.item,savedAt:data.item.saved_at});}else{const items=learnings();items.push(item);saveLearnings(items)}f.elements.conclusion.value="";f.elements.recommendation.value="";f.elements.evidence.value="";f.elements.platform.value="";f.elements.kpi.value="";render();toast(session?"已保存到当前版本企业知识库":"已保存到当前版本本机学习库")}catch(err){toast(`保存失败：${err.message}`)}};
 document.querySelector("#clear-learning").onclick=async()=>{if(confirm(session?"确认清空当前企业空间、当前版本的学习记录？":"确认清空本机当前版本学习记录？")){try{if(session){await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`,{method:"DELETE"});serverLearnings=[]}else saveLearnings([]);render();toast("当前版本学习记录已清空")}catch(err){toast(`清空失败：${err.message}`)}}};
