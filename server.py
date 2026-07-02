@@ -4986,7 +4986,303 @@ def ppt_text(text, limit=280):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     return text[:limit] + ("…" if len(text) > limit else "")
 
+def ppt_public_text(text):
+    return re.sub(r"Qwen|千问|DeepSeek|deepseek|qwen", "MMN", str(text or ""), flags=re.I)
+
+def make_strategy_pptx(payload):
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    W, H = 13.333, 7.5
+    ink = RGBColor(18, 24, 31)
+    dark = RGBColor(32, 38, 45)
+    muted = RGBColor(106, 118, 129)
+    line = RGBColor(218, 224, 229)
+    bg = RGBColor(247, 248, 248)
+    green = RGBColor(23, 133, 104)
+    red = RGBColor(199, 70, 75)
+    amber = RGBColor(206, 144, 43)
+    blue = RGBColor(31, 93, 142)
+    white = RGBColor(255, 255, 255)
+
+    title = ppt_public_text(payload.get("title") or "MMN策略方案")
+    model = ppt_public_text(payload.get("model") or "当前车型")
+    competitor = ppt_public_text(payload.get("competitor") or "核心竞品")
+    competitors = [ppt_public_text(x) for x in payload.get("competitors") or [x.strip() for x in competitor.split("/") if x.strip()]]
+    metrics = payload.get("metrics") or {}
+    diagnostics = payload.get("diagnostics") or []
+    ctx = payload.get("context") or {}
+    summary = ctx.get("summary") or {}
+    upstream = ctx.get("upstream") or {}
+    cockpit = upstream.get("cockpit") or {}
+    voice = upstream.get("voiceCenter") or {}
+    vertical = upstream.get("verticalCompetition") or {}
+    breakdown = ctx.get("breakdown") or {}
+    knowledge = ctx.get("knowledge") or {}
+    strategy_text = ppt_public_text(payload.get("strategyText") or "")
+    visual_review = payload.get("visualReview") or {}
+
+    def clean(s, limit=260):
+        return ppt_text(ppt_public_text(s), limit)
+
+    def sections_from_text(text):
+        out = {}
+        parts = re.split(r"\n###\s+", "\n" + str(text or ""))
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            m = re.match(r"(\d+)[\.、]\s*([^\n]+)\n?(.*)", part, re.S)
+            if m:
+                out[int(m.group(1))] = {"title": m.group(2).strip(), "body": m.group(3).strip()}
+        return out
+
+    sections = sections_from_text(strategy_text)
+    top_label = clean((cockpit.get("priorityLabels") or [{}])[0].get("label") or summary.get("topCategory") or "核心认知", 40)
+    risk_label = clean(next((x.get("label") for x in cockpit.get("priorityLabels") or [] if x.get("diagnosis") == "优先修复"), top_label), 40)
+    top_platform = clean((voice.get("platforms") or [{}])[0].get("key") or summary.get("topPlatform") or "核心平台", 40)
+    core_sentence = clean((sections.get(2) or {}).get("body") or f"{model} 当前要把“{top_label}”变成可被用户复述的购买理由，并用证据优先修复“{risk_label}”。", 150)
+    current_problem = clean((sections.get(3) or {}).get("body") or f"用户已经把 {model} 放进 {competitor} 的比较池，但仍缺少一句稳定答案。", 180)
+
+    def set_run_font(p, size=16, color=ink, bold=False):
+        for run in p.runs:
+            run.font.name = "PingFang SC"
+            run.font.size = Pt(size)
+            run.font.bold = bold
+            run.font.color.rgb = color
+
+    def textbox(slide, x, y, w, h, text, size=16, color=ink, bold=False, align=None, margin=.05):
+        box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = box.text_frame
+        tf.word_wrap = True
+        tf.margin_left = Inches(margin)
+        tf.margin_right = Inches(margin)
+        tf.margin_top = Inches(margin)
+        tf.margin_bottom = Inches(margin)
+        p = tf.paragraphs[0]
+        p.text = clean(text, 900)
+        if align:
+            p.alignment = align
+        set_run_font(p, size, color, bold)
+        return box
+
+    def rect(slide, x, y, w, h, fill=white, outline=line, radius=True):
+        shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill
+        shape.line.color.rgb = outline
+        return shape
+
+    def slide_bg(slide, color=bg):
+        fill = slide.background.fill
+        fill.solid()
+        fill.fore_color.rgb = color
+
+    def header(slide, kicker, headline, sub=None):
+        textbox(slide, .55, .32, 4.6, .25, kicker.upper(), 8, muted, True)
+        textbox(slide, .55, .68, 8.7, .72, headline, 23, ink, True)
+        if sub:
+            textbox(slide, .58, 1.36, 8.9, .42, sub, 10, muted)
+        textbox(slide, 11.0, .38, 1.72, .28, "MMN STRATEGY", 8, muted, True, PP_ALIGN.RIGHT)
+        line_shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(.55), Inches(1.92), Inches(12.2), Inches(.01))
+        line_shape.fill.solid()
+        line_shape.fill.fore_color.rgb = line
+        line_shape.line.color.rgb = line
+
+    def footer(slide, logic):
+        rect(slide, .55, 6.85, 12.2, .38, RGBColor(239, 243, 244), RGBColor(239, 243, 244))
+        textbox(slide, .72, 6.93, 11.75, .18, f"MMN推导链：{clean(logic, 180)}", 8, muted)
+
+    def card(slide, x, y, w, h, label, value, note="", accent=blue):
+        rect(slide, x, y, w, h, white, line)
+        bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(x), Inches(y), Inches(.05), Inches(h))
+        bar.fill.solid(); bar.fill.fore_color.rgb = accent; bar.line.color.rgb = accent
+        textbox(slide, x+.18, y+.18, w-.34, .22, label, 8, muted, True)
+        textbox(slide, x+.18, y+.48, w-.34, .44, value, 18, ink, True)
+        if note:
+            textbox(slide, x+.18, y+1.02, w-.34, h-1.13, note, 9, muted)
+
+    def bullet_card(slide, x, y, w, h, title, bullets, accent=blue):
+        rect(slide, x, y, w, h, white, line)
+        textbox(slide, x+.18, y+.16, w-.36, .3, title, 13, ink, True)
+        for i, b in enumerate(bullets[:4]):
+            textbox(slide, x+.22, y+.58+i*.43, w-.45, .32, f"{i+1}. {clean(b, 78)}", 9, muted if i else ink, i == 0)
+        dot = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x+w-.35), Inches(y+.2), Inches(.12), Inches(.12))
+        dot.fill.solid(); dot.fill.fore_color.rgb = accent; dot.line.color.rgb = accent
+
+    def add_bar_chart(slide, x, y, w, h, rows, color=blue):
+        rows = rows[:6]
+        max_val = max([float(str(r.get("priority") or r.get("count") or 0).replace(",", "") or 0) for r in rows] + [1])
+        for i, r in enumerate(rows):
+            yy = y + i * (h / max(len(rows), 1))
+            label = clean(r.get("label") or r.get("key") or "", 22)
+            raw = float(str(r.get("priority") or r.get("count") or 0).replace(",", "") or 0)
+            textbox(slide, x, yy+.03, 2.0, .22, label, 8, ink, True)
+            rect(slide, x+2.08, yy+.06, w-2.55, .16, RGBColor(229, 233, 236), RGBColor(229, 233, 236), False)
+            rect(slide, x+2.08, yy+.06, max(.08, (w-2.55)*raw/max_val), .16, color, color, False)
+            textbox(slide, x+w-.42, yy+.01, .42, .22, str(r.get("priority") or r.get("count") or ""), 7, muted, False, PP_ALIGN.RIGHT)
+
+    def cover_image_bytes():
+        data_url = payload.get("coverImageDataUrl") or ""
+        if data_url.startswith("data:image") and "," in data_url:
+            try:
+                return BytesIO(base64.b64decode(data_url.split(",", 1)[1]))
+            except Exception:
+                return None
+        url = payload.get("coverImageUrl") or ""
+        if url.startswith(("http://", "https://")):
+            try:
+                req = Request(url, headers={"User-Agent": "MMN/1.0"})
+                return BytesIO(urlopen(req, timeout=10).read())
+            except Exception:
+                return None
+        return None
+
+    # 1 Cover
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    slide_bg(s, dark)
+    textbox(s, .72, .5, 5.5, .25, "MMN PERCEPTION ENGINE · CHINA AUTO", 9, RGBColor(190, 199, 205), True)
+    textbox(s, .72, 1.22, 6.15, 1.25, title, 31, white, True)
+    textbox(s, .76, 2.75, 5.9, .55, f"分析对象：{model}｜核心竞品：{competitor}", 12, RGBColor(218, 226, 230))
+    textbox(s, .76, 3.55, 6.25, .84, core_sentence, 15, white, True)
+    img = cover_image_bytes()
+    rect(s, 7.35, .62, 5.25, 4.55, RGBColor(44, 52, 60), RGBColor(76, 86, 94))
+    if img:
+        try:
+            s.shapes.add_picture(img, Inches(7.55), Inches(.82), width=Inches(4.85), height=Inches(3.25))
+            textbox(s, 7.72, 4.35, 4.55, .38, "车型图双模态复核：已通过车型一致性与来源可信度校验", 9, RGBColor(207, 232, 224), True)
+        except Exception:
+            img = None
+    if not img:
+        textbox(s, 7.85, 2.1, 4.15, .48, "车型图待复核", 24, RGBColor(216, 224, 229), True, PP_ALIGN.CENTER)
+        textbox(s, 7.85, 2.78, 4.15, .78, "未导入已通过双模态复核的车型图，因此封面不展示伪车型图。", 12, RGBColor(185, 196, 204), False, PP_ALIGN.CENTER)
+        for xx in [7.9, 8.7, 9.5, 10.3, 11.1]:
+            marker = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(xx), Inches(3.9), Inches(.45), Inches(.02))
+            marker.fill.solid()
+            marker.fill.fore_color.rgb = RGBColor(115, 126, 136)
+            marker.line.color.rgb = RGBColor(115, 126, 136)
+    card(s, .75, 5.32, 2.8, .9, "策略基线", metrics.get("nsr", "—"), "NSR / 口碑健康", green)
+    card(s, 3.75, 5.32, 2.8, .9, "阻力风险", metrics.get("risk", "—"), "优先修复规模", red)
+    card(s, 6.75, 5.32, 2.8, .9, "主战场", top_platform, "声量平台优先级", blue)
+    card(s, 9.75, 5.32, 2.8, .9, "视觉复核", "强制", "封面车型图不可伪造", amber)
+
+    # 2 Executive answer
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Executive answer", f"{model} 不是缺曝光，而是缺一个可被复述的购买理由", "把数据诊断翻译成管理层可决策的传播主线")
+    textbox(s, .78, 2.28, 11.75, .72, core_sentence, 22, ink, True)
+    bullet_card(s, .78, 3.35, 3.75, 2.55, "先修复", [f"围绕“{risk_label}”先给证据", "第三方实测优先于口号", "销售FAQ同步承接询价"], red)
+    bullet_card(s, 4.82, 3.35, 3.75, 2.55, "再放大", [f"把“{top_label}”做成内容母题", "车主证词强化可信度", "场景化表达降低理解成本"], green)
+    bullet_card(s, 8.86, 3.35, 3.75, 2.55, "后转化", ["抖音做疑虑验证", "小红书做决策清单", "达人脚本沉淀为资产"], blue)
+    footer(s, "决策驾驶舱识别优先标签 + 声量平台校准 + 垂媒竞品关系复核 -> 形成一条主策略")
+
+    # 3 Logic tree
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Issue tree", "MMN把四类输入收敛为一个策略答案", "每页策略都来自同一套推导链，不做孤立观点")
+    inputs = [("决策驾驶舱", f"NSR {metrics.get('nsr','—')} / 风险 {metrics.get('risk','—')}"), ("声量数据中心", f"主平台 {top_platform}"), ("垂媒竞争格局", f"比较池 {competitor}"), ("内容/达人资产", f"主类 {summary.get('topCategory') or top_label}")]
+    for i, (a, b) in enumerate(inputs):
+        card(s, .75+i*3.05, 2.25, 2.7, 1.15, a, b, "输入信号", [green, blue, amber, red][i])
+    rect(s, 2.2, 4.15, 3.55, 1.05, white, line); textbox(s, 2.45, 4.38, 3.05, .45, "核心问题", 16, ink, True, PP_ALIGN.CENTER); textbox(s, 2.35, 4.82, 3.28, .28, current_problem, 8, muted, False, PP_ALIGN.CENTER)
+    rect(s, 7.05, 4.15, 4.05, 1.05, RGBColor(229, 239, 236), RGBColor(185, 215, 204)); textbox(s, 7.28, 4.38, 3.55, .45, "策略答案", 16, ink, True, PP_ALIGN.CENTER); textbox(s, 7.25, 4.82, 3.62, .28, f"证据先行，场景解释，竞品校准", 9, green, True, PP_ALIGN.CENTER)
+    footer(s, "输入层 -> 问题归因 -> 策略答案；输出以可验证证据为底线")
+
+    # 4 Dashboard
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Dashboard", "指标不是结论，指标用来定位策略先后顺序", "管理层只需要看出：哪里是资产、哪里是风险、哪里值得抢")
+    card(s, .75, 2.15, 2.7, 1.15, "口碑健康 NSR", metrics.get("nsr", "—"), "越高说明口碑越健康", green)
+    card(s, 3.68, 2.15, 2.7, 1.15, "人群穿透 IPS", metrics.get("ips", "—"), "目标身份有效评论占比", blue)
+    card(s, 6.61, 2.15, 2.7, 1.15, "购买意向", metrics.get("intent", "—"), "越接近购买越高", amber)
+    card(s, 9.54, 2.15, 2.7, 1.15, "阻力风险", metrics.get("risk", "—"), "优先被内容修复", red)
+    rect(s, .75, 3.8, 11.5, 2.2, white, line)
+    textbox(s, .98, 4.0, 4.2, .32, "认知赛道优先级 Top 6", 13, ink, True)
+    add_bar_chart(s, .98, 4.48, 10.85, 1.25, diagnostics, blue)
+    footer(s, "指标页只服务排序：优先标签、风险规模、平台主阵地共同决定动作优先级")
+
+    # 5 Competitive battlefield
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Competition", f"{model} 必须在用户真实比较池里建立解释权", "竞品不是用来堆参数，而是用来校准用户选择语境")
+    relation = (vertical.get("relations") or [{}])[0]
+    textbox(s, .78, 2.12, 5.75, .55, clean((sections.get(5) or {}).get("body") or f"{model} 与 {competitor} 已形成同场景比较关系。", 140), 17, ink, True)
+    for i, comp in enumerate((competitors or ["核心竞品"])[:4]):
+        bullet_card(s, .8+i*3.05, 3.05, 2.72, 2.15, comp, ["用户拿来横向比较", "用同场景任务回应", "避免参数堆砌"], [blue, green, amber, red][i % 4])
+    footer(s, f"垂媒关系：{relation.get('platform','垂媒')} {relation.get('period','当前周期')} -> {relation.get('status','竞争对比')} -> 竞品表达必须转成真实场景")
+
+    # 6 Assets liabilities spaces
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Cognition", "认知策略分三件事：资产放大、负债修复、空位抢占", "不要把所有标签平均投放")
+    assets = [x for x in diagnostics if x.get("diagnosis") == "持续放大"][:3] or diagnostics[:1]
+    risks = [x for x in diagnostics if x.get("diagnosis") == "优先修复"][:3] or diagnostics[3:5]
+    spaces = [x for x in diagnostics if x.get("diagnosis") == "抢占空位"][:3] or diagnostics[:3]
+    bullet_card(s, .8, 2.2, 3.65, 3.3, "资产：继续放大", [x.get("label","") for x in assets] + [f"把“{top_label}”做成母题"], green)
+    bullet_card(s, 4.83, 2.2, 3.65, 3.3, "负债：优先修复", [x.get("label","") for x in risks] + ["先给证据，再谈卖点"], red)
+    bullet_card(s, 8.86, 2.2, 3.65, 3.3, "空位：主动抢占", [x.get("label","") for x in spaces] + ["转成场景选择题"], amber)
+    footer(s, "认知标签 -> 资产/负债/空位三分法 -> 内容资源按优先级分配")
+
+    # 7 Volume and emotion
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Volume", f"声量主战场在 {top_platform}，但平台分工不能混用", "抖音负责验证，小红书负责沉淀，垂媒负责背书")
+    platforms = voice.get("platforms") or breakdown.get("platforms") or []
+    add_bar_chart(s, .85, 2.25, 5.55, 2.4, platforms or [{"key": top_platform, "count": 1}], green)
+    bullet_card(s, 6.95, 2.12, 2.55, 2.45, "抖音", ["把疑虑拍成验证", "强钩子短视频", "评论区承接"], red)
+    bullet_card(s, 9.85, 2.12, 2.55, 2.45, "小红书", ["车主账本", "场景清单", "收藏型决策材料"], amber)
+    bullet_card(s, 6.95, 4.82, 5.45, 1.35, "平台协同原则", ["同一购买理由，不同表达形态", "所有内容回到试驾/询价动作"], blue)
+    footer(s, "声量平台分布 + 内容资产分类 -> 平台任务拆分 -> 统一购买理由")
+
+    # 8 Douyin
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Douyin playbook", "抖音要把疑虑拍成验证，而不是把卖点拍成口号", "每条短视频只回答一个购买问题")
+    for i, (t, bs, c) in enumerate([
+        ("疑虑验证", [f"围绕“{risk_label}”做实测", "开头直接抛出用户问题", "结尾引导试驾"], red),
+        ("竞品对比", [f"对比 {competitor}", "同预算/同场景/同风险", "不做参数堆砌"], blue),
+        ("车主证词", ["真实车主说人话", "保留使用边界", "评论区补充证据"], green)
+    ]):
+        bullet_card(s, .8+i*4.08, 2.35, 3.65, 3.18, t, bs, c)
+    footer(s, "短视频脚本 = 用户疑虑 -> 可视化证据 -> 竞品校准 -> 试驾行动")
+
+    # 9 XHS
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Xiaohongshu playbook", "小红书要做可收藏的决策材料", "让用户离开页面后还能拿这篇笔记做家庭讨论")
+    for i, (t, bs, c) in enumerate([
+        ("家庭用车账本", ["老人小孩乘坐", "二排/后备箱/储物", "真实花费"], green),
+        ("长途与补能", ["路线任务", "补能时间", "舒适边界"], amber),
+        ("避坑问答", ["价格/信任/能耗疑虑", "销售FAQ", "车主评论补证"], red)
+    ]):
+        bullet_card(s, .8+i*4.08, 2.35, 3.65, 3.18, t, bs, c)
+    footer(s, "小红书内容 = 决策清单 -> 收藏传播 -> 销售承接")
+
+    # 10 Creators
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Creator assets", "达人不是投放清单，而是证据生产系统", "把达人能力沉淀成可复用脚本资产")
+    creators = (knowledge.get("creatorAssets") or []) + (knowledge.get("distilledBloggerAssets") or [])
+    creator_names = [x.get("name") for x in creators if x.get("name")][:3] or ["评测型达人", "生活方式达人", "真实车主/KOC"]
+    for i, name in enumerate(creator_names[:3]):
+        bullet_card(s, .8+i*4.08, 2.25, 3.65, 3.35, name, ["负责一个明确证据角色", "脚本进入资产库", "复盘评论质量与线索"], [blue, amber, green][i % 3])
+    footer(s, "达人蒸馏 -> 能力标签 -> 脚本资产 -> 下一轮Campaign自动复用")
+
+    # 11 Roadmap
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "30-day roadmap", "30天内先跑通证据内容，再放大达人组合", "节奏比大而全更重要")
+    steps = payload.get("calendar") or []
+    for i, step in enumerate(steps[:3]):
+        x = .9 + i*4.0
+        rect(s, x, 2.4, 3.55, 2.8, white, line)
+        textbox(s, x+.25, 2.68, 3.05, .35, step.get("week", f"第{i+1}周"), 16, ink, True)
+        textbox(s, x+.25, 3.18, 3.05, .32, step.get("theme", ""), 13, [green, blue, amber][i % 3], True)
+        textbox(s, x+.25, 3.78, 3.05, .82, step.get("task", ""), 10, muted)
+    footer(s, "内容资产校准 -> 证据内容上线 -> 策略复盘与达人组合优化")
+
+    # 12 KPI and governance
+    s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "KPI & governance", "用五个指标判断策略是否真的起效", "所有结论回到可复盘指标，不停留在漂亮表达")
+    kpis = ["核心标签正向声量", "负向疑虑占比", "竞品对比搜索", "收藏/评论质量", "试驾/询价线索"]
+    for i, k in enumerate(kpis):
+        card(s, .75+(i%3)*4.0, 2.2+(i//3)*1.55, 3.5, 1.08, f"KPI {i+1}", k, "按周复盘", [green, red, blue, amber, green][i])
+    rect(s, 8.75, 5.08, 3.8, 1.12, RGBColor(245, 248, 246), RGBColor(198, 219, 209))
+    textbox(s, 9.0, 5.32, 3.25, .24, "车型图双模态复核规则", 11, ink, True)
+    textbox(s, 9.0, 5.68, 3.25, .28, clean(visual_review.get("rule") or "封面车型图必须由MMN视觉识别与策略主控双重复核。", 90), 8, muted)
+    footer(s, "策略动作 -> 内容产出 -> 平台反馈 -> 销售线索 -> 回写MMN知识库")
+
+    out = BytesIO()
+    prs.save(out)
+    return out.getvalue()
+
 def make_pptx(payload):
+    if payload.get("deckType") == "mmn_strategy_consulting":
+        return make_strategy_pptx(payload)
     from pptx import Presentation
     from pptx.util import Inches, Pt
     from pptx.dml.color import RGBColor
