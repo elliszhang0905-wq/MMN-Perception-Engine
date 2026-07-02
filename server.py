@@ -74,6 +74,10 @@ SOCIAL_PLUGIN_URLS = {
     "douyin": "https://www.douyin.com/search/%E6%B1%BD%E8%BD%A6%E8%AF%84%E6%B5%8B",
     "xiaohongshu": "https://www.xiaohongshu.com/search_result?keyword=%E6%B1%BD%E8%BD%A6%E8%AF%84%E6%B5%8B"
 }
+SOCIAL_PLUGIN_TASK_LABELS = {
+    "douyin": "抖音视频自动采集",
+    "xiaohongshu": "小红书笔记自动采集"
+}
 BLOGGER_SKILL_IMPORT_ROOT = Path(os.getenv("MMN_BLOGGER_SKILL_IMPORT_ROOT", str(ROOT / "imports" / "chassis_reviews"))).expanduser().resolve()
 BLOGGER_SKILL_TAGS = [
     "滤震", "支撑", "侧倾", "转向手感", "车身收敛", "后桥跟随", "制动姿态", "NVH", "轮胎匹配",
@@ -818,6 +822,64 @@ def social_plugin_status():
         "mode": "export-folder-bridge",
         "note": "当前插件未开放 externally_connectable，MMN 先通过打开采集页 + 同步插件导出 Excel 完成对接。",
         "platforms": platforms
+    }
+
+def social_search_url(platform, query):
+    platform = social_platform(platform)
+    q = quote(str(query or "汽车评测").strip() or "汽车评测")
+    if platform == "xiaohongshu":
+        return f"https://www.xiaohongshu.com/search_result?keyword={q}"
+    return f"https://www.douyin.com/search/{q}"
+
+def run_osascript(script, timeout=12):
+    proc = subprocess.run(
+        ["osascript"],
+        input=script,
+        text=True,
+        capture_output=True,
+        timeout=timeout
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "AppleScript 执行失败").strip())
+    return (proc.stdout or "").strip()
+
+def drive_social_plugin_crawl(platform, query, limit=50):
+    if not DESKTOP_BRIDGE_ENABLED:
+        raise ValueError("当前部署未启用桌面采集插件桥，无法自动驱动本机 Chrome 插件。")
+    manifest = social_plugin_manifest()
+    if not manifest:
+        raise ValueError("未识别到 Chrome 采集插件，请先确认社媒助手插件已安装并启用。")
+    platform = social_platform(platform)
+    query = str(query or "").strip() or "汽车评测"
+    url = social_search_url(platform, query)
+    task_id = stable_id("social-auto-crawl", platform, query, now())
+    script = f'''
+tell application "Google Chrome"
+  activate
+  if (count of windows) = 0 then make new window
+  set crawlTab to make new tab at end of tabs of front window with properties {{URL:"{url}"}}
+  set active tab index of front window to (count of tabs of front window)
+end tell
+delay 2
+tell application "System Events"
+  tell process "Google Chrome"
+    keystroke "c" using option down
+  end tell
+end tell
+delay 1
+return "ok"
+'''
+    run_osascript(script)
+    return {
+        "taskId": task_id,
+        "platform": platform,
+        "platformName": "小红书" if platform == "xiaohongshu" else "抖音",
+        "query": query,
+        "limit": int(limit or 50),
+        "url": url,
+        "plugin": manifest,
+        "mode": "chrome-apple-events-rpa",
+        "message": f"已自动打开{SOCIAL_PLUGIN_TASK_LABELS[platform]}入口：{query}。Chrome 插件侧边栏已被唤起，采集完成后点击同步结果入库。"
     }
 
 def thailand_market_payload():
@@ -5089,6 +5151,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 url = body.get("url") or SOCIAL_PLUGIN_URLS[platform]
                 subprocess.Popen(["open", "-a", "Google Chrome", url])
                 self.send_json({"ok": True, "platform": platform, "url": url, "message": "已打开 Chrome 采集页面"})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-plugin/auto-crawl":
+            try:
+                body = self.read_json()
+                platform = social_platform(body.get("platform"))
+                query = body.get("query") or body.get("keyword") or "汽车评测"
+                limit = int(body.get("limit") or 50)
+                self.send_json({"ok": True, "task": drive_social_plugin_crawl(platform, query, limit)})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

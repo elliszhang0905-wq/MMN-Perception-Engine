@@ -1300,11 +1300,14 @@ async function startAssetCrawl(platformKey,slot){
  const model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
  if(!model)return toast("请先设置车型，再启动自动抓取");
  const query=`${model} 汽车评测`;
- const opened=await openSocialPlugin(platformKey,query);
- if(!opened)return;
- videoState.files[platformKey][slot]={...(videoState.files?.[platformKey]?.[slot]||{}),source:"自动抓取任务",count:0,items:videoState.files?.[platformKey]?.[slot]?.items||[],crawlTask:{query,platform:platformKey,slot,role,model,openedAt:new Date().toISOString()},taskStatus:"opened"};
- saveVideoState();
- renderUploadMatrix();
+ try{
+  toast(`正在自动驱动${assetPlatformName(platformKey)}插件抓取：${query}`);
+  const data=await api("/api/social-plugin/auto-crawl",{method:"POST",body:JSON.stringify({platform:platformKey,query,limit:50})});
+  videoState.files[platformKey][slot]={...(videoState.files?.[platformKey]?.[slot]||{}),source:"自动抓取任务",count:0,items:videoState.files?.[platformKey]?.[slot]?.items||[],crawlTask:{...data.task,platform:platformKey,slot,role,model,startedAt:new Date().toISOString()},taskStatus:"driving"};
+  saveVideoState();
+  renderUploadMatrix();
+  toast(data.task?.message||"已自动驱动 Chrome 插件开始抓取");
+ }catch(e){toast(`自动抓取启动失败：${e.message}`)}
 }
 async function syncAssetCrawl(platformKey,slot){
  const model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
@@ -1513,7 +1516,7 @@ function renderAssetConfig(){
 }
 function renderUploadMatrix(){
  const el=document.querySelector("#content-upload-matrix");if(!el)return;
- el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频自动抓取":"种草笔记自动抓取"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=+file?.count||file?.items?.length||0,opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":opened?"pending":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${synced?`<small>已同步 ${count} 条｜${file.source||"插件导出"}</small>`:opened?`<small>采集任务已打开｜${query}</small>`:`<small>等待自动抓取</small>`}</div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>开始抓取</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
+ el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频自动抓取":"种草笔记自动抓取"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=+file?.count||file?.items?.length||0,driving=file?.taskStatus==="driving",opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":driving||opened?"pending":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${synced?`<small>已同步 ${count} 条｜${file.source||"插件导出"}</small>`:driving?`<small>自动驱动中｜${query}</small>`:opened?`<small>采集任务已打开｜${query}</small>`:`<small>等待自动抓取</small>`}</div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>${driving?"重新抓取":"开始抓取"}</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
  document.querySelectorAll("[data-asset-crawl]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetCrawl.split(":");startAssetCrawl(platform,slot)});
  document.querySelectorAll("[data-asset-sync]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetSync.split(":");syncAssetCrawl(platform,slot)});
 }
