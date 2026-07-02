@@ -1920,20 +1920,38 @@ def call_openai(messages, temperature=.35):
 def rule_strategy(context):
     summary = context.get("summary", {})
     breakdown = context.get("breakdown", {})
-    labels = breakdown.get("labels") or []
-    platforms = breakdown.get("platforms") or []
+    upstream = context.get("upstream") or {}
+    cockpit = upstream.get("cockpit") or {}
+    voice = upstream.get("voiceCenter") or {}
+    vertical = upstream.get("verticalCompetition") or {}
+    labels = breakdown.get("labels") or voice.get("labels") or cockpit.get("priorityLabels") or breakdown.get("categories") or []
+    platforms = breakdown.get("platforms") or voice.get("platforms") or []
     top_label = labels[0].get("key") if labels else context.get("drillKey", "核心标签")
+    if labels and not labels[0].get("key") and labels[0].get("label"):
+        top_label = labels[0].get("label")
     top_platform = platforms[0].get("key") if platforms else "核心平台"
     negative = summary.get("negativeScore", 0)
     positive = summary.get("positiveScore", 0)
     mode = "优先修复" if negative > positive else "资产放大"
+    if context.get("drillType") == "content_asset_strategy":
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        relation_copy = (
+            f"{relation.get('platform','垂媒')} {relation.get('period','')}：与{relation.get('competitor','核心竞品')}形成{relation.get('status','竞争对比')}，"
+            f"正向排名{relation.get('positiveRank','未上榜')}、反向排名{relation.get('negativeRank','未上榜')}。"
+        ) if relation else "垂媒竞争格局用于校准竞品表达，优先把参数对比翻译成用户真实场景。"
+        return "\n".join([
+            f"核心营销结论：{context.get('project',{}).get('model', context.get('drillKey','当前车型'))} 应围绕“{top_label}”采取“{mode}”策略，把决策驾驶舱、声量数据中心和垂媒竞争格局合并成一个可执行传播判断。",
+            f"三大数据依据：决策驾驶舱显示正向分 {positive}、负向风险 {negative}；声量数据中心主平台为 {top_platform}；{relation_copy}",
+            f"营销动作：在 {top_platform} 优先输出证据型内容，将“{top_label}”拆成第三方实测、车主证词、场景短视频和销售FAQ；竞品表达只做同场景对比，不做参数堆砌。",
+            "KPI：核心标签正向声量提升、负向疑虑评论占比下降、垂媒正向排名提升、竞品对比搜索占比提升、试驾/询价线索提升。"
+        ])
     return "\n".join([
         f"核心判断：当前围绕“{top_label}”应采取“{mode}”策略。",
         f"关键触发点：样本量 {summary.get('samples', 0)}，正向分 {positive}，负向风险 {negative}。",
         f"平台动作：优先在 {top_platform} 制作证据型内容，并将高频问题转成FAQ、短视频脚本和销售话术。",
         "证据链：第三方实测、真实车主反馈、官方解释三类素材同步沉淀。",
-        "KPI：情绪负向占比下降、目标标签正向声量提升、收藏/询价/试驾线索改善。",
-        "数据缺口：如缺少原始评论、字幕、作者类型、互动量和商业化标记，应先补齐。"
+        "KPI：情绪负向占比下降、目标标签正向声量提升、收藏/询价/试驾线索改善。"
     ])
 
 MMN_OUTPUT_STYLE = (
@@ -1945,13 +1963,24 @@ MMN_OUTPUT_STYLE = (
 )
 
 def llm_strategy_prompt(context, engine_name):
-    system = (
-        f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
-        "请基于输入的数据拆解、词云、know-how、learning与RAG引用，生成可执行、可复盘的中文汽车营销建议。"
-        "必须包含：核心判断、关键触发点、内容策略、平台动作、证据链、KPI、数据缺口。"
-        "不要编造不存在的数据；如果依据不足，请明确说明。"
-        + MMN_OUTPUT_STYLE
-    )
+    if context.get("drillType") == "content_asset_strategy":
+        system = (
+            f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
+            "这是一份内容资产中心的外显策略交付。你必须综合调用输入中的三大上游板块：决策驾驶舱、声量数据中心、垂媒竞争格局，再结合抖音/小红书内容资产归类。"
+            "输出必须只包含：核心营销结论、三大数据依据、营销动作、KPI。"
+            "不要输出“数据缺口”“依据不足”“尚未同步”“尚未创建任务”等字样；缺失项只作为内部质量判断，不进入外显策略。"
+            "底层模型名称不要作为主标题，统一以MMN模型策略口径交付。"
+            "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
+            + MMN_OUTPUT_STYLE
+        )
+    else:
+        system = (
+            f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
+            "请基于输入的数据拆解、词云、know-how、learning与RAG引用，生成可执行、可复盘的中文汽车营销建议。"
+            "必须包含：核心判断、关键触发点、内容策略、平台动作、证据链、KPI。"
+            "不要编造不存在的数据；如果依据不足，请明确说明。"
+            + MMN_OUTPUT_STYLE
+        )
     user = "请基于以下本地声量拆解生成策略：\n" + json.dumps(context, ensure_ascii=False, indent=2)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -2422,6 +2451,20 @@ def parse_json_object(text):
         raise
 
 def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None, rule_text=None):
+    def without_gap_sections(text):
+        lines = str(text or "").splitlines()
+        kept, skip = [], False
+        blocked = re.compile(r"数据缺口|依据不足|尚未同步|尚未创建任务|需要补充的数据|缺失")
+        heading = re.compile(r"^\s*(#{1,6}\s*)?(一、|二、|三、|四、|五、|六、|七、|八、|\d+[\.、]|[-*]\s*)?")
+        for line in lines:
+            if blocked.search(line):
+                skip = True
+                continue
+            if skip and line.strip() and heading.match(line) and not line.startswith((" ", "\t")):
+                skip = False
+            if not skip:
+                kept.append(line)
+        return "\n".join(kept).strip()
     available = []
     if qwen_text:
         available.append(("MMN主控执行引擎", qwen_text))
@@ -2433,6 +2476,45 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         available.append(("规则引擎", rule_text))
     if not available:
         return "MMN融合策略暂不可用：没有可用模型或规则结果。"
+    if context.get("drillType") == "content_asset_strategy":
+        project = context.get("project") or {}
+        summary = context.get("summary") or {}
+        upstream = context.get("upstream") or {}
+        cockpit = upstream.get("cockpit") or {}
+        voice = upstream.get("voiceCenter") or {}
+        vertical = upstream.get("verticalCompetition") or {}
+        labels = cockpit.get("priorityLabels") or voice.get("labels") or []
+        platforms = voice.get("platforms") or []
+        top_label = (labels[0].get("label") or labels[0].get("key")) if labels else summary.get("topCategory", "核心认知")
+        top_platform = platforms[0].get("key") if platforms else summary.get("topPlatform", "核心平台")
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        competitor = relation.get("competitor") or (project.get("competitors") or ["核心竞品"])[0]
+        rule_clean = without_gap_sections(rule_text or "")
+        qwen_clean = without_gap_sections(qwen_text or "")
+        deepseek_clean = without_gap_sections(deepseek_text or "")
+        return "\n".join([
+            "### 核心营销结论",
+            f"{project.get('model', context.get('drillKey', '当前车型'))} 的下一步不是继续堆内容数量，而是把决策驾驶舱识别出的“{top_label}”优先级、声量数据中心里的“{top_platform}”主阵地，以及垂媒里与 {competitor} 的竞争关系合并成一个清晰购买理由。",
+            "",
+            "### 三大数据依据",
+            f"1. 决策驾驶舱：NSR {cockpit.get('nsr', 0)}，正向分 {cockpit.get('positiveScore', summary.get('positiveScore', 0))}，负向风险 {cockpit.get('negativeScore', summary.get('negativeScore', 0))}，优先判断落在“{top_label}”。",
+            f"2. 声量数据中心：主平台为“{top_platform}”，内容表达要围绕高声量平台重写，不做平均投放。",
+            f"3. 垂媒竞争格局：{relation.get('platform','垂媒')} {relation.get('period','')} 显示与 {competitor} 的关系为“{relation.get('status','竞争对比')}”，需要把对比从参数表转为真实场景。",
+            "",
+            "### 营销动作",
+            f"1. 内容动作：围绕“{top_label}”做第三方实测、车主证词、场景短视频和销售FAQ四类资产。",
+            f"2. 竞品动作：对 {competitor} 做同场景对比，标题直接回答用户为什么选择 {project.get('model', context.get('drillKey', '本品'))}。",
+            "3. 达人动作：评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。",
+            "",
+            "### KPI",
+            "核心标签正向声量提升、负向疑虑评论占比下降、垂媒正向排名提升、竞品对比搜索占比提升、试驾/询价线索提升。",
+            "",
+            "### MMN交叉验证结论",
+            qwen_clean.split("\n", 1)[0] if qwen_clean else "主控模型建议采用证据型内容承接。",
+            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "质检模型建议用竞品关系校准表达。",
+            rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以可验证证据作为策略底线。"
+        ])
     common = "\n".join([f"- {name}：{text[:500]}" for name, text in available])
     return "\n".join([
         "核心判断：综合多模型与规则引擎结果，优先采用可被当前数据和RAG依据支持的策略，不采纳无证据扩展。",
@@ -2632,6 +2714,7 @@ def classify_video_title(title):
     t = str(title or "")
     rules = [
         ("价格权益", "价格|售价|权益|优惠|补贴|定金|盲订|锁单|性价比|贵不贵|值不值|购车|金融"),
+        ("购买阻塞点", "劝退|不买|缺点|槽点|问题|故障|投诉|异响|召回|翻车|后悔|失望|焦虑|担心|质疑|避坑|智商税|不值"),
         ("上市发布", "上市|发布|首发|发布会|预售|开启交付|交付|亮相|新车|官宣"),
         ("竞品对比", "对比|横评|大战|吊打|不输|胜过|打得过|PK|pk|vs|VS|Model|小米|理想|蔚来|极氪|特斯拉"),
         ("智驾科技", "智驾|智能驾驶|自动驾驶|NOA|城市NOA|辅助驾驶|激光雷达|端到端|泊车|座舱|车机|语音|OTA|芯片"),
@@ -2640,13 +2723,16 @@ def classify_video_title(title):
         ("空间舒适", "空间|后排|二排|座椅|舒适|家用|家庭|亲子|后备箱|露营|NVH|静谧"),
         ("外观内饰", "外观|颜值|设计|内饰|配色|车漆|轮毂|灯|氛围灯|豪华|质感"),
         ("安全质量", "安全|碰撞|质量|异响|故障|召回|品控|耐久|自燃|刹不住|投诉"),
+        ("身份表达", "面子|豪华|格调|审美|设计感|精英|年轻人|家庭用户|奶爸|宝妈|女性|商务|老板|高级|质感|颜值"),
         ("用户口碑", "车主|真实体验|提车|用车|试驾|测评|长测|口碑|后悔|满意|吐槽"),
         ("流量热点", "爆了|热搜|刷屏|出圈|争议|翻车|雷军|余承东|老板|大事件|热点"),
     ]
     for name, pattern in rules:
         if re.search(pattern, t, re.I):
             return name
-    return "其他内容"
+    if re.search(r"汽车|新能源|SUV|MPV|轿车|车系|车型|试驾|评测|体验|懂车|车主|4S|门店|订单|销量", t, re.I):
+        return "综合评测"
+    return "综合评测"
 
 def infer_platform(text):
     s = str(text or "").lower()
@@ -2719,11 +2805,12 @@ def build_video_dataset_from_workbook(data, filename):
             model = str(row[model_i] if model_i is not None and model_i < len(row) and row[model_i] else "").strip()
             if not model:
                 model = infer_model(" ".join([str(title), search_text, topic_text]))
+            classify_text = " ".join([str(title), search_text, topic_text, str(platform or ""), str(row[author_i] if author_i is not None and author_i < len(row) and row[author_i] else "")])
             item = {
                 "platform": str(platform or "未知平台").strip(),
                 "model": model,
                 "title": str(title).strip(),
-                "category": classify_video_title(title),
+                "category": classify_video_title(classify_text),
                 "author": str(row[author_i] if author_i is not None and author_i < len(row) and row[author_i] else "").strip(),
                 "date": str(row[date_i] if date_i is not None and date_i < len(row) and row[date_i] else "").strip(),
                 "likes": num(row[like_i] if like_i is not None and like_i < len(row) else 0),
@@ -2732,6 +2819,8 @@ def build_video_dataset_from_workbook(data, filename):
                 "shares": num(row[share_i] if share_i is not None and share_i < len(row) else 0),
                 "plays": num(row[play_i] if play_i is not None and play_i < len(row) else 0),
                 "url": url,
+                "searchText": search_text,
+                "topicText": topic_text,
                 "sheet": sheet,
                 "source": filename
             }
@@ -3312,6 +3401,54 @@ def summarize_vertical_assets(platform):
         "relationCount": int(rank_row["relation_count"] or 0),
         "periodCount": int(rank_row["period_count"] or 0),
         "topBrands": [dict(x) for x in brands]
+    }
+
+def vertical_assets_payload(platform="all", limit=5000):
+    platforms = VERTICAL_PLATFORMS if platform in ("", "all", "全部来源") else [platform]
+    summaries = [summarize_vertical_assets(p) for p in platforms if p in VERTICAL_PLATFORMS]
+    with db() as conn:
+        placeholders = ",".join("?" for _ in platforms if _ in VERTICAL_PLATFORMS)
+        if not placeholders:
+            return {"platform": platform, "assetSummary": {"platform": platform, "brandCount": 0, "modelCount": 0, "relationCount": 0, "periodCount": 0, "topBrands": []}, "items": [], "sources": []}
+        rows = conn.execute(f"""
+            select platform, period, own_model, competitor_model, positive_rank, negative_rank,
+                   compare_share, source_file, sheet, parse_mode, updated_at
+            from vertical_rank_assets
+            where platform in ({placeholders})
+            order by platform, period, own_model, coalesce(positive_rank, 999), coalesce(negative_rank, 999), competitor_model
+            limit ?
+        """, (*[p for p in platforms if p in VERTICAL_PLATFORMS], int(limit or 5000))).fetchall()
+    items = [{
+        "source": row["source_file"] or "vertical_rank_assets",
+        "platform": row["platform"],
+        "period": row["period"],
+        "periodOrder": period_order(row["period"]),
+        "ownModel": row["own_model"],
+        "competitor": row["competitor_model"],
+        "positiveRank": row["positive_rank"],
+        "negativeRank": row["negative_rank"],
+        "share": row["compare_share"],
+        "sheet": row["sheet"] or "",
+        "parseMode": row["parse_mode"] or "asset-db",
+        "updatedAt": row["updated_at"] or ""
+    } for row in rows]
+    source_map = {}
+    for item in items:
+        key = item["source"] or f"{item['platform']}车型资产库"
+        source_map.setdefault(key, {"source": key, "platform": item["platform"], "count": 0, "importedAt": item.get("updatedAt", ""), "remembered": {"assetSource": "vertical_rank_assets"}})
+        source_map[key]["count"] += 1
+    return {
+        "platform": platform,
+        "assetSummary": {
+            "platform": platform,
+            "brandCount": sum(x["brandCount"] for x in summaries),
+            "modelCount": sum(x["modelCount"] for x in summaries),
+            "relationCount": sum(x["relationCount"] for x in summaries),
+            "periodCount": max([x["periodCount"] for x in summaries] or [0]),
+            "topBrands": [b for x in summaries for b in x.get("topBrands", [])][:12]
+        },
+        "items": items,
+        "sources": list(source_map.values())
     }
 
 def remember_vertical_dataset(data, filename, dataset):
@@ -4889,11 +5026,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/vertical-assets":
             q = parse_qs(parsed.query)
-            platform = q.get("platform", ["懂车帝"])[0]
-            if platform not in VERTICAL_PLATFORMS:
+            platform = q.get("platform", ["all"])[0]
+            if platform not in (*VERTICAL_PLATFORMS, "all", "全部来源"):
                 self.send_json({"ok": False, "error": "正反向车型资产只支持汽车之家和懂车帝"}, 400)
                 return
-            self.send_json({"ok": True, "assetSummary": summarize_vertical_assets(platform)})
+            limit = int(q.get("limit", ["5000"])[0] or 5000)
+            self.send_json({"ok": True, **vertical_assets_payload(platform, limit)})
             return
         if parsed.path == "/api/learnings":
             q = parse_qs(parsed.query)
