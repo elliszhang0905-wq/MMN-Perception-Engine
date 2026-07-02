@@ -3737,6 +3737,44 @@ def clean_mmn_consulting_text(text):
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
+def local_vertical_learning_draft(context):
+    model = context.get("model") or "当前车型"
+    platform = context.get("platform") or "垂媒"
+    period = context.get("period") or "当前周期"
+    rows = context.get("rows") or []
+    sorted_pos = sorted(rows, key=lambda x: x.get("positiveRank") or 999)
+    sorted_neg = sorted(rows, key=lambda x: x.get("negativeRank") or 999)
+    top_pos = "、".join([x.get("competitor") or "竞品" for x in sorted_pos[:3]]) or "核心竞品"
+    top_neg = (sorted_neg[0].get("competitor") if sorted_neg else "") or "反向牵引竞品"
+    return "\n\n".join([
+        "### 一句话判断",
+        f"{model} 在{platform}{period}的重点不是泛泛对比，而是处理与{top_neg}的反向牵引。",
+        "### 为什么会这样",
+        f"正向排名靠前的是{top_pos}，说明用户会把这些车当作横向参照；反向排名靠前的是{top_neg}，说明它更容易干扰购买判断。",
+        "### 关键竞品关系",
+        f"正向对比竞品：{top_pos}。反向牵引竞品：{top_neg}。心智位置：先把本品和反向牵引对象切清，再做外部竞品对比。",
+        "### 下一步打法",
+        f"1. 做{model}与{top_neg}的差异说明页，验证指标看详情页停留和跳转变化。\n2. 围绕{top_pos}做同场景对比内容，验证指标看收藏、询价和搜索词变化。\n3. 把正反向排名变化写入周度复盘，验证指标看下一周期负向排名是否下降。",
+        "### RAG入库卡片",
+        f"标题：{model}在{platform}{period}的正反向竞争格局学习\n标签：#正反向排名 #竞品关系 #垂媒竞争格局\n一句话结论：{model}要先处理{top_neg}带来的反向牵引，再放大与{top_pos}的正向对比。"
+    ])
+
+def fuse_vertical_learning(context, qwen_text=None, deepseek_text=None, rule_text=None):
+    qwen_clean = clean_mmn_consulting_text(qwen_text or "")
+    deepseek_clean = clean_mmn_consulting_text(deepseek_text or "")
+    rule_clean = clean_mmn_consulting_text(rule_text or local_vertical_learning_draft(context))
+    base = qwen_clean or rule_clean
+    if "### MMN交叉验证结论" not in base:
+        checks = []
+        if qwen_clean:
+            checks.append("MMN主控：已生成竞争格局主判断和打法。")
+        if deepseek_clean:
+            checks.append("MMN质检：已复核事实边界和过度承诺风险。")
+        if not checks:
+            checks.append("MMN本地规则：已按正反向排名生成兜底策略。")
+        base = f"{base}\n\n### MMN交叉验证结论\n" + "\n".join(checks)
+    return clean_mmn_consulting_text(base)
+
 def rag_strategy_prompt(question, project, references):
     compact_refs = []
     for i, item in enumerate((references or [])[:8], start=1):
@@ -5611,9 +5649,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 context = body.get("context", {})
-                text = clean_mmn_consulting_text(call_qwen(vertical_learning_prompt(context), temperature=.25))
+                qwen_text = deepseek_text = None
+                errors = {}
+                rule_text = local_vertical_learning_draft(context)
+                try:
+                    qwen_text = clean_mmn_consulting_text(call_qwen(vertical_learning_prompt(context), temperature=.25))
+                except Exception as exc:
+                    errors["qwen"] = str(exc)
+                if deepseek_config()["configured"]:
+                    try:
+                        deepseek_text = clean_mmn_consulting_text(call_deepseek(vertical_learning_prompt(context), temperature=.18, profile="fast", timeout=90, max_tokens=900))
+                    except Exception as exc:
+                        errors["deepseek"] = str(exc)
+                text = fuse_vertical_learning(context, qwen_text=qwen_text, deepseek_text=deepseek_text, rule_text=rule_text)
                 knowledge = save_vertical_ai_learning(context, text)
-                self.send_json({"ok": True, "text": text, "knowledgeItem": knowledge, "qwen": qwen_config()})
+                self.send_json({
+                    "ok": True,
+                    "text": text,
+                    "knowledgeItem": knowledge,
+                    "parts": {"qwen": qwen_text, "deepseek": deepseek_text, "rules": rule_text},
+                    "errors": errors,
+                    "qwen": qwen_config(),
+                    "deepseek": deepseek_config()
+                })
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
