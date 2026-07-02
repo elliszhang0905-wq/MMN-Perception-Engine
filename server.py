@@ -5281,7 +5281,14 @@ def make_strategy_pptx(payload):
     return out.getvalue()
 
 def make_pptx(payload):
-    if payload.get("deckType") == "mmn_strategy_consulting":
+    legacy_strategy_payload = (
+        "内容资产与营销策略方案" in str(payload.get("title") or "")
+        or payload.get("account") == "MMN多模态策略输出"
+        or any(str(x.get("label", "")).startswith("策略页") for x in payload.get("manual") or [] if isinstance(x, dict))
+    )
+    if payload.get("deckType") == "mmn_strategy_consulting" or legacy_strategy_payload:
+        if not payload.get("deckType"):
+            payload = {**payload, "deckType": "mmn_strategy_consulting"}
         return make_strategy_pptx(payload)
     from pptx import Presentation
     from pptx.util import Inches, Pt
