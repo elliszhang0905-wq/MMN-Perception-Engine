@@ -3998,6 +3998,84 @@ def blogger_skill_profile_from_samples(samples, blogger_name="冷静的饺子", 
         "updated_at": now()
     }
 
+def blogger_strategy_assets(profile, samples):
+    name = profile.get("blogger_name") or "蒸馏达人"
+    domain = profile.get("vertical_domain") or "汽车垂直内容"
+    dimensions = list(dict.fromkeys(profile.get("terminology_system") or []))[:8]
+    models = list(dict.fromkeys([s.get("model") for s in samples if s.get("model")]))[:6]
+    evidence = profile.get("evidence_preference") or "优先使用可复验场景、横向对比和真实用户反馈。"
+    return [
+        {
+            "name": "车型传播策略辅助",
+            "purpose": "辅助MMN判断某台车当前该让什么类型达人介入，以及该解决认知、信任、兴趣还是转化问题。",
+            "inputs": ["车型", "传播问题", "平台", "目标人群", "竞品压力", "已有声量/正反向数据"],
+            "outputs": ["达人适配理由", "传播角度", "证据链要求", "brief要点", "风险边界"],
+            "scenarios": ["上市期认知建立", "负面疑虑澄清", "竞品对抗", "技术信任转译"],
+            "rules": (profile.get("judgment_rules") or [])[:5],
+            "evidence": evidence,
+            "assetText": f"{name}可作为MMN策略资产：在{domain}相关议题中，优先围绕{', '.join(dimensions[:5]) or domain}建立判断链，适配车型：{', '.join(models) or '待按项目匹配'}。"
+        },
+        {
+            "name": "达人投放与brief生成",
+            "purpose": "帮助品牌项目把达人能力翻译成可执行brief，而不是只给达人名单。",
+            "inputs": ["项目目标", "车型卖点", "用户疑虑", "平台内容形态", "合作边界"],
+            "outputs": ["推荐达人类型", "选题方向", "内容证据清单", "禁讲风险", "验收标准"],
+            "scenarios": ["KOL初筛", "达人矩阵规划", "商单brief", "内容质检"],
+            "rules": [
+                "先判断达人能解决的营销问题，再决定是否推荐。",
+                "brief必须写清证据，不只写卖点。",
+                "外部观点只能作为引用依据，不能包装为品牌原创结论。"
+            ],
+            "evidence": evidence,
+            "assetText": f"{name}适合进入达人投放brief链路：把{domain}专业表达转为内容任务、证据要求和风险边界。"
+        }
+    ]
+
+def blogger_script_assets(profile, samples):
+    name = profile.get("blogger_name") or "蒸馏达人"
+    structures = profile.get("content_structure_patterns") or []
+    translations = profile.get("marketing_translation_patterns") or []
+    risks = profile.get("risk_expression_patterns") or []
+    sample_titles = [s.get("original_topic") for s in samples if s.get("original_topic")][:8]
+    base_template = profile.get("script_template") or "开头抛问题 → 中段讲原因和证据 → 对比同级车型 → 结尾给试驾验证点。"
+    return [
+        {
+            "name": "短视频脚本骨架",
+            "purpose": "帮助MCN把新签约达人快速训练成可稳定产出汽车垂直内容的创作者。",
+            "structure": structures[:6] or ["开头抛用户体感问题", "解释工程或产品原因", "给同级对比", "落到试驾验证点"],
+            "template": base_template,
+            "openingHooks": [
+                "这台车真正要看的不是参数，而是你每天开起来会不会觉得稳。",
+                "同样是这个价位，差别不只在配置表，而在真实路面体感。",
+                "如果你在意这个问题，试驾时别只看加速，要看这几个细节。"
+            ],
+            "evidenceSlots": ["实测画面", "场景体验", "同级对比", "车主反馈", "可复验条件"],
+            "riskNotes": risks[:5] or ["避免复刻原博主口吻", "避免绝对化攻击竞品", "避免把主观体感说成实验事实"],
+            "sampleTitles": sample_titles,
+            "assetText": f"{name}脚本资产：{base_template}"
+        },
+        {
+            "name": "小红书图文/笔记结构",
+            "purpose": "把专业判断转成可读、可收藏、可复用的种草笔记或图文脚本。",
+            "structure": ["标题先给场景结论", "正文拆成3个判断点", "每个判断点配一个证据", "结尾给试驾检查清单"],
+            "template": "标题：一个具体场景 + 一个清晰判断。正文：问题/原因/证据/适合谁/不适合谁。结尾：试驾时看什么。",
+            "openingHooks": [
+                "如果你买车最怕坐着累，这几点比参数更重要。",
+                "这台车适不适合家用，不要只看空间，还要看动态舒适。",
+                "我会把这个问题拆成用户能试出来的几个点。"
+            ],
+            "evidenceSlots": ["图片标注", "对比表", "场景清单", "体验结论", "来源链接"],
+            "riskNotes": risks[:5] or ["保留来源边界", "避免冒充原作者", "避免未经验证的性能断言"],
+            "sampleTitles": sample_titles,
+            "assetText": f"{name}图文资产：把{', '.join(translations[:4]) or '专业判断'}转成用户可收藏的试驾清单。"
+        }
+    ]
+
+def attach_blogger_assets(profile, samples):
+    profile["strategy_assets"] = blogger_strategy_assets(profile, samples)
+    profile["script_assets"] = blogger_script_assets(profile, samples)
+    return profile
+
 def parse_json_object(text):
     raw = str(text or "").strip()
     raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.I).strip()
@@ -4063,7 +4141,7 @@ def blogger_skill_model_distill(profile, samples):
         profile["risk_expression_patterns"] = list(dict.fromkeys([*profile.get("risk_expression_patterns", []), deepseek_review]))
     profile["updated_at"] = now()
     profile["model_trace"] = {"qwen": bool(qwen_result), "deepseek": bool(deepseek_review), "errors": errors}
-    return profile
+    return attach_blogger_assets(profile, samples)
 
 def save_blogger_skill_items(sources, edition="china"):
     samples = [distill_blogger_sample(x) for x in sources]
@@ -4226,6 +4304,8 @@ def distilled_creator_libraries(profiles, samples):
             "source": "blogger_skill_distill",
             "sampleCount": len(person_samples),
             "verticalDomain": profile.get("vertical_domain") or "",
+            "strategyAssets": profile.get("strategy_assets") or blogger_strategy_assets(profile, person_samples),
+            "scriptAssets": profile.get("script_assets") or blogger_script_assets(profile, person_samples),
             "updatedAt": profile.get("updated_at") or now(),
         }
         item.update(creator_influence_tier(platform, 0))
@@ -4259,7 +4339,8 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
     for row in profile_rows:
         for field in json_fields:
             row[field.replace("_json", "")] = json.loads(row.pop(field) or "[]")
-        profiles.append(row)
+        person_samples = [s for s in samples if s.get("blogger_name") == row.get("blogger_name")]
+        profiles.append(attach_blogger_assets(row, person_samples))
     knowledge = [{
         "id": stable_id("blogger-rag", x["id"]),
         "type": "博主能力蒸馏Skill",
@@ -4271,10 +4352,37 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
         "source": "blogger_skill",
         "metadata": {"domain": x.get("vertical_domain"), "entity": x.get("model"), "source_url": x.get("source_url")}
     } for x in samples if x.get("rag_chunk")]
+    asset_knowledge = []
+    for profile in profiles:
+        for asset in profile.get("strategy_assets") or []:
+            asset_knowledge.append({
+                "id": stable_id("blogger-strategy-asset", profile.get("id"), asset.get("name")),
+                "type": "达人策略资产",
+                "title": f"{profile.get('blogger_name')}｜{asset.get('name')}",
+                "body": asset.get("assetText") or asset.get("purpose") or "",
+                "keywords": [profile.get("blogger_name"), profile.get("vertical_domain"), *(asset.get("outputs") or [])],
+                "tags": ["策略资产", profile.get("vertical_domain"), *(asset.get("scenarios") or [])],
+                "targets": ["决策驾驶舱", "打法知识库", "内容资产中心", "RAG知识库管理"],
+                "source": "blogger_strategy_asset",
+                "metadata": {"author": profile.get("blogger_name"), "domain": profile.get("vertical_domain"), "asset_type": "strategy"}
+            })
+        for asset in profile.get("script_assets") or []:
+            asset_knowledge.append({
+                "id": stable_id("blogger-script-asset", profile.get("id"), asset.get("name")),
+                "type": "达人脚本资产",
+                "title": f"{profile.get('blogger_name')}｜{asset.get('name')}",
+                "body": asset.get("assetText") or asset.get("template") or "",
+                "keywords": [profile.get("blogger_name"), profile.get("vertical_domain"), *(asset.get("evidenceSlots") or [])],
+                "tags": ["脚本资产", profile.get("vertical_domain"), "MCN", "内容生产"],
+                "targets": ["内容资产中心", "RAG知识库管理"],
+                "source": "blogger_script_asset",
+                "metadata": {"author": profile.get("blogger_name"), "domain": profile.get("vertical_domain"), "asset_type": "script"}
+            })
+    knowledge.extend(asset_knowledge)
     return {
         "ok": True,
         "imported": imported,
-        "stats": {"sources": source_count, "samples": sample_count, "profiles": profile_count, "ragChunks": len(knowledge)},
+        "stats": {"sources": source_count, "samples": sample_count, "profiles": profile_count, "ragChunks": len(knowledge), "strategyAssets": sum(len(p.get("strategy_assets") or []) for p in profiles), "scriptAssets": sum(len(p.get("script_assets") or []) for p in profiles)},
         "sources": source_rows,
         "samples": samples,
         "profiles": profiles,

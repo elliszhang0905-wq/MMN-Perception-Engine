@@ -1307,6 +1307,8 @@ function mergeDistilledCreatorLibraries(libraries={}){
      categories:[...new Set([...(current.categories||[]),...(item.categories||[])])],
      strengths:[...new Set([...(current.strengths||[]),...(item.strengths||[])])],
      fitStages:[...new Set([...(current.fitStages||[]),...(item.fitStages||[])])],
+     strategyAssets:item.strategyAssets||current.strategyAssets||[],
+     scriptAssets:item.scriptAssets||current.scriptAssets||[],
      source:current.source||item.source,
      sampleCount:Math.max(+current.sampleCount||0,+item.sampleCount||0),
      distilledAt:item.updatedAt||current.distilledAt||""
@@ -1347,7 +1349,7 @@ function renderCreatorLibrary(){
  document.querySelector("#creator-category-count").textContent=cats.size.toLocaleString();
  document.querySelector("#creator-avg-fit").textContent=enriched.length?Math.round(enriched.reduce((s,x)=>s+x.fitScore,0)/enriched.length):"—";
  document.querySelector("#creator-top-count").textContent=top.length.toLocaleString();
- document.querySelector("#creator-card-grid").innerHTML=enriched.length?enriched.map(x=>{const id=x.id||creatorKey(x),city=x.city&&x.city!=="待补充"?x.city:(x.estimatedCity||"城市待核验"),fanText=+x.fans?formatShortNumber(x.fans):x.estimatedFansText?`MMN补全 ${x.estimatedFansText}`:"未采集";return`<article class="creator-card ${x.fitScore>=78?"recommended":""}"><div class="creator-head"><div><span>${x.influenceLabel} · ${city}</span><b>${x.name}</b></div><strong>${x.fitScore}</strong></div><div class="creator-meta"><span>粉丝 ${fanText}</span><span>${x.influenceLabel}</span><span>均播 ${formatShortNumber(x.avgViews,"待补充")}</span><span>互动率 ${x.engagementRate?`${x.engagementRate}%`:"待补充"}</span><span>成本 ${x.costLevel||"待评估"}</span></div><div class="creator-tags"><em class="tier">${x.influenceLabel}</em>${(x.categories||[]).map(t=>`<em>${t}</em>`).join("")}</div><p>${(x.summary||x.publicProfile||x.strengths?.join(" / ")||"等待补充达人能力判断")}</p><small>推荐场景：${(x.fitStages||[]).join("、")||"待MMN分析或手动补充"}｜风险提示：${x.risk||"需结合具体brief复核"}${x.confidence?`｜MMN置信度：${x.confidence}`:""}</small>${x.profileUrl?`<a class="creator-profile" href="${x.profileUrl}" target="_blank">打开主页</a>`:""}<div class="creator-actions"><button type="button" class="ghost" data-creator-edit="${id}">编辑</button><button type="button" class="primary" data-creator-ai="${id}">MMN分析标签</button></div></article>`}).join(""):`<p class="empty">当前筛选下暂无达人。可以调整类型或搜索条件。</p>`;
+ document.querySelector("#creator-card-grid").innerHTML=enriched.length?enriched.map(x=>{const id=x.id||creatorKey(x),city=x.city&&x.city!=="待补充"?x.city:(x.estimatedCity||"城市待核验"),fanText=+x.fans?formatShortNumber(x.fans):x.estimatedFansText?`MMN补全 ${x.estimatedFansText}`:"未采集";return`<article class="creator-card ${x.fitScore>=78?"recommended":""}"><div class="creator-head"><div><span>${x.influenceLabel} · ${city}</span><b>${x.name}</b></div><strong>${x.fitScore}</strong></div><div class="creator-meta"><span>粉丝 ${fanText}</span><span>${x.influenceLabel}</span><span>均播 ${formatShortNumber(x.avgViews,"待补充")}</span><span>互动率 ${x.engagementRate?`${x.engagementRate}%`:"待补充"}</span><span>成本 ${x.costLevel||"待评估"}</span></div><div class="creator-tags"><em class="tier">${x.influenceLabel}</em>${(x.categories||[]).map(t=>`<em>${t}</em>`).join("")}${x.strategyAssets?.length?`<em>策略资产${x.strategyAssets.length}</em>`:""}${x.scriptAssets?.length?`<em>脚本资产${x.scriptAssets.length}</em>`:""}</div><p>${(x.summary||x.publicProfile||x.strengths?.join(" / ")||"等待补充达人能力判断")}</p><small>推荐场景：${(x.fitStages||[]).join("、")||"待MMN分析或手动补充"}｜风险提示：${x.risk||"需结合具体brief复核"}${x.confidence?`｜MMN置信度：${x.confidence}`:""}</small>${x.profileUrl?`<a class="creator-profile" href="${x.profileUrl}" target="_blank">打开主页</a>`:""}<div class="creator-actions"><button type="button" class="ghost" data-creator-edit="${id}">编辑</button><button type="button" class="primary" data-creator-ai="${id}">MMN分析标签</button></div></article>`}).join(""):`<p class="empty">当前筛选下暂无达人。可以调整类型或搜索条件。</p>`;
  document.querySelectorAll("[data-creator-edit]").forEach(b=>b.onclick=()=>openCreatorEditor(platform,b.dataset.creatorEdit));
  document.querySelectorAll("[data-creator-ai]").forEach(b=>b.onclick=()=>analyzeCreatorWithQwen(platform,b.dataset.creatorAi,b));
  document.querySelector("#creator-planner-flow").innerHTML=["导入达人基础库","识别当前Campaign目标","匹配认知标签与平台赛道","计算达人适配分","生成达人组合与brief","复盘表现并回写学习库"].map((x,i)=>`<div><span>${String(i+1).padStart(2,"0")}</span><b>${x}</b></div>`).join("");
@@ -1782,6 +1784,8 @@ function renderBloggerSkill(){
  set("#blogger-skill-sample-count",(stats.samples||0).toLocaleString());
  set("#blogger-skill-profile-count",(stats.profiles||0).toLocaleString());
  set("#blogger-skill-rag-count",(stats.ragChunks||0).toLocaleString());
+ set("#blogger-skill-strategy-count",(stats.strategyAssets||0).toLocaleString());
+ set("#blogger-skill-script-count",(stats.scriptAssets||0).toLocaleString());
  const allSamples=bloggerSkillState.samples||[];
  const allProfiles=bloggerSkillState.profiles||[];
  const names=[...new Set([...allProfiles.map(x=>x.blogger_name),...allSamples.map(x=>x.blogger_name)].filter(Boolean))];
@@ -1809,6 +1813,15 @@ function renderBloggerSkill(){
  if(profileBox){
   profileBox.innerHTML=profile?`<div class="founder-profile-head"><span>MMN模型交叉蒸馏</span><b>${profile.blogger_name}｜${profile.vertical_domain}工程 Skill</b></div><dl><dt>能力定位</dt><dd>${profile.professional_background||"公开内容能力蒸馏"}</dd><dt>评价框架</dt><dd>${(profile.evaluation_framework||[]).join(" → ")}</dd><dt>术语体系</dt><dd>${(profile.terminology_system||[]).slice(0,16).join("、")}</dd><dt>判断规则</dt><dd>${(profile.judgment_rules||[]).slice(0,4).map(x=>clip(x,64)).join("；")}</dd><dt>策略质检</dt><dd>${clip((profile.risk_expression_patterns||[]).slice(-1)[0]||"已内置合规边界：不复刻原文、不模仿个人身份、不包装为MMN原创。",150)}</dd><dt>Agent指令</dt><dd>${clip(profile.reusable_agent_instruction,180)}</dd><dt>短视频模板</dt><dd>${clip(profile.script_template,160)}</dd><dt>客户报告模板</dt><dd>${clip(profile.report_template,160)}</dd></dl>`:`<p class="empty">导入样本后生成博主能力画像、底盘标签体系和可复用 Agent 指令。</p>`;
  }
+ const strategyBox=document.querySelector("#blogger-skill-strategy-assets"),scriptBox=document.querySelector("#blogger-skill-script-assets");
+ const renderAssetList=(assets,type)=>assets?.length?assets.map(asset=>`<article class="distilled-asset-card ${type}">
+  <div><span>${type==="strategy"?"策略资产":"脚本资产"}</span><b>${asset.name||"未命名资产"}</b></div>
+  <p>${clip(asset.purpose||asset.assetText||asset.template,150)}</p>
+  <dl>${asset.scenarios?`<dt>适用场景</dt><dd>${(asset.scenarios||[]).slice(0,4).join(" / ")}</dd>`:""}${asset.outputs?`<dt>输出内容</dt><dd>${(asset.outputs||[]).slice(0,5).join(" / ")}</dd>`:""}${asset.structure?`<dt>结构</dt><dd>${(asset.structure||[]).slice(0,5).join(" → ")}</dd>`:""}${asset.template?`<dt>模板</dt><dd>${clip(asset.template,110)}</dd>`:""}${asset.evidenceSlots?`<dt>证据槽</dt><dd>${(asset.evidenceSlots||[]).slice(0,5).join(" / ")}</dd>`:""}</dl>
+  <small>${clip(asset.assetText||"已进入MMN可调用资产库",120)}</small>
+ </article>`).join(""):`<p class="empty">当前达人还没有生成${type==="strategy"?"策略资产":"脚本资产"}。导入样本后会自动沉淀。</p>`;
+ if(strategyBox)strategyBox.innerHTML=renderAssetList(profile?.strategy_assets||profile?.strategyAssets||[],"strategy");
+ if(scriptBox)scriptBox.innerHTML=renderAssetList(profile?.script_assets||profile?.scriptAssets||[],"script");
  const rag=document.querySelector("#blogger-skill-rag-list");
  if(rag){
   const chunks=(bloggerSkillState.knowledgeItems||[]).filter(x=>!bloggerSkillPersonFilter||[x.title,x.body,x.keywords,x.metadata?.author,x.metadata?.source_account_name,x.metadata?.entity].join(" ").includes(bloggerSkillPersonFilter));
