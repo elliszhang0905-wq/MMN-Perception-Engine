@@ -1220,7 +1220,7 @@ function localCognitionStrategyDraft(ctx){
  const topPlatform=ctx.breakdown?.platforms?.[0]?.key||"核心平台",relation=ctx.verticalCompetition?.relations?.[0];
  const comp=relation?.competitor||(ctx.project?.competitors||[])[0]||"核心竞品";
  const relationLine=relation?`${relation.platform}${relation.period?` ${relation.period}`:""}中，${model}与${comp}的关系是“${relation.status}”，正向排名${relation.positiveRank||"未上榜"}、反向排名${relation.negativeRank||"未上榜"}。`:`垂媒竞争格局用于校准竞品口径，避免只在内部标签里自我判断。`;
- return[`### 核心认知判断`,`${model} 的认知诊断要同时处理三件事：把“${asset.label||"已有好评"}”做成可复述资产，把“${risk.label||"购买疑虑"}”转成可验证证据，把“${space.label||"竞品空位"}”抢成清晰的购买理由。`,`### 资产负债机会`,`1. 资产：${asset.label||"核心正向标签"} 可以继续放大，适合沉淀成短视频钩子、垂媒解释和销售话术。\n2. 负债：${risk.label||"高风险疑虑"} 必须优先修复，先给证据，再谈卖点。\n3. 机会：${space.label||"认知空位"} 是与 ${comp} 拉开差异的入口，不能只做参数对比。`,`### 策略动作`,`1. 在 ${topPlatform} 先做“一个疑虑一个证据”的内容包，把用户问题直接改成标题。\n2. 竞品表达围绕 ${comp} 做同场景对比，用家庭、通勤、长途、价格权益等真实任务解释差异。\n3. 达人与销售协同：评测达人给证据，车主/KOC给使用场景，门店销售承接FAQ。`,`### KPI`,`核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。`,`### MMN交叉验证结论`,`Qwen负责生成主策略，DeepSeek负责复核风险和过度承诺；两者冲突时，以可验证证据和当前数据结构为准。`].join("\n\n");
+ return[`### 核心认知判断`,`${model} 的认知诊断要同时处理三件事：把“${asset.label||"已有好评"}”做成可复述资产，把“${risk.label||"购买疑虑"}”转成可验证证据，把“${space.label||"竞品空位"}”抢成清晰的购买理由。`,`### 资产负债机会`,`1. 资产：${asset.label||"核心正向标签"} 可以继续放大，适合沉淀成短视频钩子、垂媒解释和销售话术。\n2. 负债：${risk.label||"高风险疑虑"} 必须优先修复，先给证据，再谈卖点。\n3. 机会：${space.label||"认知空位"} 是与 ${comp} 拉开差异的入口，不能只做参数对比。`,`### 策略动作`,`1. 在 ${topPlatform} 先做“一个疑虑一个证据”的内容包，把用户问题直接改成标题。\n2. 竞品表达围绕 ${comp} 做同场景对比，用家庭、通勤、长途、价格权益等真实任务解释差异。\n3. 达人与销售协同：评测达人给证据，车主/KOC给使用场景，门店销售承接FAQ。`,`### KPI`,`核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。`,`### MMN交叉验证结论`,`MMN主控已生成主策略，MMN质检已复核风险和过度承诺；两者冲突时，以可验证证据和当前数据结构为准。`].join("\n\n");
 }
 function renderCognitionMmnStrategy(a){
  const box=document.querySelector("#cognition-mmn-output"),status=document.querySelector("#cognition-mmn-status");
@@ -1228,7 +1228,7 @@ function renderCognitionMmnStrategy(a){
  const ctx=cognitionStrategyContext(a),result=cognitionStrategyState.result||{text:localCognitionStrategyDraft(ctx),parts:{rules:localCognitionStrategyDraft(ctx)},context:ctx};
  if(status)status.textContent=cognitionStrategyState.loading?"MMN正在交叉验证":mmnTraceLabel(result);
  const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||k}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
- box.innerHTML=`<div class="content-mmn-head"><div><b>${cognitionStrategyState.loading?"MMN正在生成认知策略":"MMN多模态策略输出"}</b><span>决策驾驶舱 + 声量数据中心 + 垂媒竞争格局｜${ctx.project.brand} / ${canonicalModelLabel(ctx.project.model)}｜Qwen + DeepSeek</span></div><button type="button" class="primary" id="run-cognition-mmn-strategy" ${cognitionStrategyState.loading?"disabled":""}>${cognitionStrategyState.loading?"生成中…":"生成/刷新MMN策略"}</button></div><div class="content-mmn-output">${markdownish(String(result.text||""))}</div>${cognitionStrategyState.error?`<p class="empty">模型生成失败，已使用MMN本地策略输出：${cognitionStrategyState.error}</p>`:""}${parts}`;
+ box.innerHTML=`<div class="content-mmn-head"><div><b>${cognitionStrategyState.loading?"MMN正在生成认知策略":"MMN多模态策略输出"}</b><span>决策驾驶舱 + 声量数据中心 + 垂媒竞争格局｜${ctx.project.brand} / ${canonicalModelLabel(ctx.project.model)}｜MMN交叉验证</span></div><button type="button" class="primary" id="run-cognition-mmn-strategy" ${cognitionStrategyState.loading?"disabled":""}>${cognitionStrategyState.loading?"生成中…":"生成/刷新MMN策略"}</button></div><div class="content-mmn-output">${markdownish(String(result.text||""))}</div>${cognitionStrategyState.error?`<p class="empty">模型生成失败，已使用MMN本地策略输出：${cognitionStrategyState.error}</p>`:""}${parts}`;
  const btn=document.querySelector("#run-cognition-mmn-strategy");
  if(btn)btn.onclick=()=>runCognitionMmnStrategy();
 }
@@ -1994,10 +1994,13 @@ async function submitModelJudgment(e){
  }
 }
 function markdownish(text){
- return String(text||"").trim().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
+ return publicMmnText(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
+}
+function publicMmnText(text){
+ return String(text||"").trim().replace(/Qwen|千问/gi,"MMN主控").replace(/DeepSeek/gi,"MMN质检");
 }
 function consultingMarkdown(text){
- const safe=String(text||"").trim().replace(/\*\*/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+ const safe=publicMmnText(text).replace(/\*\*/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
  return safe.split(/\n+/).map(line=>{
   const s=line.trim();
   if(!s)return"";

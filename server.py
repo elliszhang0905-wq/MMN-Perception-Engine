@@ -1994,7 +1994,7 @@ def llm_strategy_prompt(context, engine_name):
             "这是一份认知赛道诊断页面的外显策略交付。你必须综合调用输入中的决策驾驶舱、声量数据中心、垂媒竞争格局，并围绕认知资产、认知负债、认知空位给出策略。"
             "输出必须只包含：核心认知判断、资产负债机会、策略动作、KPI。"
             "外显主标题和语气统一为MMN多模态策略输出；底层模型名称只能作为交叉验证过程，不要作为策略主标题。"
-            "必须体现Qwen负责主策略、DeepSeek负责风险和过度承诺复核的双模型交叉验证逻辑。"
+            "必须体现MMN主控负责主策略、MMN质检负责风险和过度承诺复核的交叉验证逻辑。"
             "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
             + MMN_OUTPUT_STYLE
         )
@@ -2580,8 +2580,8 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
             f"核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。当前NSR {summary.get('nsr', 0)} 可作为复盘基线。",
             "",
             "### MMN交叉验证结论",
-            qwen_clean.split("\n", 1)[0] if qwen_clean else "Qwen主控建议以认知资产和购买阻塞点组织策略。",
-            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "DeepSeek质检建议控制过度承诺，优先使用可验证证据。",
+            qwen_clean.split("\n", 1)[0] if qwen_clean else "MMN主控建议以认知资产和购买阻塞点组织策略。",
+            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "MMN质检建议控制过度承诺，优先使用可验证证据。",
             rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以真实数据结构作为策略底线。"
         ])
     common = "\n".join([f"- {name}：{text[:500]}" for name, text in available])
