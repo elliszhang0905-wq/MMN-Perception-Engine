@@ -212,7 +212,7 @@ function cleanAssetFiles(files={}){
  const cleaned=emptyAssetFiles();
  assetPlatforms.forEach(p=>assetSlots.forEach(s=>{
   const file=files?.[p.key]?.[s.key];
-  if(!file||file.pluginExportPath||String(file.source||"").includes("社媒助手"))return;
+  if(!file)return;
   cleaned[p.key][s.key]=file;
  }));
  return cleaned;
@@ -426,7 +426,7 @@ function allVideoItems(){
  const items=[...(videoState.legacyItems||[])];
  assetPlatforms.forEach(p=>assetSlots.forEach(s=>{
   const file=videoState.files?.[p.key]?.[s.key];
-  if(file?.items&&!file.pluginExportPath&&!String(file.source||"").includes("社媒助手"))items.push(...file.items);
+  if(file?.items?.length)items.push(...file.items);
  }));
  return items;
 }
@@ -1235,7 +1235,7 @@ function renderVideos(){
  const all=allVideoItems(),catAgg=aggregateVideos(all,"category"),hotLine=all.length?[...all].sort((a,b)=>(b.engagement||0)-(a.engagement||0))[Math.max(0,Math.floor(all.length*.2)-1)]?.engagement||0:0;
  const items=all.filter(x=>[x.title,x.assetModel,x.model,x.platform,x.author,x.category,x.assetRole].join(" ").toLowerCase().includes(videoSearch.toLowerCase()));
  const importedSlots=assetPlatforms.flatMap(p=>assetSlots.map(s=>videoState.files?.[p.key]?.[s.key]).filter(Boolean));
- document.querySelector("#video-source-note").textContent=importedSlots.length?`已上传 ${importedSlots.length} 份内容采集文件，共 ${all.length} 条内容。每个槽位可单独替换，系统按标题自动分类。`:"按平台和车型分别上传采集 Excel：抖音最多 4 份，小红书最多 4 份。系统会自动分类并合并成看板。";
+ document.querySelector("#video-source-note").textContent=importedSlots.length?`已创建 ${importedSlots.length} 个自动抓取任务，共沉淀 ${all.length} 条内容。每个槽位按平台和车型独立同步，系统会自动分类并合并成看板。`:"按当前本品和核心竞品自动生成抖音 / 小红书抓取任务。先打开采集页完成平台采集，再同步最新导出沉淀为内容资产。";
  document.querySelector("#video-total").textContent=all.length.toLocaleString();
  document.querySelector("#video-cats").textContent=catAgg.length.toLocaleString();
  document.querySelector("#video-top-cat").textContent=catAgg[0]?.key||"—";
@@ -1263,9 +1263,13 @@ async function loadSocialPluginStatus(){
  try{const data=await api("/api/social-plugin/status");socialPluginStatus=data.plugin;renderSocialPluginPanel()}
  catch(e){socialPluginStatus={installed:false,platforms:{},note:e.message};renderSocialPluginPanel()}
 }
-async function openSocialPlugin(platform){
- try{const data=await api("/api/social-plugin/open",{method:"POST",body:JSON.stringify({platform})});toast(data.message||"已打开采集页面")}
- catch(e){toast(`打开采集页失败：${e.message}`)}
+function socialSearchUrl(platform,query){
+ const q=encodeURIComponent(query||"汽车评测");
+ return platform==="xiaohongshu"?`https://www.xiaohongshu.com/search_result?keyword=${q}`:`https://www.douyin.com/search/${q}`;
+}
+async function openSocialPlugin(platform,query=""){
+ try{const data=await api("/api/social-plugin/open",{method:"POST",body:JSON.stringify({platform,url:query?socialSearchUrl(platform,query):undefined})});toast(query?`已打开${assetPlatformName(platform)}采集页：${query}`:data.message||"已打开采集页面");return true}
+ catch(e){toast(`打开采集页失败：${e.message}`);return false}
 }
 function mergePluginCreators(platform,creators=[]){
  if(!creators.length)return 0;
@@ -1291,6 +1295,30 @@ async function syncSocialPluginExport(platform){
   renderVideos();
   toast(`已同步到${assetPlatformName(platform)}独立达人库：沉淀 ${creatorCount} 位达人；未写入车型内容库`);
  }catch(e){toast(`同步失败：${e.message}`)}
+}
+async function startAssetCrawl(platformKey,slot){
+ const model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
+ if(!model)return toast("请先设置车型，再启动自动抓取");
+ const query=`${model} 汽车评测`;
+ const opened=await openSocialPlugin(platformKey,query);
+ if(!opened)return;
+ videoState.files[platformKey][slot]={...(videoState.files?.[platformKey]?.[slot]||{}),source:"自动抓取任务",count:0,items:videoState.files?.[platformKey]?.[slot]?.items||[],crawlTask:{query,platform:platformKey,slot,role,model,openedAt:new Date().toISOString()},taskStatus:"opened"};
+ saveVideoState();
+ renderUploadMatrix();
+}
+async function syncAssetCrawl(platformKey,slot){
+ const model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
+ if(!model)return toast("请先设置车型，再同步抓取结果");
+ try{
+  toast(`正在同步${assetPlatformName(platformKey)} · ${model} 的最新抓取结果…`);
+  const data=await api("/api/social-plugin/import-latest",{method:"POST",body:JSON.stringify({platform:platformKey})});
+  const items=(data.dataset.items||[]).map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:data.dataset.source||"插件自动抓取"}));
+  const creatorCount=mergePluginCreators(platformKey,data.dataset.creators||[]);
+  if(!items.length&&creatorCount)toast("最新导出只识别到达人画像，未识别到内容明细");
+  videoState.files[platformKey][slot]={source:data.dataset.source||"插件自动抓取",count:items.length,syncedAt:new Date().toISOString(),items,pluginExportPath:data.dataset.exportPath||"",exportedAt:data.dataset.exportedAt||"",crawlTask:{query:`${model} 汽车评测`,platform:platformKey,slot,role,model},taskStatus:"synced"};
+  saveVideoState();saveCreatorState();await loadSocialPluginStatus();renderVideos();
+  toast(`已同步 ${model} ${assetPlatformName(platformKey)}内容 ${items.length} 条${creatorCount?`，并沉淀达人 ${creatorCount} 位`:""}`);
+ }catch(e){toast(`同步抓取结果失败：${e.message}`)}
 }
 function mountContentDistillViews(){
  const move=(sourceId,targetId)=>{
@@ -1485,8 +1513,9 @@ function renderAssetConfig(){
 }
 function renderUploadMatrix(){
  const el=document.querySelector("#content-upload-matrix");if(!el)return;
- el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频资产":"种草笔记资产"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],inputId=`asset-upload-${p.key}-${s.key}`;return`<div class="asset-slot ${file?"filled":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${file?`<small>${file.source} · ${file.count} 条</small>`:`<small>等待上传 Excel</small>`}</div><button type="button" class="${model?"primary":"ghost"} file-button" data-file-target="${inputId}" ${model?"":"disabled"}>${file?"替换":"上传"}</button><input id="${inputId}" class="asset-upload file-input-hidden" data-platform="${p.key}" data-slot="${s.key}" type="file" accept=".xlsx" ${model?"":"disabled"}></div>`}).join("")}</div></article>`).join("");
- document.querySelectorAll(".asset-upload").forEach(input=>input.onchange=handleAssetUpload);
+ el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频自动抓取":"种草笔记自动抓取"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=+file?.count||file?.items?.length||0,opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":opened?"pending":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${synced?`<small>已同步 ${count} 条｜${file.source||"插件导出"}</small>`:opened?`<small>采集任务已打开｜${query}</small>`:`<small>等待自动抓取</small>`}</div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>开始抓取</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
+ document.querySelectorAll("[data-asset-crawl]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetCrawl.split(":");startAssetCrawl(platform,slot)});
+ document.querySelectorAll("[data-asset-sync]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetSync.split(":");syncAssetCrawl(platform,slot)});
 }
 function renderPlatformBoard(platformKey,chartSel,noteSel){
  const name=assetPlatformName(platformKey),items=allVideoItems().filter(x=>x.assetPlatform===platformKey||x.platform===name),agg=aggregateVideos(items,"category");
@@ -2157,7 +2186,7 @@ const dashboardTemplateButton=document.querySelector("#dashboard-template");if(d
 document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入数据…");try{const res=await fetch(`/api/import-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");state=json.dataset;save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`)}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#clear-vertical-data").onclick=()=>{if(confirm("确认清空当前垂媒看板数据？已沉淀的车型资产库不会删除。")){verticalState={sources:[],items:[],assetSummary:verticalState.assetSummary||null,selectedPlatform:"all",selectedSource:"all",selectedModel:"",selectedCompetitor:"",selectedPeriod:"latest"};verticalSearch="";verticalPeriodPickerOpen=false;document.querySelector("#vertical-search").value="";saveVerticalState();renderVertical();toast("当前看板已清空，车型资产库已保留")}};
-document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已上传的抖音/小红书文件会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
+document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清空全部内容资产？车型预设会保留，已同步的抖音/小红书抓取结果会清空。")){videoState={...normalizeVideoState(videoState),files:emptyAssetFiles(),legacyItems:[]};videoSearch="";document.querySelector("#video-search").value="";saveVideoState();renderVideos();toast("内容资产已清空")}};
 document.querySelector("#csv-file").onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const lines=reader.result.trim().split(/\r?\n/).slice(1);const parsed=lines.map(line=>line.split(",").map(x=>x.trim())).filter(r=>r.length>=12).map(r=>r.map((v,i)=>i>=8&&i<=11?+v:v));if(parsed.length){state.rows.push(...parsed);save();render();toast(`已导入 ${parsed.length} 行数据`)}else toast("未识别到有效数据")};reader.readAsText(file,"utf-8")};
 document.querySelector("#learning-form").onsubmit=async e=>{e.preventDefault();const f=e.target,item={edition:activeEdition(),model:f.elements.model.value||state.config.model,label:f.elements.label.value,conclusion:f.elements.conclusion.value.trim(),recommendation:f.elements.recommendation.value.trim(),evidence:f.elements.evidence.value.trim(),platform:f.elements.platform.value.trim(),kpi:f.elements.kpi.value.trim(),stage:f.elements.stage.value,savedAt:new Date().toISOString()};if(!item.conclusion&&!item.recommendation){toast("请先填写结论或建议");return}try{if(session){const data=await api("/api/learnings",{method:"POST",body:JSON.stringify({...item,org_id:session.org_id,user_id:session.user_id})});serverLearnings.unshift({...data.item,savedAt:data.item.saved_at});}else{const items=learnings();items.push(item);saveLearnings(items)}f.elements.conclusion.value="";f.elements.recommendation.value="";f.elements.evidence.value="";f.elements.platform.value="";f.elements.kpi.value="";render();toast(session?"已保存到当前版本企业知识库":"已保存到当前版本本机学习库")}catch(err){toast(`保存失败：${err.message}`)}};
 document.querySelector("#clear-learning").onclick=async()=>{if(confirm(session?"确认清空当前企业空间、当前版本的学习记录？":"确认清空本机当前版本学习记录？")){try{if(session){await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`,{method:"DELETE"});serverLearnings=[]}else saveLearnings([]);render();toast("当前版本学习记录已清空")}catch(err){toast(`清空失败：${err.message}`)}}};

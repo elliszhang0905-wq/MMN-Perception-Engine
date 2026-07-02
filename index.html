@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-semantic-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.01-auto-crawl-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -308,7 +308,7 @@
         </div>
         <div class="search"><input id="video-search" placeholder="搜索标题、车型、作者、分类…"></div>
       </div>
-      <div class="notice" id="video-source-note">按平台和车型分别上传采集 Excel：抖音最多 4 份，小红书最多 4 份。系统会自动分类并合并成看板。</div>
+      <div class="notice" id="video-source-note">按当前本品和核心竞品自动生成抖音 / 小红书抓取任务。先打开采集页完成平台采集，再同步最新导出沉淀为内容资产。</div>
       <div id="content-upload-matrix" class="upload-matrix"></div>
       <div class="kpis video-kpis">
         <article class="kpi"><span>视频/笔记数量</span><strong id="video-total">—</strong><small>已导入内容条数</small></article>
@@ -327,7 +327,7 @@
         </article>
       </div>
       <article class="panel">
-        <div class="panel-title"><div><span>车型对比看板</span><h2>本品与核心竞品内容资产结构</h2></div><em>按已上传文件实时汇总</em></div>
+        <div class="panel-title"><div><span>车型对比看板</span><h2>本品与核心竞品内容资产结构</h2></div><em>按自动抓取结果实时汇总</em></div>
         <div id="content-model-board" class="model-board"></div>
       </article>
       <div class="table-wrap"><table id="video-table"></table></div>
@@ -748,6 +748,6 @@
   </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-semantic-1"></script>
+  <script src="app.js?v=beta-1.01-auto-crawl-1"></script>
 </body>
 </html>
