@@ -3700,7 +3700,17 @@ def vertical_learning_prompt(context):
         for x in rows[:30]
     ]
     return [
-        {"role": "system", "content": "你是MMN汽车营销智能体的垂媒竞争格局学习模块。只基于用户提供的正反向排名数据分析，不要编造销量、声量或事实。输出中文，偏营销策略。" + MMN_OUTPUT_STYLE},
+        {"role": "system", "content": (
+            "你是MMN汽车营销引擎的垂媒竞争格局咨询顾问。"
+            "只基于用户提供的正反向排名数据分析，不要编造销量、声量或事实。"
+            "输出要像专业咨询顾问写给品牌市场负责人看的判断：结论直接、原因讲人话、动作能落地。"
+            "禁止使用“好的、收到、以下是、希望对你有帮助、作为AI”等助手腔。"
+            "输入没有提供的页面位置、评论内容、真实车主留言、搜索词、点击率、转化率，不得写成已发生事实；只能写成建议验证项。"
+            "不要用大段连续编号堆砌；每段控制在80字以内。"
+            "用Markdown小标题输出，但不要使用加粗符号。"
+            "固定输出这5段：### 一句话判断、### 为什么会这样、### 关键竞品关系、### 下一步打法、### RAG入库卡片。"
+            + MMN_OUTPUT_STYLE
+        )},
         {"role": "user", "content": json.dumps({
             "任务": "学习并归纳车型正反向竞争格局，形成可进入RAG知识库的策略学习卡",
             "车型": model,
@@ -3708,15 +3718,24 @@ def vertical_learning_prompt(context):
             "周期": period,
             "正反向排名数据": compact,
             "输出要求": [
-                "1. 先给一句清楚结论，不超过35字",
-                "2. 拆清楚归因：用户为什么会把这些车放在一起比",
-                "3. 识别核心正向对比竞品和核心反向牵引竞品",
-                "4. 判断该车型在用户心智里处于主动被搜索、被替代比较、还是反向被牵引",
-                "5. 给出3条垂媒内容/口碑/竞品拦截打法，每条必须有动作和验证指标",
-                "6. 给出适合写入RAG知识库的标题、标签和一句话结论"
+                "一句话判断：不超过35字，直接说该车型现在的竞争处境",
+                "为什么会这样：解释用户为什么把这些车放在一起比，用通俗营销语言，不讲空概念",
+                "关键竞品关系：识别正向对比竞品、反向牵引竞品和心智位置",
+                "下一步打法：给3条动作，每条包含动作和验证指标",
+                "RAG入库卡片：给标题、标签、一句话结论",
+                "整体语气：专业咨询腔，但普通市场同事也能一眼读懂",
+                "事实边界：只能引用正向排名、反向排名、对比占比、状态；其他内容写成建议动作或验证指标"
             ]
         }, ensure_ascii=False)}
     ]
+
+def clean_mmn_consulting_text(text):
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"^(好的|收到|好[，,]?|以下是|下面是)[：:，,\s]*", "", cleaned)
+    cleaned = re.sub(r"作为AI[^。\n]*[。\n]", "", cleaned)
+    cleaned = cleaned.replace("**", "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 def rag_strategy_prompt(question, project, references):
     compact_refs = []
@@ -5592,7 +5611,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 context = body.get("context", {})
-                text = call_qwen(vertical_learning_prompt(context), temperature=.25)
+                text = clean_mmn_consulting_text(call_qwen(vertical_learning_prompt(context), temperature=.25))
                 knowledge = save_vertical_ai_learning(context, text)
                 self.send_json({"ok": True, "text": text, "knowledgeItem": knowledge, "qwen": qwen_config()})
             except Exception as exc:

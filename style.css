@@ -1046,6 +1046,11 @@ label.file-button.ghost,.file-button.ghost{
 .rag-card b{font-size:14px;color:var(--ink);margin-bottom:6px}
 .rag-card p{font-size:12px;line-height:1.55;color:#303840}
 .rag-card small{font-size:11px;color:var(--muted);line-height:1.45;margin-top:7px}
+.mmn-consulting-card{border-left:4px solid #273039}
+.mmn-consulting-body{display:grid;gap:8px;margin-top:8px}
+.mmn-consulting-body h3{margin:10px 0 0;font-size:13px;color:#151b21}
+.mmn-consulting-body h3:first-child{margin-top:0}
+.mmn-consulting-body p{margin:0;font-size:13px;line-height:1.72;color:#303840}
 .kb-cluster-map{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 .kb-cluster{position:relative;overflow:hidden;text-align:left;min-height:92px;padding:14px;border:1px solid var(--hairline);border-radius:14px;background:#f2f3f4;color:var(--text);box-shadow:none}
 .kb-cluster:hover{transform:translateY(-1px)}

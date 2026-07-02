@@ -1316,7 +1316,7 @@ async function runVerticalAiLearning(context){
  try{
   const data=await api("/api/ai/vertical-rank-learning",{method:"POST",body:JSON.stringify({context:{...context,rows:context.rows.slice(0,30).map(x=>({competitor:x.competitor,positiveRank:x.positiveRank,negativeRank:x.negativeRank,share:x.share,status:rankStatus(x)}))}})});
   if(data.knowledgeItem)mergeStrategyKnowledge([data.knowledgeItem]);
-  if(box)box.innerHTML=`<article class="rag-card"><span>MMN学习完成｜${context.platform}｜${context.period}</span><b>${context.model} 正反向竞争格局学习</b><p>${data.text}</p><small>已写入RAG知识库，可被巡检和MMN策略召回。</small></article>`;
+  if(box)box.innerHTML=`<article class="rag-card mmn-consulting-card"><span>MMN学习完成｜${context.platform}｜${context.period}</span><b>${context.model} 正反向竞争格局学习</b><div class="mmn-consulting-body">${consultingMarkdown(data.text)}</div><small>已写入RAG知识库，可被巡检和MMN策略召回。</small></article>`;
   renderStrategyKb();
   toast("MMN已学习正反向排名，并写入RAG知识库");
  }catch(err){
@@ -1994,6 +1994,15 @@ async function submitModelJudgment(e){
 }
 function markdownish(text){
  return String(text||"").trim().replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
+}
+function consultingMarkdown(text){
+ const safe=String(text||"").trim().replace(/\*\*/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+ return safe.split(/\n+/).map(line=>{
+  const s=line.trim();
+  if(!s)return"";
+  if(s.startsWith("### "))return`<h3>${s.replace(/^###\s+/,"")}</h3>`;
+  return`<p>${s}</p>`;
+ }).join("");
 }
 function loadStrategyAnswerCache(){try{return JSON.parse(localStorage.getItem(storageKey("mmnStrategyAnswerCache")))||{items:{},order:[]}}catch{return{items:{},order:[]}}}
 function saveStrategyAnswerCache(cache){localStorage.setItem(storageKey("mmnStrategyAnswerCache"),JSON.stringify(cache))}
