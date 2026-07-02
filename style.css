@@ -355,6 +355,10 @@ button.permission-locked,.file-button.permission-locked{
 .content-ppt-actions button{
   min-width:128px;
 }
+.content-ppt-actions .ppt-main-action{
+  min-width:150px;
+  box-shadow:0 10px 22px rgba(15,23,42,.22);
+}
 .content-ppt-meta{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
