@@ -47,8 +47,10 @@ let dataBrandFilter="all";
 let dashBrandOpen="";
 let dashModelMenuOpen=false;
 let learningBrandOpen="";
+let cognitionBrandOpen="";
 let contentAssetView="assets",creatorFilter="all",creatorSearch="";
 let contentStrategyState={loading:false,result:null,error:""};
+let cognitionStrategyState={loading:false,result:null,error:""};
 let socialPluginStatus=null;
 let currentDrillContext=null;
 let semanticState={result:null,schema:null};
@@ -665,6 +667,27 @@ function brandModelGroups(models){
  });
  return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
 }
+function cognitionModelOptions(){
+ const models=new Set();
+ state.rows.forEach(r=>{if(r[0])models.add(r[0])});
+ (verticalState.items||[]).forEach(x=>{if(x.ownModel)models.add(x.ownModel);if(x.competitor)models.add(x.competitor)});
+ (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
+ if(!models.size&&state.config.model)models.add(state.config.model);
+ return [...models].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+}
+function cognitionBrandModelGroups(models){
+ const groups={};
+ models.forEach(model=>{
+  const brand=brandForDisplay(model)||brandForModel(model)||"待确认品牌";
+  const id=standardIdentityFor(model);
+  const energy=id?.energy_type||id?.energyType||"UNKNOWN";
+  const key=[brand,id?.model_family||id?.modelFamily||id?.normalized_name||model,energy].join("|");
+  const list=(groups[brand]||(groups[brand]=new Map()));
+  const current=list.get(key);
+  if(!current||canonicalModelLabel(model).length>=canonicalModelLabel(current).length)list.set(key,model);
+ });
+ return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
+}
 function dcdTopPositiveCompetitors(model){
  const items=(verticalState.items||[]).filter(x=>x.ownModel===model&&x.platform==="懂车帝"&&x.competitor&&Number(x.positiveRank)>0);
  if(!items.length)return[];
@@ -1132,7 +1155,101 @@ function renderData(){
  document.querySelector("#data-table").innerHTML=`<thead><tr>${shownHeaders.map(h=>`<th>${h}</th>`).join("")}<th>正向分</th><th>负向分</th><th>操作</th></tr></thead><tbody>${rows.map(({r,i})=>{const s=score(r),shown=[...r.slice(0,12).map((v,idx)=>idx===1?(r[0]===state.config.model?"本品":"竞品"):v),trafficType(r),r[13]||""];return`<tr>${shown.map(v=>`<td>${typeof v==="number"?v.toLocaleString():v}</td>`).join("")}<td class="positive">${Math.round(s.positive).toLocaleString()}</td><td class="negative">${Math.round(s.negative).toLocaleString()}</td><td><button class="ghost delete-row" data-i="${i}">删除</button></td></tr>`}).join("")}</tbody>`;
  document.querySelectorAll(".delete-row").forEach(b=>b.onclick=()=>{state.rows.splice(+b.dataset.i,1);save();render();toast("数据已删除")});
 }
-function renderCognition(a){document.querySelector("#cognition-table").innerHTML=`<thead><tr><th>认知标签</th><th>一级赛道</th><th>本品正向</th><th>本品负向</th><th>竞品正向</th><th>本品占有率</th><th>竞品占有率</th><th>认知 Gap</th><th>Impact</th><th>White Space</th><th>诊断</th></tr></thead><tbody>${a.labels.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td class="positive">${Math.round(x.op).toLocaleString()}</td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${Math.round(x.cp).toLocaleString()}</td><td>${(x.oShare*100).toFixed(1)}%</td><td>${(x.cShare*100).toFixed(1)}%</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.white.toFixed(1)}</td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td></tr>`).join("")}</tbody>`}
+function renderCognition(a){
+ const models=cognitionModelOptions();
+ if(models.length&&!models.includes(state.config.model)){
+  applyModelSelection(models[0]);
+  a=analysis();
+ }
+ renderCognitionSelectors(a,models);
+ renderCognitionMmnStrategy(a);
+ const rows=a.labels||[];
+ document.querySelector("#cognition-table").innerHTML=`<thead><tr><th>认知标签</th><th>一级赛道</th><th>本品正向</th><th>本品负向</th><th>竞品正向</th><th>本品占有率</th><th>竞品占有率</th><th>认知 Gap</th><th>Impact</th><th>White Space</th><th>诊断</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td class="positive">${Math.round(x.op).toLocaleString()}</td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${Math.round(x.cp).toLocaleString()}</td><td>${(x.oShare*100).toFixed(1)}%</td><td>${(x.cShare*100).toFixed(1)}%</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.white.toFixed(1)}</td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td></tr>`).join(""):`<tr><td class="empty-cell" colspan="11">当前车型还没有可用于认知诊断的声量标签。请先在声量数据中心或内容资产中心导入相关数据。</td></tr>`}</tbody>`;
+}
+function renderCognitionSelectors(a,models){
+ const brandSel=document.querySelector("#cognition-brand-select"),modelSel=document.querySelector("#cognition-model-select"),note=document.querySelector("#cognition-model-note");
+ if(!brandSel||!modelSel)return;
+ const groups=cognitionBrandModelGroups(models);
+ const currentBrand=brandForDisplay(state.config.model)||brandForModel(state.config.model)||groups[0]?.brand||"待确认品牌";
+ cognitionBrandOpen=groups.some(g=>g.brand===cognitionBrandOpen)?cognitionBrandOpen:currentBrand;
+ const activeGroup=groups.find(g=>g.brand===cognitionBrandOpen)||groups[0]||{brand:"暂无品牌",models:[]};
+ const activeModels=activeGroup.models||[];
+ if(activeModels.length&&!activeModels.includes(state.config.model)){
+  applyModelSelection(activeModels[0]);
+  a=analysis();
+ }
+ brandSel.innerHTML=groups.length?groups.map(g=>`<option value="${escapeAttr(g.brand)}" ${g.brand===activeGroup.brand?"selected":""}>${g.brand}（${g.models.length}款）</option>`).join(""):`<option>暂无可选品牌</option>`;
+ modelSel.innerHTML=activeModels.length?activeModels.map(m=>`<option value="${escapeAttr(m)}" ${m===state.config.model?"selected":""}>${canonicalModelLabel(m)}</option>`).join(""):`<option>暂无可选车型</option>`;
+ brandSel.onchange=()=>{
+  cognitionBrandOpen=brandSel.value;
+  const next=cognitionBrandModelGroups(cognitionModelOptions()).find(g=>g.brand===cognitionBrandOpen)?.models?.[0];
+  if(next){
+   cognitionStrategyState={loading:false,result:null,error:""};
+   applyModelSelection(next);save();render();toast(`已切换到 ${canonicalModelLabel(next)} 的认知诊断`);
+  }
+ };
+ modelSel.onchange=()=>{
+  if(!modelSel.value)return;
+  cognitionStrategyState={loading:false,result:null,error:""};
+  applyModelSelection(modelSel.value);cognitionBrandOpen=brandForDisplay(modelSel.value)||brandForModel(modelSel.value);save();render();toast(`已切换到 ${canonicalModelLabel(modelSel.value)} 的认知诊断`);
+ };
+ if(note)note.textContent=`${brandForDisplay(state.config.model)} / ${canonicalModelLabel(state.config.model)}｜${(a.labels||[]).length} 个认知标签`;
+}
+function cognitionStrategyContext(a=analysis()){
+ const model=state.config.model,competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+ const ownRows=state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]===model);
+ const compRows=state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]!==model&&(competitors.includes(x.r[0])||x.r[1]==="竞品"));
+ const scopedRows=ownRows.length?[...ownRows,...compRows]:state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]===model||competitors.includes(x.r[0]));
+ const verticalItems=(verticalState.items||[]).filter(x=>x.ownModel===model||x.competitor===model||competitors.includes(x.competitor)||competitors.includes(x.ownModel));
+ const periods=uniquePeriods(verticalItems),latestPeriod=periods[periods.length-1]||"",latestVertical=latestPeriod?verticalItems.filter(x=>x.period===latestPeriod):verticalItems.slice(-12);
+ return{
+  drillType:"cognition_strategy",
+  drillKey:model,
+  question:"请基于认知赛道诊断，调用决策驾驶舱、声量数据中心和垂媒竞争格局，为当前品牌车型输出可执行营销策略。外显结果必须是MMN多模态策略输出。",
+  project:{edition:activeEdition(),brand:brandForDisplay(model),model,competitors,project:state.config.project,stage:state.config.stage||"上市/增长期"},
+  summary:{nsr:+(a.nsr||0).toFixed(3),intent:+(a.intent||0).toFixed(3),ips:+(a.ips||0).toFixed(3),positiveScore:Math.round(a.pos||0),negativeScore:Math.round(a.neg||0),ownSamples:a.ownComments||0,assetCount:(a.labels||[]).filter(x=>x.diagnosis==="持续放大").length,riskCount:(a.labels||[]).filter(x=>x.diagnosis==="优先修复").length,spaceCount:(a.labels||[]).filter(x=>x.diagnosis==="抢占空位").length},
+  breakdown:{labels:(a.labels||[]).slice(0,12).map(x=>({label:x.label,category:x.category,diagnosis:x.diagnosis,priority:+(x.priority||0).toFixed(2),gap:+(x.gap||0).toFixed(3),white:+(x.white||0).toFixed(2),ownPositive:Math.round(x.op||0),ownNegative:Math.round(x.on||0),competitorPositive:Math.round(x.cp||0)})),platforms:topBreakdown(scopedRows,2,8),categories:topBreakdown(scopedRows,3,8),emotions:topBreakdown(scopedRows,5,8)},
+  verticalCompetition:{latestPeriod,relations:latestVertical.slice(0,16).map(x=>({platform:x.platform,period:x.period,ownModel:x.ownModel,competitor:x.competitor,positiveRank:x.positiveRank,negativeRank:x.negativeRank,share:x.share,status:rankStatus(x)}))},
+  references:ragSearch({query:[model,...competitors,"认知资产","认知负债","空位","营销策略"].join(" "),rows:scopedRows,limit:6}),
+  outputPolicy:{visibleBrand:"MMN多模态策略输出",requiredModels:["qwen","deepseek"],requiredSections:["核心认知判断","资产负债机会","策略动作","KPI"]}
+ };
+}
+function localCognitionStrategyDraft(ctx){
+ const model=ctx.project?.model||"当前车型",labels=ctx.breakdown?.labels||[];
+ const asset=labels.find(x=>x.diagnosis==="持续放大")||labels[0]||{},risk=labels.find(x=>x.diagnosis==="优先修复")||labels.find(x=>x.ownNegative>0)||{},space=labels.find(x=>x.diagnosis==="抢占空位")||labels.find(x=>x.white>0)||{};
+ const topPlatform=ctx.breakdown?.platforms?.[0]?.key||"核心平台",relation=ctx.verticalCompetition?.relations?.[0];
+ const comp=relation?.competitor||(ctx.project?.competitors||[])[0]||"核心竞品";
+ const relationLine=relation?`${relation.platform}${relation.period?` ${relation.period}`:""}中，${model}与${comp}的关系是“${relation.status}”，正向排名${relation.positiveRank||"未上榜"}、反向排名${relation.negativeRank||"未上榜"}。`:`垂媒竞争格局用于校准竞品口径，避免只在内部标签里自我判断。`;
+ return[`### 核心认知判断`,`${model} 的认知诊断要同时处理三件事：把“${asset.label||"已有好评"}”做成可复述资产，把“${risk.label||"购买疑虑"}”转成可验证证据，把“${space.label||"竞品空位"}”抢成清晰的购买理由。`,`### 资产负债机会`,`1. 资产：${asset.label||"核心正向标签"} 可以继续放大，适合沉淀成短视频钩子、垂媒解释和销售话术。\n2. 负债：${risk.label||"高风险疑虑"} 必须优先修复，先给证据，再谈卖点。\n3. 机会：${space.label||"认知空位"} 是与 ${comp} 拉开差异的入口，不能只做参数对比。`,`### 策略动作`,`1. 在 ${topPlatform} 先做“一个疑虑一个证据”的内容包，把用户问题直接改成标题。\n2. 竞品表达围绕 ${comp} 做同场景对比，用家庭、通勤、长途、价格权益等真实任务解释差异。\n3. 达人与销售协同：评测达人给证据，车主/KOC给使用场景，门店销售承接FAQ。`,`### KPI`,`核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。`,`### MMN交叉验证结论`,`Qwen负责生成主策略，DeepSeek负责复核风险和过度承诺；两者冲突时，以可验证证据和当前数据结构为准。`].join("\n\n");
+}
+function renderCognitionMmnStrategy(a){
+ const box=document.querySelector("#cognition-mmn-output"),status=document.querySelector("#cognition-mmn-status");
+ if(!box)return;
+ const ctx=cognitionStrategyContext(a),result=cognitionStrategyState.result||{text:localCognitionStrategyDraft(ctx),parts:{rules:localCognitionStrategyDraft(ctx)},context:ctx};
+ if(status)status.textContent=cognitionStrategyState.loading?"MMN正在交叉验证":mmnTraceLabel(result);
+ const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||k}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+ box.innerHTML=`<div class="content-mmn-head"><div><b>${cognitionStrategyState.loading?"MMN正在生成认知策略":"MMN多模态策略输出"}</b><span>决策驾驶舱 + 声量数据中心 + 垂媒竞争格局｜${ctx.project.brand} / ${canonicalModelLabel(ctx.project.model)}｜Qwen + DeepSeek</span></div><button type="button" class="primary" id="run-cognition-mmn-strategy" ${cognitionStrategyState.loading?"disabled":""}>${cognitionStrategyState.loading?"生成中…":"生成/刷新MMN策略"}</button></div><div class="content-mmn-output">${markdownish(String(result.text||""))}</div>${cognitionStrategyState.error?`<p class="empty">模型生成失败，已使用MMN本地策略输出：${cognitionStrategyState.error}</p>`:""}${parts}`;
+ const btn=document.querySelector("#run-cognition-mmn-strategy");
+ if(btn)btn.onclick=()=>runCognitionMmnStrategy();
+}
+async function runCognitionMmnStrategy(silent=false){
+ const ctx=cognitionStrategyContext(analysis()),fallback=localCognitionStrategyDraft(ctx);
+ cognitionStrategyState={loading:true,result:{text:fallback,parts:{rules:fallback},context:ctx},error:""};
+ renderCognitionMmnStrategy(analysis());
+ try{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),90000);
+  const res=await fetch("/api/ai/fusion-strategy",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify({context:ctx}),signal:controller.signal});
+  clearTimeout(timer);
+  const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
+  if(!res.ok||!data.ok)throw new Error(data.error||"MMN认知策略生成失败");
+  cognitionStrategyState={loading:false,result:{...data,context:ctx},error:""};
+  if(!silent)toast("MMN已完成认知赛道多模态策略交叉验证");
+ }catch(err){
+  cognitionStrategyState={loading:false,result:{text:fallback,parts:{rules:fallback},context:ctx},error:err.name==="AbortError"?"模型生成超过90秒":err.message};
+  if(!silent)toast("MMN认知策略暂用本地规则兜底");
+ }
+ renderCognitionMmnStrategy(analysis());
+}
 function renderVertical(){
  const allItems=verticalState.items||[],allSources=verticalState.sources||[];
  if(!allItems.length)restoreVerticalAssetsFromServer();

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-content-strategy-3">
+  <link rel="stylesheet" href="style.css?v=beta-1.01-cognition-strategy-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -217,6 +217,17 @@
         <div><p class="eyebrow">COGNITION DIAGNOSIS</p><h2>哪些是资产，哪些是负债，哪里有空位</h2></div>
         <div class="legend"><i class="green"></i>资产 <i class="red"></i>负债 <i class="amber"></i>机会</div>
       </div>
+      <article class="panel cognition-control-panel">
+        <div class="panel-title"><div><span>分析对象</span><h2>选择品牌与车型</h2></div><em id="cognition-model-note">—</em></div>
+        <div class="cognition-select-grid">
+          <label><span>品牌</span><select id="cognition-brand-select"></select></label>
+          <label><span>车型</span><select id="cognition-model-select"></select></label>
+        </div>
+      </article>
+      <article class="panel cognition-mmn-panel">
+        <div class="panel-title"><div><span>MMN多模态策略输出</span><h2>认知资产、负债与机会的策略判断</h2></div><em id="cognition-mmn-status">Qwen + DeepSeek 交叉验证</em></div>
+        <div id="cognition-mmn-output" class="content-mmn-strategy"></div>
+      </article>
       <div class="table-wrap"><table id="cognition-table"></table></div>
     </section>
 
@@ -752,6 +763,6 @@
   </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-content-strategy-3"></script>
+  <script src="app.js?v=beta-1.01-cognition-strategy-1"></script>
 </body>
 </html>

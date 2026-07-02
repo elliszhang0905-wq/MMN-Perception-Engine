@@ -1923,7 +1923,7 @@ def rule_strategy(context):
     upstream = context.get("upstream") or {}
     cockpit = upstream.get("cockpit") or {}
     voice = upstream.get("voiceCenter") or {}
-    vertical = upstream.get("verticalCompetition") or {}
+    vertical = upstream.get("verticalCompetition") or context.get("verticalCompetition") or {}
     labels = breakdown.get("labels") or voice.get("labels") or cockpit.get("priorityLabels") or breakdown.get("categories") or []
     platforms = breakdown.get("platforms") or voice.get("platforms") or []
     top_label = labels[0].get("key") if labels else context.get("drillKey", "核心标签")
@@ -1945,6 +1945,21 @@ def rule_strategy(context):
             f"三大数据依据：决策驾驶舱显示正向分 {positive}、负向风险 {negative}；声量数据中心主平台为 {top_platform}；{relation_copy}",
             f"营销动作：在 {top_platform} 优先输出证据型内容，将“{top_label}”拆成第三方实测、车主证词、场景短视频和销售FAQ；竞品表达只做同场景对比，不做参数堆砌。",
             "KPI：核心标签正向声量提升、负向疑虑评论占比下降、垂媒正向排名提升、竞品对比搜索占比提升、试驾/询价线索提升。"
+        ])
+    if context.get("drillType") == "cognition_strategy":
+        project = context.get("project") or {}
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        competitor = relation.get("competitor") or (project.get("competitors") or ["核心竞品"])[0]
+        labels = breakdown.get("labels") or []
+        asset = next((x for x in labels if x.get("diagnosis") == "持续放大"), labels[0] if labels else {})
+        risk = next((x for x in labels if x.get("diagnosis") == "优先修复"), {})
+        space = next((x for x in labels if x.get("diagnosis") == "抢占空位"), {})
+        return "\n".join([
+            f"核心认知判断：{project.get('model', context.get('drillKey','当前车型'))} 要把“{asset.get('label', top_label)}”做成认知资产，把“{risk.get('label','购买疑虑')}”用证据优先修复，并围绕“{space.get('label','竞品空位')}”建立与 {competitor} 的差异化购买理由。",
+            f"资产负债机会：资产来自{asset.get('label', top_label)}，负债来自{risk.get('label','高风险疑虑')}，机会来自{space.get('label','可抢占空位')}；声量主平台是 {top_platform}。",
+            f"策略动作：在 {top_platform} 用第三方实测、车主证词、场景短视频和销售FAQ承接认知诊断；竞品表达只做真实场景对比，不做参数堆砌。",
+            "KPI：核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。"
         ])
     return "\n".join([
         f"核心判断：当前围绕“{top_label}”应采取“{mode}”策略。",
@@ -1970,6 +1985,16 @@ def llm_strategy_prompt(context, engine_name):
             "输出必须只包含：核心营销结论、三大数据依据、营销动作、KPI。"
             "不要输出“数据缺口”“依据不足”“尚未同步”“尚未创建任务”等字样；缺失项只作为内部质量判断，不进入外显策略。"
             "底层模型名称不要作为主标题，统一以MMN模型策略口径交付。"
+            "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
+            + MMN_OUTPUT_STYLE
+        )
+    elif context.get("drillType") == "cognition_strategy":
+        system = (
+            f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
+            "这是一份认知赛道诊断页面的外显策略交付。你必须综合调用输入中的决策驾驶舱、声量数据中心、垂媒竞争格局，并围绕认知资产、认知负债、认知空位给出策略。"
+            "输出必须只包含：核心认知判断、资产负债机会、策略动作、KPI。"
+            "外显主标题和语气统一为MMN多模态策略输出；底层模型名称只能作为交叉验证过程，不要作为策略主标题。"
+            "必须体现Qwen负责主策略、DeepSeek负责风险和过度承诺复核的双模型交叉验证逻辑。"
             "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
             + MMN_OUTPUT_STYLE
         )
@@ -2514,6 +2539,50 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
             qwen_clean.split("\n", 1)[0] if qwen_clean else "主控模型建议采用证据型内容承接。",
             deepseek_clean.split("\n", 1)[0] if deepseek_clean else "质检模型建议用竞品关系校准表达。",
             rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以可验证证据作为策略底线。"
+        ])
+    if context.get("drillType") == "cognition_strategy":
+        project = context.get("project") or {}
+        summary = context.get("summary") or {}
+        breakdown = context.get("breakdown") or {}
+        vertical = context.get("verticalCompetition") or {}
+        labels = breakdown.get("labels") or []
+        asset = next((x for x in labels if x.get("diagnosis") == "持续放大"), labels[0] if labels else {})
+        risk = next((x for x in labels if x.get("diagnosis") == "优先修复"), next((x for x in labels if (x.get("ownNegative") or 0) > 0), {}))
+        space = next((x for x in labels if x.get("diagnosis") == "抢占空位"), next((x for x in labels if (x.get("white") or 0) > 0), {}))
+        platforms = breakdown.get("platforms") or []
+        top_platform = platforms[0].get("key") if platforms else "核心平台"
+        relations = vertical.get("relations") or []
+        relation = relations[0] if relations else {}
+        competitor = relation.get("competitor") or (project.get("competitors") or ["核心竞品"])[0]
+        model = project.get("model") or context.get("drillKey") or "当前车型"
+        relation_copy = (
+            f"{relation.get('platform','垂媒')} {relation.get('period','')} 显示与 {competitor} 的关系为“{relation.get('status','竞争对比')}”，"
+            f"正向排名{relation.get('positiveRank','未上榜')}、反向排名{relation.get('negativeRank','未上榜')}。"
+        ) if relation else "垂媒竞争格局用于校准竞品口径，避免只在内部标签里自我判断。"
+        rule_clean = without_gap_sections(rule_text or "")
+        qwen_clean = without_gap_sections(qwen_text or "")
+        deepseek_clean = without_gap_sections(deepseek_text or "")
+        return "\n".join([
+            "### 核心认知判断",
+            f"{model} 的认知策略不是看单个正负面，而是把“{asset.get('label','已有好评')}”沉淀为资产，把“{risk.get('label','购买疑虑')}”用证据修复，把“{space.get('label','可抢占空位')}”转成与 {competitor} 的可传播差异。",
+            "",
+            "### 资产负债机会",
+            f"1. 资产：{asset.get('label','核心正向标签')} 可继续放大，适合进入短视频钩子、垂媒解释和销售话术。",
+            f"2. 负债：{risk.get('label','高风险疑虑')} 需要优先修复，先给证据再谈卖点。",
+            f"3. 机会：{space.get('label','认知空位')} 可作为下一轮抢位主题，和 {competitor} 做同场景对比。",
+            "",
+            "### 策略动作",
+            f"1. 平台动作：在 {top_platform} 先做“一个疑虑一个证据”的内容包，标题直接回答用户问题。",
+            f"2. 竞品动作：{relation_copy}",
+            "3. 协同动作：评测达人负责证据，车主/KOC负责真实场景，销售端同步FAQ承接询价和试驾。",
+            "",
+            "### KPI",
+            f"核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。当前NSR {summary.get('nsr', 0)} 可作为复盘基线。",
+            "",
+            "### MMN交叉验证结论",
+            qwen_clean.split("\n", 1)[0] if qwen_clean else "Qwen主控建议以认知资产和购买阻塞点组织策略。",
+            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "DeepSeek质检建议控制过度承诺，优先使用可验证证据。",
+            rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以真实数据结构作为策略底线。"
         ])
     common = "\n".join([f"- {name}：{text[:500]}" for name, text in available])
     return "\n".join([
