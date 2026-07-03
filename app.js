@@ -1464,7 +1464,7 @@ async function loadSocialPluginStatus(){
  catch(e){socialPluginStatus={installed:false,platforms:{},note:e.message};renderSocialPluginPanel()}
 }
 function socialSearchUrl(platform,query){
- const q=encodeURIComponent(query||"汽车评测");
+ const q=encodeURIComponent(query||"");
  return platform==="xiaohongshu"?`https://www.xiaohongshu.com/search_result?keyword=${q}`:`https://www.douyin.com/search/${q}`;
 }
 async function openSocialPlugin(platform,query=""){
@@ -1499,7 +1499,7 @@ async function syncSocialPluginExport(platform){
 async function startAssetCrawl(platformKey,slot){
  const model=assetModel(slot),role=assetSlots.find(s=>s.key===slot)?.label||"";
  if(!model)return toast("请先设置车型，再启动自动抓取");
- const query=`${model} 汽车评测`;
+ const query=model;
  try{
   toast(`正在自动驱动${assetPlatformName(platformKey)}插件抓取：${query}`);
   const data=await api("/api/social-plugin/auto-crawl",{method:"POST",body:JSON.stringify({platform:platformKey,query,limit:50})});
@@ -1521,7 +1521,7 @@ async function syncAssetCrawl(platformKey,slot){
   const items=cleanAssetItemsForSlot(rawItems,platformKey,slot,model,role,data.dataset.source||"插件自动抓取");
   const creatorCount=mergePluginCreators(platformKey,data.dataset.creators||[]);
   if(!items.length&&creatorCount)toast("最新导出只识别到达人画像，未识别到内容明细");
-  videoState.files[platformKey][slot]={source:data.dataset.source||"插件自动抓取",count:items.length,syncedAt:new Date().toISOString(),items,pluginExportPath:data.dataset.exportPath||"",exportedAt:data.dataset.exportedAt||"",crawlTask:{query:`${model} 汽车评测`,platform:platformKey,slot,role,model},taskStatus:"synced"};
+  videoState.files[platformKey][slot]={source:data.dataset.source||"插件自动抓取",count:items.length,syncedAt:new Date().toISOString(),items,pluginExportPath:data.dataset.exportPath||"",exportedAt:data.dataset.exportedAt||"",crawlTask:{query:model,platform:platformKey,slot,role,model},taskStatus:"synced"};
   resetContentPptPlan();
   saveVideoState();saveCreatorState();await loadSocialPluginStatus();renderVideos();runContentMmnStrategy(true);
   toast(`已同步 ${model} ${assetPlatformName(platformKey)}内容 ${items.length} 条${rawItems.length!==items.length?`，已过滤 ${rawItems.length-items.length} 条非本车型内容`:""}${creatorCount?`，并沉淀达人 ${creatorCount} 位`:""}`);
@@ -1720,7 +1720,7 @@ function renderAssetConfig(){
 }
 function renderUploadMatrix(){
  const el=document.querySelector("#content-upload-matrix");if(!el)return;
- el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card capture-card"><div class="asset-platform-head"><div><span>${p.name==="抖音"?"DOUYIN AUTO CAPTURE":"XHS AUTO CAPTURE"}</span><b>${p.name}</b></div><em>${p.name==="抖音"?"短视频车型资产":"种草笔记车型资产"}</em></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=storedAssetItems(p.key,s.key).length,rawCount=+file?.count||file?.items?.length||0,driving=file?.taskStatus==="driving",opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":driving||opened?"pending":""}"><div class="asset-slot-main"><small>${s.key==="own"?"本品车型":"核心竞品"}</small><b>${model||"未设置车型"}</b><span>${synced?`已沉淀 ${count} 条车型内容${rawCount&&rawCount!==count?`｜过滤 ${rawCount-count} 条非本车型内容`:""}`:driving?`自动驱动中｜${query}`:opened?`采集任务已打开｜${query}`:"等待自动抓取"}</span></div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>${driving?"重新抓取":"开始抓取"}</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
+ el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card capture-card"><div class="asset-platform-head"><div><span>${p.name==="抖音"?"DOUYIN AUTO CAPTURE":"XHS AUTO CAPTURE"}</span><b>${p.name}</b></div><em>${p.name==="抖音"?"短视频车型资产":"种草笔记车型资产"}</em></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=storedAssetItems(p.key,s.key).length,rawCount=+file?.count||file?.items?.length||0,driving=file?.taskStatus==="driving",opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||model||"车型";return`<div class="asset-slot ${synced?"filled":driving||opened?"pending":""}"><div class="asset-slot-main"><small>${s.key==="own"?"本品车型":"核心竞品"}</small><b>${model||"未设置车型"}</b><span>${synced?`已沉淀 ${count} 条车型内容${rawCount&&rawCount!==count?`｜过滤 ${rawCount-count} 条非本车型内容`:""}`:driving?`自动驱动中｜${query}`:opened?`采集任务已打开｜${query}`:"等待自动抓取"}</span></div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>${driving?"重新抓取":"开始抓取"}</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
  document.querySelectorAll("[data-asset-crawl]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetCrawl.split(":");startAssetCrawl(platform,slot)});
  document.querySelectorAll("[data-asset-sync]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetSync.split(":");syncAssetCrawl(platform,slot)});
 }
