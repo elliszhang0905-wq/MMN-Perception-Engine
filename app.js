@@ -448,7 +448,7 @@ function compactModelName(v){return String(v||"").toLowerCase().replace(/[\s·.\
 function contentAuthorName(item){
  const candidates=[item?.authorName,item?.nickname,item?.nickName,item?.userName,item?.accountName,item?.accountNickname,item?.source_account_name,item?.author].map(x=>String(x||"").trim()).filter(Boolean);
  const good=candidates.find(x=>!/^[a-f0-9]{16,}$/i.test(x)&&!/^\d{8,}$/.test(x)&&!/^user[_-]?\d+/i.test(x));
- return good||"待识别网名";
+ return good||"";
 }
 function itemMatchesAssetModel(item,model){
  const m=compactModelName(model);
@@ -1443,7 +1443,7 @@ function renderVideos(){
  renderContentStrategyPath(all);
  renderContentMmnStrategy();
  renderContentPptPlanner();
- document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产车型</th><th>车型</th><th>标题</th><th>作者网名</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetModel||x.model||x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${contentAuthorName(x)}</td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
+ document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产车型</th><th>车型</th><th>标题</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetModel||x.model||x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
  renderCreatorLibrary();
 }
 function renderSocialPluginPanel(){
