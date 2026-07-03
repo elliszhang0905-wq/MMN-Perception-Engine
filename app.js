@@ -1731,7 +1731,7 @@ function renderPlatformBoard(platformKey,chartSel,noteSel){
  const rows=assetSlots.map(s=>{const model=assetModel(s.key),its=items.filter(x=>x.assetSlot===s.key||x.assetModel===model||x.model===model),agg=aggregateVideos(its,"category").slice(0,5);return{s,model,items:its,agg}});
  const topModel=rows.filter(r=>r.items.length).sort((a,b)=>b.items.length-a.items.length)[0];
  if(note)note.textContent=topModel?`${topModel.model}｜${topModel.items.length.toLocaleString()} 条｜Top：${topModel.agg[0]?.key||"综合评测"}`:"暂无车型内容";
- el.innerHTML=rows.map(r=>`<div class="model-tag-board ${r.items.length?"":"empty"}"><div class="model-tag-head"><span>${r.s.key==="own"?"本品":"竞品"}</span><b>${r.model||"未设置车型"}</b><em>${r.items.length.toLocaleString()} 条</em></div>${r.agg.length?`<div class="model-tag-bars">${r.agg.map(x=>`<div><label>${x.key}</label><i><span style="width:${Math.max(4,x.value/(r.agg[0]?.value||1)*100)}%"></span></i><strong>${x.value}</strong></div>`).join("")}</div>`:`<p>暂无该车型${name}内容</p>`}</div>`).join("");
+ el.innerHTML=rows.map(r=>`<div class="model-tag-board ${r.items.length?"":"empty"}"><div class="model-tag-head"><span>${r.s.key==="own"?"本品":"竞品"}</span><b>${r.model||"未设置车型"}</b><em>${r.items.length.toLocaleString()} 条</em></div>${r.agg.length?`<div class="model-tag-bars">${r.agg.map(x=>{const count=+x.count||0,max=+r.agg[0]?.count||1;return`<div><label>${x.key}</label><i><span style="width:${Math.max(4,count/max*100)}%"></span></i><strong>${count.toLocaleString()}</strong></div>`}).join("")}</div>`:`<p>暂无该车型${name}内容</p>`}</div>`).join("");
 }
 function renderModelBoard(items){
  const target=document.querySelector("#content-model-board");
