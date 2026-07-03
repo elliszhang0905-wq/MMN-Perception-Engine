@@ -444,11 +444,34 @@ function defaultWorkspaceState(){
 }
 function assetModel(slot){return (videoState.config?.[assetSlots.find(s=>s.key===slot)?.field]||"").trim()}
 function assetPlatformName(key){return assetPlatforms.find(p=>p.key===key)?.name||key}
+function compactModelName(v){return String(v||"").toLowerCase().replace(/[\s·.\-_/｜|]+/g,"")}
+function contentAuthorName(item){
+ const candidates=[item?.authorName,item?.nickname,item?.nickName,item?.userName,item?.accountName,item?.accountNickname,item?.source_account_name,item?.author].map(x=>String(x||"").trim()).filter(Boolean);
+ const good=candidates.find(x=>!/^[a-f0-9]{16,}$/i.test(x)&&!/^\d{8,}$/.test(x)&&!/^user[_-]?\d+/i.test(x));
+ return good||"待识别网名";
+}
+function itemMatchesAssetModel(item,model){
+ const m=compactModelName(model);
+ if(!m)return true;
+ const explicit=compactModelName(item?.model||item?.assetModel||"");
+ if(explicit&&explicit===m)return true;
+ const text=compactModelName([item?.title,item?.searchText,item?.topicText,item?.tags,item?.desc,item?.description,item?.url].filter(Boolean).join(" "));
+ return text.includes(m);
+}
+function cleanAssetItemsForSlot(items,platformKey,slot,model,role,source="插件自动抓取"){
+ return (items||[])
+  .filter(x=>itemMatchesAssetModel(x,model))
+  .map(x=>({...x,author:contentAuthorName(x),platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:model||role,assetModel:model,model:model,source}));
+}
+function storedAssetItems(platformKey,slot){
+ const file=videoState.files?.[platformKey]?.[slot],model=assetModel(slot);
+ if(!file?.items?.length)return [];
+ return file.items.filter(x=>itemMatchesAssetModel(x,model)).map(x=>({...x,author:contentAuthorName(x),assetRole:x.assetModel||model||x.assetRole}));
+}
 function allVideoItems(){
  const items=[...(videoState.legacyItems||[])];
  assetPlatforms.forEach(p=>assetSlots.forEach(s=>{
-  const file=videoState.files?.[p.key]?.[s.key];
-  if(file?.items?.length)items.push(...file.items);
+  items.push(...storedAssetItems(p.key,s.key));
  }));
  return items.map(enrichContentItem);
 }
@@ -485,7 +508,7 @@ function contentMarketingLabels(item){
 }
 function enrichContentItem(item){
  const labels=contentMarketingLabels(item||{});
- return{...item,originalCategory:item?.originalCategory||item?.category||"",category:labels.category,mmnLabels:labels};
+ return{...item,author:contentAuthorName(item),assetRole:item?.assetModel||item?.model||item?.assetRole||"",originalCategory:item?.originalCategory||item?.category||"",category:labels.category,mmnLabels:labels};
 }
 let session=loadSession(),serverLearnings=[];
 function loadSession(){try{return JSON.parse(localStorage.getItem("mmnCommercialSession"))||null}catch{return null}}
@@ -1417,10 +1440,10 @@ function renderVideos(){
  document.querySelector("#video-hot").textContent=all.filter(x=>(x.engagement||0)>=hotLine&&hotLine>0).length.toLocaleString();
  renderPlatformBoard("douyin","#douyin-category-chart","#douyin-board-note");
  renderPlatformBoard("xiaohongshu","#xhs-category-chart","#xhs-board-note");
- renderModelBoard(all);
+ renderContentStrategyPath(all);
  renderContentMmnStrategy();
  renderContentPptPlanner();
- document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产角色</th><th>车型</th><th>标题</th><th>作者</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${x.author||""}</td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
+ document.querySelector("#video-table").innerHTML=`<thead><tr><th>分类</th><th>平台</th><th>资产车型</th><th>车型</th><th>标题</th><th>作者网名</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>互动分</th><th>链接</th></tr></thead><tbody>${items.sort((a,b)=>(b.engagement||0)-(a.engagement||0)).map(x=>`<tr><td><span class="tag">${x.category}</span></td><td>${x.platform||""}</td><td>${x.assetModel||x.model||x.assetRole||""}</td><td>${x.assetModel||x.model||""}</td><td><b>${x.title||""}</b></td><td>${contentAuthorName(x)}</td><td>${Math.round(x.likes||0).toLocaleString()}</td><td>${Math.round(x.comments||0).toLocaleString()}</td><td>${Math.round(x.collects||0).toLocaleString()}</td><td>${Math.round(x.shares||0).toLocaleString()}</td><td>${Math.round(x.engagement||0).toLocaleString()}</td><td>${x.url?`<a href="${x.url}" target="_blank">打开</a>`:""}</td></tr>`).join("")}</tbody>`;
  renderCreatorLibrary();
 }
 function renderSocialPluginPanel(){
@@ -1433,8 +1456,8 @@ function renderSocialPluginPanel(){
  if(!socialPluginStatus){status.textContent="等待检测";dy.textContent="等待插件状态";xhs.textContent="等待插件状态";return}
  status.textContent=socialPluginStatus.installed?"已识别Chrome采集插件":"未识别插件";
  const d=socialPluginStatus.platforms?.douyin||{},x=socialPluginStatus.platforms?.xiaohongshu||{};
- dy.textContent=d.latestFile?`最新导出：${d.latestFile}｜共 ${d.count} 份`:`未发现导出文件｜目录：${d.folder||"未配置"}`;
- xhs.textContent=x.latestFile?`最新导出：${x.latestFile}｜共 ${x.count} 份`:`未发现导出文件｜目录：${x.folder||"未配置"}`;
+ dy.textContent=d.latestFile?`已发现最新采集结果｜共 ${d.count} 份可同步`:"暂未发现可同步的抖音采集结果";
+ xhs.textContent=x.latestFile?`已发现最新采集结果｜共 ${x.count} 份可同步`:"暂未发现可同步的小红书采集结果";
 }
 async function loadSocialPluginStatus(){
  try{const data=await api("/api/social-plugin/status");socialPluginStatus=data.plugin;renderSocialPluginPanel()}
@@ -1494,13 +1517,14 @@ async function syncAssetCrawl(platformKey,slot){
  try{
   toast(`正在同步${assetPlatformName(platformKey)} · ${model} 的最新抓取结果…`);
   const data=await api("/api/social-plugin/import-latest",{method:"POST",body:JSON.stringify({platform:platformKey})});
-  const items=(data.dataset.items||[]).map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:data.dataset.source||"插件自动抓取"}));
+  const rawItems=data.dataset.items||[];
+  const items=cleanAssetItemsForSlot(rawItems,platformKey,slot,model,role,data.dataset.source||"插件自动抓取");
   const creatorCount=mergePluginCreators(platformKey,data.dataset.creators||[]);
   if(!items.length&&creatorCount)toast("最新导出只识别到达人画像，未识别到内容明细");
   videoState.files[platformKey][slot]={source:data.dataset.source||"插件自动抓取",count:items.length,syncedAt:new Date().toISOString(),items,pluginExportPath:data.dataset.exportPath||"",exportedAt:data.dataset.exportedAt||"",crawlTask:{query:`${model} 汽车评测`,platform:platformKey,slot,role,model},taskStatus:"synced"};
   resetContentPptPlan();
   saveVideoState();saveCreatorState();await loadSocialPluginStatus();renderVideos();runContentMmnStrategy(true);
-  toast(`已同步 ${model} ${assetPlatformName(platformKey)}内容 ${items.length} 条${creatorCount?`，并沉淀达人 ${creatorCount} 位`:""}`);
+  toast(`已同步 ${model} ${assetPlatformName(platformKey)}内容 ${items.length} 条${rawItems.length!==items.length?`，已过滤 ${rawItems.length-items.length} 条非本车型内容`:""}${creatorCount?`，并沉淀达人 ${creatorCount} 位`:""}`);
  }catch(e){toast(`同步抓取结果失败：${e.message}`)}
 }
 function mountContentDistillViews(){
@@ -1692,23 +1716,43 @@ async function analyzeCreatorWithQwen(platform,id,button){
 function renderAssetConfig(){
  const el=document.querySelector("#content-asset-config");if(!el)return;
  el.innerHTML=assetSlots.map(s=>`<div class="field"><label>${s.label}车型</label><input data-asset-model="${s.field}" value="${videoState.config?.[s.field]||""}" placeholder="${s.key==="own"?"例如：智己LS8":"可留空"}"></div>`).join("");
- document.querySelectorAll("[data-asset-model]").forEach(input=>input.onchange=input.oninput=()=>{videoState.config[input.dataset.assetModel]=input.value.trim();resetContentPptPlan();saveVideoState();renderUploadMatrix();renderModelBoard(allVideoItems());renderContentMmnStrategy();renderContentPptPlanner()});
+ document.querySelectorAll("[data-asset-model]").forEach(input=>input.onchange=input.oninput=()=>{videoState.config[input.dataset.assetModel]=input.value.trim();resetContentPptPlan();saveVideoState();renderUploadMatrix();renderContentStrategyPath(allVideoItems());renderContentMmnStrategy();renderContentPptPlanner()});
 }
 function renderUploadMatrix(){
  const el=document.querySelector("#content-upload-matrix");if(!el)return;
- el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card"><div class="asset-platform-head"><b>${p.name}</b><span>${p.name==="抖音"?"短视频自动抓取":"种草笔记自动抓取"}</span></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=+file?.count||file?.items?.length||0,driving=file?.taskStatus==="driving",opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":driving||opened?"pending":""}"><div><b>${s.label}</b><span>${model||"未设置车型"}</span>${synced?`<small>已同步 ${count} 条｜${file.source||"插件导出"}</small>`:driving?`<small>自动驱动中｜${query}</small>`:opened?`<small>采集任务已打开｜${query}</small>`:`<small>等待自动抓取</small>`}</div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>${driving?"重新抓取":"开始抓取"}</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
+ el.innerHTML=assetPlatforms.map(p=>`<article class="asset-platform-card capture-card"><div class="asset-platform-head"><div><span>${p.name==="抖音"?"DOUYIN AUTO CAPTURE":"XHS AUTO CAPTURE"}</span><b>${p.name}</b></div><em>${p.name==="抖音"?"短视频车型资产":"种草笔记车型资产"}</em></div><div class="asset-slots">${assetSlots.map(s=>{const model=assetModel(s.key),file=videoState.files?.[p.key]?.[s.key],count=storedAssetItems(p.key,s.key).length,rawCount=+file?.count||file?.items?.length||0,driving=file?.taskStatus==="driving",opened=file?.taskStatus==="opened",synced=file?.taskStatus==="synced"||count>0,query=file?.crawlTask?.query||`${model||"车型"} 汽车评测`;return`<div class="asset-slot ${synced?"filled":driving||opened?"pending":""}"><div class="asset-slot-main"><small>${s.key==="own"?"本品车型":"核心竞品"}</small><b>${model||"未设置车型"}</b><span>${synced?`已沉淀 ${count} 条车型内容${rawCount&&rawCount!==count?`｜过滤 ${rawCount-count} 条非本车型内容`:""}`:driving?`自动驱动中｜${query}`:opened?`采集任务已打开｜${query}`:"等待自动抓取"}</span></div><div class="asset-slot-actions"><button type="button" class="${model?"primary":"ghost"}" data-asset-crawl="${p.key}:${s.key}" ${model?"":"disabled"}>${driving?"重新抓取":"开始抓取"}</button><button type="button" class="ghost" data-asset-sync="${p.key}:${s.key}" ${model?"":"disabled"}>同步结果</button></div></div>`}).join("")}</div></article>`).join("");
  document.querySelectorAll("[data-asset-crawl]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetCrawl.split(":");startAssetCrawl(platform,slot)});
  document.querySelectorAll("[data-asset-sync]").forEach(b=>b.onclick=()=>{const [platform,slot]=b.dataset.assetSync.split(":");syncAssetCrawl(platform,slot)});
 }
 function renderPlatformBoard(platformKey,chartSel,noteSel){
- const name=assetPlatformName(platformKey),items=allVideoItems().filter(x=>x.assetPlatform===platformKey||x.platform===name),agg=aggregateVideos(items,"category");
- renderVideoBars(chartSel,agg);
- const top=agg[0]?.key||"暂无数据";
- document.querySelector(noteSel).textContent=items.length?`${items.length.toLocaleString()} 条｜Top：${top}`:"暂无数据";
+ const name=assetPlatformName(platformKey),items=allVideoItems().filter(x=>x.assetPlatform===platformKey||x.platform===name);
+ const el=document.querySelector(chartSel),note=document.querySelector(noteSel);
+ if(!el)return;
+ const rows=assetSlots.map(s=>{const model=assetModel(s.key),its=items.filter(x=>x.assetSlot===s.key||x.assetModel===model||x.model===model),agg=aggregateVideos(its,"category").slice(0,5);return{s,model,items:its,agg}});
+ const topModel=rows.filter(r=>r.items.length).sort((a,b)=>b.items.length-a.items.length)[0];
+ if(note)note.textContent=topModel?`${topModel.model}｜${topModel.items.length.toLocaleString()} 条｜Top：${topModel.agg[0]?.key||"综合评测"}`:"暂无车型内容";
+ el.innerHTML=rows.map(r=>`<div class="model-tag-board ${r.items.length?"":"empty"}"><div class="model-tag-head"><span>${r.s.key==="own"?"本品":"竞品"}</span><b>${r.model||"未设置车型"}</b><em>${r.items.length.toLocaleString()} 条</em></div>${r.agg.length?`<div class="model-tag-bars">${r.agg.map(x=>`<div><label>${x.key}</label><i><span style="width:${Math.max(4,x.value/(r.agg[0]?.value||1)*100)}%"></span></i><strong>${x.value}</strong></div>`).join("")}</div>`:`<p>暂无该车型${name}内容</p>`}</div>`).join("");
 }
 function renderModelBoard(items){
+ const target=document.querySelector("#content-model-board");
+ if(!target)return;
  const rows=assetSlots.map(s=>{const model=assetModel(s.key),its=items.filter(x=>x.assetSlot===s.key),dy=its.filter(x=>x.assetPlatform==="douyin").length,xhs=its.filter(x=>x.assetPlatform==="xiaohongshu").length,top=aggregateVideos(its,"category")[0]?.key||"—",eng=its.reduce((n,x)=>n+(+x.engagement||0),0);return{s,model,all:its.length,dy,xhs,top,eng}});
- document.querySelector("#content-model-board").innerHTML=`<div class="table-wrap mini"><table><thead><tr><th>角色</th><th>车型</th><th>总内容</th><th>抖音</th><th>小红书</th><th>主分类</th><th>互动分</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="tag ${r.s.key==="own"?"asset":""}">${r.s.label}</span></td><td><b>${r.model||"未设置"}</b></td><td>${r.all.toLocaleString()}</td><td>${r.dy.toLocaleString()}</td><td>${r.xhs.toLocaleString()}</td><td>${r.top}</td><td>${Math.round(r.eng).toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`;
+ target.innerHTML=`<div class="table-wrap mini"><table><thead><tr><th>角色</th><th>车型</th><th>总内容</th><th>抖音</th><th>小红书</th><th>主分类</th><th>互动分</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="tag ${r.s.key==="own"?"asset":""}">${r.s.label}</span></td><td><b>${r.model||"未设置"}</b></td><td>${r.all.toLocaleString()}</td><td>${r.dy.toLocaleString()}</td><td>${r.xhs.toLocaleString()}</td><td>${r.top}</td><td>${Math.round(r.eng).toLocaleString()}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function renderContentStrategyPath(items){
+ const el=document.querySelector("#content-strategy-path"),status=document.querySelector("#content-strategy-path-status");
+ if(!el)return;
+ const hasOwn=items.some(x=>x.assetSlot==="own"),hasCompetitor=items.some(x=>x.assetSlot&&x.assetSlot!=="own"),hasBoth=hasOwn&&hasCompetitor;
+ const steps=[
+  {name:"车型内容抓取",desc:"按本品和竞品分别沉淀抖音 / 小红书内容资产",ok:items.length>0},
+  {name:"MMN语义归类",desc:"识别产品属性、购买阻塞点、竞品关系、身份表达和场景需求",ok:items.length>0},
+  {name:"交叉质检",desc:"结合决策驾驶舱、声量数据中心、垂媒竞争格局做策略复核",ok:hasBoth},
+  {name:"策略输出",desc:"生成MMN模型外显策略，并可进入策略PPT方案",ok:!!contentStrategyState.result||hasBoth}
+ ];
+ if(status)status.textContent=hasBoth?"可进入MMN策略输出":items.length?"等待竞品/本品补齐":"等待自动抓取";
+ el.innerHTML=`<div class="strategy-path-steps">${steps.map((s,i)=>`<div class="${s.ok?"done":""}"><span>${String(i+1).padStart(2,"0")}</span><b>${s.name}</b><small>${s.desc}</small></div>`).join("")}</div><div class="strategy-path-action"><p>${hasBoth?"本品和竞品内容已经进入同一条策略链路，下一步应刷新MMN策略，形成可汇报结论。":"先完成本品和至少一个核心竞品的抓取同步，再由MMN输出交叉质检后的营销策略。"}</p><button type="button" class="primary" id="strategy-path-run" ${items.length?"":"disabled"}>生成/刷新MMN策略</button></div>`;
+ const btn=document.querySelector("#strategy-path-run");
+ if(btn)btn.onclick=()=>runContentMmnStrategy();
 }
 function upstreamStrategySignals(model,competitors=[]){
  const a=analysis(),ownRows=state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]===state.config.model),compRows=state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]!==state.config.model&&(competitors.includes(x.r[0])||x.r[1]==="竞品"));
@@ -1909,7 +1953,7 @@ async function handleAssetUpload(e){
  try{
   const res=await fetch(`/api/import-video-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
-  const items=json.dataset.items.map(x=>({...x,platform:assetPlatformName(platformKey),assetPlatform:platformKey,assetSlot:slot,assetRole:role,assetModel:model,model:model,source:file.name}));
+  const items=cleanAssetItemsForSlot(json.dataset.items,platformKey,slot,model,role,file.name);
   videoState.files[platformKey][slot]={source:file.name,count:items.length,uploadedAt:new Date().toISOString(),items};
   resetContentPptPlan();
   saveVideoState();renderVideos();runContentMmnStrategy(true);toast(`已导入 ${model} ${assetPlatformName(platformKey)} ${items.length} 条`);
