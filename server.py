@@ -16,6 +16,7 @@ import hashlib
 import time
 import base64
 import hmac
+import html as html_lib
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -83,6 +84,11 @@ BLOGGER_SKILL_TAGS = [
     "滤震", "支撑", "侧倾", "转向手感", "车身收敛", "后桥跟随", "制动姿态", "NVH", "轮胎匹配",
     "平台架构", "空气悬挂", "CDC", "后轮转向", "机械素质", "电控底盘", "高速稳定性", "低速舒适性",
     "弯道表现", "麋鹿表现", "赛道表现"
+]
+CONTENT_CAPABILITY_IMPORT_ROOT = Path(os.getenv("MMN_CONTENT_CAPABILITY_IMPORT_ROOT", str(ROOT / "imports" / "content_capability"))).expanduser().resolve()
+CONTENT_CAPABILITY_TAG_TYPES = [
+    "平台标签", "账号标签", "车型标签", "品牌标签", "技术标签", "场景标签", "情绪标签",
+    "脚本结构标签", "表达风格标签", "专业领域标签", "适用任务标签", "可信度标签", "可迁移性标签"
 ]
 NODE_CANDIDATES = [
     os.getenv("NODE_BINARY"),
@@ -343,6 +349,44 @@ def init_db():
             updated_at text not null,
             unique(edition, blogger_name, vertical_domain)
         );
+        create table if not exists content_capability_sources (
+            id text primary key,
+            edition text not null default 'china',
+            account_name text,
+            platform text,
+            title text,
+            publish_time text,
+            source_url text,
+            source_file text,
+            ingest_time text not null,
+            interaction_json text not null default '{}',
+            comment_summary text,
+            raw_text text,
+            raw_payload_hash text not null,
+            status text not null,
+            unique(edition, raw_payload_hash)
+        );
+        create table if not exists content_capability_chunks (
+            id text primary key,
+            source_id text not null,
+            edition text not null default 'china',
+            account_name text,
+            platform text,
+            title text,
+            chunk_text text not null,
+            script_style_json text not null default '{}',
+            professional_knowledge_json text not null default '[]',
+            knowledge_structure text,
+            content_breakdown_json text not null default '{}',
+            methodology_json text not null default '[]',
+            transferable_capabilities_json text not null default '[]',
+            tags_json text not null default '{}',
+            flat_tags_json text not null default '[]',
+            embedding_json text not null default '[]',
+            source_url text,
+            created_at text not null,
+            unique(edition, source_id, id)
+        );
         create table if not exists agent_runs (
             id text primary key,
             org_id text,
@@ -433,6 +477,7 @@ def init_db():
         """)
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
+        ensure_column(conn, "content_capability_chunks", "content_breakdown_json", "text not null default '{}'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
 
 def now():
@@ -4982,6 +5027,824 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
         "result": result or {}
     }
 
+def content_capability_interactions(row):
+    keys = ["互动数据", "点赞", "点赞量", "评论", "评论量", "收藏", "收藏量", "分享", "分享量", "转发", "推荐量", "likes", "comments", "collects", "shares"]
+    data = {}
+    for key in keys:
+        value = field_value(row, [key], "")
+        if value:
+            data[key] = value
+    return data
+
+def content_title_from_text(text, fallback="内容能力样本"):
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    text = re.sub(r"https?://\S+", "", text).strip()
+    if not text:
+        return fallback
+    first = re.split(r"[。！？!?#\n]", text)[0].strip(" ，,；;")
+    if len(first) >= 6:
+        return first[:52]
+    return text[:52]
+
+def normalize_content_capability_source(row, filename, file_digest, edition="china"):
+    desc = field_value(row, ["视频描述", "描述", "正文", "内容", "笔记内容", "笔记正文", "作品描述", "content", "desc", "text"], "")
+    spoken = field_value(row, ["口播文案", "脚本", "字幕", "视频文案", "文案", "spoken_script", "script", "subtitle"], "")
+    title = field_value(row, ["视频标题", "作品标题", "笔记标题", "标题", "title"], "")
+    if not title or "社媒助手" in title:
+        title = content_title_from_text(desc or spoken, Path(filename or "内容样本").stem)
+    account = field_value(row, ["达人昵称", "博主昵称", "用户昵称", "账号昵称", "账号名", "账号", "博主", "达人", "作者", "昵称", "source_account_name", "author"], "待确认账号")
+    if re.fullmatch(r"\d{6,}", str(account or "")):
+        account = field_value(row, ["达人昵称", "博主昵称", "用户昵称", "账号昵称", "昵称", "作者"], "待确认账号")
+    platform = infer_platform(" ".join([
+        filename or "",
+        field_value(row, ["平台", "来源平台", "source_platform", "platform"], ""),
+        field_value(row, ["视频链接", "链接", "source_url", "url", "URL"], "")
+    ])) or field_value(row, ["平台", "来源平台", "source_platform", "platform"], "公开内容")
+    comment_summary = field_value(row, ["评论摘要", "评论区摘要", "comment_summary", "comments_summary"], "")
+    publish_time = field_value(row, ["发布时间", "发布日期", "publish_time", "published_at", "date"], "")
+    source_url = field_value(row, ["视频链接", "内容链接", "笔记链接", "链接", "source_url", "url", "URL"], "")
+    raw_text = "\n".join(x for x in [title, spoken, desc, comment_summary] if x).strip()
+    digest = stable_id("content-capability", edition, account, platform, title, publish_time, source_url, raw_text[:240], file_digest)
+    return {
+        "id": digest,
+        "edition": edition,
+        "account_name": account,
+        "platform": platform,
+        "title": title,
+        "publish_time": publish_time,
+        "source_url": source_url or f"local://content-capability/{quote(filename or 'manual')}/{digest}",
+        "source_file": filename,
+        "ingest_time": now(),
+        "interaction": content_capability_interactions(row),
+        "comment_summary": comment_summary,
+        "raw_text": raw_text,
+        "raw_payload_hash": digest,
+        "status": "fetched" if raw_text else "manual_required"
+    }
+
+def tag_matches(text, patterns):
+    found = []
+    for tag, pattern in patterns.items():
+        if re.search(pattern, text or "", re.I):
+            found.append(tag)
+    return found
+
+def content_capability_tags(source):
+    text = " ".join([source.get("title", ""), source.get("raw_text", ""), source.get("comment_summary", "")])
+    model = infer_model(text) or ""
+    brand = infer_brand_from_model(model) if model else ""
+    model_tags = [model] if model else []
+    if re.search(r"SUV|越野|轿车|MPV|皮卡|旅行车|跑车", text, re.I):
+        model_tags.extend(list(dict.fromkeys(re.findall(r"(?:\d+万级)?(?:SUV|MPV|轿车|皮卡|旅行车|跑车|越野)", text, re.I))))
+    tech = tag_matches(text, {
+        "底盘技术": r"底盘|悬架|滤震|支撑|侧倾|转向|NVH|轮胎|CDC|空气悬挂",
+        "空气悬挂": r"空气悬挂|空簧",
+        "CDC": r"\bCDC\b|连续阻尼",
+        "三电技术": r"三电|电池|电机|电控|续航|补能|快充|能耗",
+        "智驾技术": r"智驾|NOA|辅助驾驶|自动驾驶|激光雷达|泊车",
+        "座舱体验": r"座舱|车机|屏幕|语音|交互|音响",
+        "配置价格": r"价格|权益|配置|版本|选装|性价比"
+    })
+    scene = tag_matches(text, {
+        "城市场景": r"城市|通勤|代步|拥堵|停车",
+        "家庭场景": r"家庭|家用|孩子|老人|二排|后排|空间",
+        "长途场景": r"长途|高速|自驾|旅行|续航",
+        "试驾场景": r"试驾|体验|开起来|坐起来|实测",
+        "竞品对比": r"对比|竞品|同级|相比|PK|vs"
+    })
+    emotion = tag_matches(text, {
+        "犀利质疑": r"问题|槽点|不行|短板|质疑|翻车|离谱",
+        "理性解释": r"原因|逻辑|本质|取决于|证据|拆解",
+        "兴奋种草": r"惊喜|喜欢|值得|推荐|真香",
+        "焦虑劝退": r"风险|慎重|不建议|别买|避坑"
+    })
+    script = tag_matches(text, {
+        "先结论后论证": r"先说结论|结论是|一句话|直接说",
+        "先场景后技术": r"如果你|当你|场景|用户|然后.*技术",
+        "先痛点后解决方案": r"痛点|问题|怎么办|解决",
+        "先反驳再立论": r"很多人说|别只看|不是.*而是|误区"
+    })
+    style = tag_matches(text, {
+        "犀利表达": r"犀利|别|不是.*而是|离谱|真相|别被|误区",
+        "轻专业": r"轻专业|简单说|普通人|你只要|听懂|翻译",
+        "专业测评": r"专业测评|专业评测|测评|评测|实测|参数|结构|调校|证据|工程",
+        "女达人口播": r"女达人|女性|女生|口播",
+        "口语化": r"咱们|你会发现|说白了|聊聊|口播"
+    })
+    domains = tag_matches(text, {
+        "底盘": r"底盘|悬架|滤震|支撑|侧倾|转向|NVH",
+        "三电": r"三电|电池|电机|电控|续航|充电",
+        "智驾": r"智驾|NOA|辅助驾驶|自动驾驶",
+        "座舱": r"座舱|车机|语音|屏幕|音响",
+        "品牌营销": r"品牌|传播|定位|用户|声量|营销"
+    })
+    tasks = ["达人brief", "短视频脚本", "账号孵化方案"]
+    if "竞品对比" in scene or re.search(r"攻防|反驳|竞品", text):
+        tasks.append("竞品攻防话术")
+    if re.search(r"策略|报告|客户|结论", text):
+        tasks.append("营销策略输出")
+    confidence = "高可信" if source.get("source_url", "").startswith("http") and len(source.get("raw_text", "")) > 80 else "中可信"
+    transfer = "高可迁移" if len(set(tech + scene + script + style)) >= 4 else "中可迁移"
+    return {
+        "平台标签": [source.get("platform") or "公开内容"],
+        "账号标签": [source.get("account_name") or "待确认账号"],
+        "车型标签": list(dict.fromkeys([x for x in model_tags if x])),
+        "品牌标签": [brand] if brand else [],
+        "技术标签": tech or ["汽车产品认知"],
+        "场景标签": scene or ["综合场景"],
+        "情绪标签": emotion or ["理性解释"],
+        "脚本结构标签": script or ["观点拆解"],
+        "表达风格标签": style or ["专业表达"],
+        "专业领域标签": domains or ["汽车垂直内容"],
+        "适用任务标签": tasks,
+        "可信度标签": [confidence],
+        "可迁移性标签": [transfer]
+    }
+
+def flat_content_tags(tags):
+    values = []
+    for key in CONTENT_CAPABILITY_TAG_TYPES:
+        values.extend(tags.get(key) or [])
+    return list(dict.fromkeys([x for x in values if x]))
+
+def content_knowledge_structure(text):
+    if re.search(r"先说结论|结论是|一句话", text):
+        return "先结论后论证"
+    if re.search(r"场景|用户|如果你|当你", text) and re.search(r"技术|原因|结构|调校", text):
+        return "先场景后技术"
+    if re.search(r"问题|痛点|槽点", text) and re.search(r"解决|建议|应该", text):
+        return "先痛点后解决方案"
+    if re.search(r"很多人说|不是.*而是|别只看", text):
+        return "先反驳再立论"
+    return "观点拆解型"
+
+def content_script_style(source, tags):
+    text = source.get("raw_text", "")
+    return {
+        "opening_hook": excerpt_sentences(text, r"先说结论|如果你|别|为什么|一句话", 80) or source.get("title", ""),
+        "narrative_rhythm": content_knowledge_structure(text),
+        "sentence_feature": "短句高密度" if len(re.findall(r"[。！？!?]", text)) >= 6 else "中等信息密度",
+        "viewpoint_density": "高" if len(flat_content_tags(tags)) >= 12 else "中",
+        "transition_style": "场景到证据" if "试驾场景" in tags.get("场景标签", []) else "观点到解释",
+        "ending_style": "落到行动建议" if re.search(r"建议|适合|不适合|试驾", text) else "保留判断边界"
+    }
+
+def content_methodology(source, tags):
+    structure = content_knowledge_structure(source.get("raw_text", ""))
+    return [
+        f"选题逻辑：围绕{', '.join(tags.get('场景标签', [])[:2]) or '用户场景'}切入，再落到{', '.join(tags.get('技术标签', [])[:2]) or '产品判断'}。",
+        f"观点框架：{structure}，先让用户听懂问题，再补证据和边界。",
+        "评论反馈用法：只归纳共性反馈，不采集或展示个人隐私。",
+        "迁移边界：学习分析结构和表达方法，不复制原文、不冒充账号、不搬运素材。"
+    ]
+
+def content_transferable_capabilities(tags):
+    tasks = tags.get("适用任务标签") or []
+    return [f"可用于{task}：按标签组合调用样本方法论，生成MMN原创策略表达。" for task in tasks]
+
+def content_item_breakdown(source, piece, tags, script_style):
+    text = re.sub(r"\s+", " ", str(piece or source.get("raw_text") or "")).strip()
+    title = source.get("title") or content_title_from_text(text)
+    topic = (tags.get("专业领域标签") or tags.get("技术标签") or ["汽车垂直内容"])[0]
+    scene_tags = tags.get("场景标签") or ["综合场景"]
+    style_tags = tags.get("表达风格标签") or ["专业表达"]
+    hook = script_style.get("opening_hook") or content_title_from_text(text, title)
+    sentences = [x.strip() for x in re.split(r"[。！？!?；;]", text) if x.strip()]
+    main_view = sentences[0][:90] if sentences else title
+    proof = " -> ".join([script_style.get("narrative_rhythm") or "观点拆解", "提出判断", "补充证据或体验", "给出边界"])
+    ending = script_style.get("ending_style") or ("落到行动建议" if re.search(r"建议|适合|不适合|试驾|关注", text) else "保留判断边界")
+    return {
+        "title": title,
+        "core_topic": topic,
+        "opening_hook": hook,
+        "main_viewpoint": main_view,
+        "argument_structure": proof,
+        "professional_knowledge": list(dict.fromkeys((tags.get("技术标签") or []) + (tags.get("专业领域标签") or [])))[:8],
+        "scene_tags": scene_tags[:6],
+        "expression_style": style_tags[:6],
+        "ending_type": ending,
+        "transferable_method": "迁移选题角度、判断顺序、证据组织和用户翻译方式，生成MMN原创内容。",
+        "noncopy_risk": "不得复制原文、不得复刻个人口吻、不得冒充原账号、不得将外部观点包装成MMN原创事实。",
+        "media_learning_status": {
+            "video_transcript": "已读取文本字段" if source.get("raw_text") else "待导入转写文本",
+            "image_ocr": "如导入截图/OCR文本则可参与拆解",
+            "comments": "仅支持用户提供的评论摘要，不采集个人隐私"
+        }
+    }
+
+def split_content_chunks(text, max_len=420):
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return []
+    sentences = re.split(r"(?<=[。！？!?；;])", text)
+    chunks, current = [], ""
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if len(current) + len(sentence) > max_len and current:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = (current + sentence)[:max_len] if current else sentence
+    if current:
+        chunks.append(current[:max_len])
+    return chunks[:6]
+
+def extract_content_keywords(text, limit=32):
+    text = str(text or "")
+    common = {"一个", "这个", "那个", "就是", "但是", "因为", "所以", "如果", "可以", "需要", "没有", "不是", "还是", "进行", "内容", "用户"}
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9\\-]{1,24}|[\u4e00-\u9fff]{2,8}", text)
+    scored = {}
+    for token in tokens:
+        token = token.strip()
+        if not token or token in common:
+            continue
+        scored[token] = scored.get(token, 0) + 1
+    return [k for k, _ in sorted(scored.items(), key=lambda x: (-x[1], len(x[0])))[:limit]]
+
+def simple_content_embedding(text, dims=16):
+    tokens = extract_content_keywords(text) or re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{2,}", text or "")
+    vec = [0] * dims
+    for token in tokens[:80]:
+        idx = int(hashlib.sha1(str(token).encode("utf-8")).hexdigest()[:6], 16) % dims
+        vec[idx] += 1
+    total = sum(vec) or 1
+    return [round(v / total, 4) for v in vec]
+
+def distill_content_capability_chunks(source):
+    tags = content_capability_tags(source)
+    flat = flat_content_tags(tags)
+    text_chunks = split_content_chunks(source.get("raw_text") or source.get("title") or "")
+    if not text_chunks:
+        text_chunks = [source.get("title") or "待人工补全文本"]
+    script_style = content_script_style(source, tags)
+    methodology = content_methodology(source, tags)
+    transferable = content_transferable_capabilities(tags)
+    chunks = []
+    for idx, piece in enumerate(text_chunks):
+        breakdown = content_item_breakdown(source, piece, tags, script_style)
+        chunk_text = (
+            f"根据公开内容样本归纳，{source.get('account_name')}在{source.get('platform')}的《{source.get('title')}》可沉淀为MMN内容能力："
+            f"脚本结构为{script_style['narrative_rhythm']}，专业领域涉及{', '.join(tags.get('专业领域标签', [])[:3])}，"
+            f"可迁移到{', '.join(tags.get('适用任务标签', [])[:4])}。方法论迁移：{methodology[0]} {methodology[1]} "
+            f"合规边界：仅迁移判断框架、选题逻辑和表达方法，不复制原文、不冒充原账号。来源片段摘要：{piece[:160]}"
+        )[:520]
+        chunks.append({
+            "id": stable_id("content-capability-chunk", source["id"], idx, chunk_text),
+            "source_id": source["id"],
+            "edition": source["edition"],
+            "account_name": source.get("account_name"),
+            "platform": source.get("platform"),
+            "title": source.get("title"),
+            "chunk_text": chunk_text,
+            "script_style": script_style,
+            "professional_knowledge": tags.get("技术标签", []) + tags.get("专业领域标签", []) + tags.get("车型标签", []),
+            "knowledge_structure": script_style["narrative_rhythm"],
+            "content_breakdown": breakdown,
+            "methodology": methodology,
+            "transferable_capabilities": transferable,
+            "tags": tags,
+            "flat_tags": flat,
+            "embedding": simple_content_embedding(" ".join([chunk_text, " ".join(flat)])),
+            "source_url": source.get("source_url"),
+            "created_at": now()
+        })
+    return chunks
+
+def save_content_capability_items(sources, edition="china"):
+    chunks = [chunk for source in sources for chunk in distill_content_capability_chunks(source)]
+    with db() as conn:
+        for source in sources:
+            conn.execute("""
+                insert into content_capability_sources
+                (id, edition, account_name, platform, title, publish_time, source_url, source_file, ingest_time,
+                 interaction_json, comment_summary, raw_text, raw_payload_hash, status)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(edition, raw_payload_hash) do update set
+                  account_name=excluded.account_name, platform=excluded.platform, title=excluded.title,
+                  publish_time=excluded.publish_time, source_url=excluded.source_url, source_file=excluded.source_file,
+                  ingest_time=excluded.ingest_time, interaction_json=excluded.interaction_json,
+                  comment_summary=excluded.comment_summary, raw_text=excluded.raw_text, status=excluded.status
+            """, (
+                source["id"], edition, source["account_name"], source["platform"], source["title"], source["publish_time"],
+                source["source_url"], source["source_file"], source["ingest_time"],
+                json.dumps(source.get("interaction") or {}, ensure_ascii=False), source.get("comment_summary", ""),
+                source.get("raw_text", ""), source["raw_payload_hash"], source["status"]
+            ))
+            conn.execute(
+                "delete from content_capability_chunks where edition=? and source_id=?",
+                (edition, source["id"])
+            )
+        for chunk in chunks:
+            conn.execute("""
+                insert into content_capability_chunks
+                (id, source_id, edition, account_name, platform, title, chunk_text, script_style_json,
+                 professional_knowledge_json, knowledge_structure, content_breakdown_json, methodology_json, transferable_capabilities_json,
+                 tags_json, flat_tags_json, embedding_json, source_url, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(edition, source_id, id) do update set
+                  account_name=excluded.account_name, platform=excluded.platform, title=excluded.title,
+                  chunk_text=excluded.chunk_text, script_style_json=excluded.script_style_json,
+                  professional_knowledge_json=excluded.professional_knowledge_json,
+                  knowledge_structure=excluded.knowledge_structure, content_breakdown_json=excluded.content_breakdown_json,
+                  methodology_json=excluded.methodology_json,
+                  transferable_capabilities_json=excluded.transferable_capabilities_json,
+                  tags_json=excluded.tags_json, flat_tags_json=excluded.flat_tags_json,
+                  embedding_json=excluded.embedding_json, source_url=excluded.source_url
+            """, (
+                chunk["id"], chunk["source_id"], edition, chunk["account_name"], chunk["platform"], chunk["title"],
+                chunk["chunk_text"], json.dumps(chunk["script_style"], ensure_ascii=False),
+                json.dumps(chunk["professional_knowledge"], ensure_ascii=False), chunk["knowledge_structure"],
+                json.dumps(chunk.get("content_breakdown") or {}, ensure_ascii=False),
+                json.dumps(chunk["methodology"], ensure_ascii=False),
+                json.dumps(chunk["transferable_capabilities"], ensure_ascii=False),
+                json.dumps(chunk["tags"], ensure_ascii=False), json.dumps(chunk["flat_tags"], ensure_ascii=False),
+                json.dumps(chunk["embedding"], ensure_ascii=False), chunk["source_url"], chunk["created_at"]
+            ))
+    return {"sources": len(sources), "chunks": len(chunks)}
+
+def import_content_capability_file(data, filename, edition="china", limit=120):
+    digest = file_hash(data)
+    rows = generic_rows_from_file(data, filename)
+    sources = []
+    for row in rows[:max(1, min(int(limit or 120), 120))]:
+        source = normalize_content_capability_source(row, filename, digest, edition=edition)
+        if source.get("title") or source.get("raw_text") or source.get("source_url"):
+            sources.append(source)
+    if not sources:
+        raise ValueError("未识别到内容能力样本。请确认文件包含账号名、平台、标题、口播文案、描述或链接字段。")
+    result = save_content_capability_items(sources, edition=edition)
+    return content_capability_payload(edition=edition, imported=len(sources), result=result)
+
+CONTENT_PUBLIC_BLOCK_TERMS = [
+    "captcha", "验证码", "人机验证", "登录后", "请登录", "付费", "subscribe",
+    "access denied", "forbidden", "安全验证", "风险验证"
+]
+
+def detect_content_platform(url, fallback="all"):
+    raw = (fallback or "").strip()
+    if raw and raw not in ("all", "全部平台"):
+        return social_platform(raw) if raw in ("douyin", "xiaohongshu") else raw
+    host = urlparse(url).netloc.lower()
+    if "douyin" in host:
+        return "抖音"
+    if "xiaohongshu" in host or "xhslink" in host:
+        return "小红书"
+    if "bilibili" in host or "b23" in host:
+        return "B站"
+    if "dongchedi" in host:
+        return "懂车帝"
+    if "autohome" in host:
+        return "汽车之家"
+    if "zhihu" in host:
+        return "知乎"
+    return "公开内容"
+
+def html_meta_value(text, key):
+    patterns = [
+        rf'<meta[^>]+property=["\']{re.escape(key)}["\'][^>]+content=["\']([^"\']+)["\']',
+        rf'<meta[^>]+name=["\']{re.escape(key)}["\'][^>]+content=["\']([^"\']+)["\']',
+        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{re.escape(key)}["\']',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text or "", re.I | re.S)
+        if m:
+            return html_lib.unescape(re.sub(r"\s+", " ", m.group(1)).strip())
+    return ""
+
+def public_content_plain_text(text):
+    text = re.sub(r"<script[\s\S]*?</script>|<style[\s\S]*?</style>|<noscript[\s\S]*?</noscript>", " ", text or "", flags=re.I)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</p>|</div>|</li>|</h\d>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_lib.unescape(text)
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip()
+
+def public_content_excerpt(plain, account=""):
+    lines = [x.strip() for x in (plain or "").splitlines() if x.strip()]
+    useful = []
+    for line in lines:
+        if len(line) < 8:
+            continue
+        if sum(1 for term in ["登录", "注册", "首页", "下载", "客户端", "隐私", "协议"] if term in line) >= 3:
+            continue
+        useful.append(line)
+        if len(" ".join(useful)) >= 2600:
+            break
+    text = "\n".join(useful) or (plain or "")
+    if account and account in text:
+        idx = text.find(account)
+        left = max(0, idx - 500)
+        right = min(len(text), idx + 2600)
+        text = text[left:right]
+    return text[:3200].strip()
+
+def collect_public_content_source(account, source_url, platform="all", edition="china"):
+    account = str(account or "").strip()
+    source_url = str(source_url or "").strip()
+    if not source_url:
+        raise ValueError("请填写达人主页或单条公开视频/笔记链接。")
+    parsed = urlparse(source_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError("仅支持 http/https 公开链接。")
+    platform_name = detect_content_platform(source_url, platform)
+    user_agent = "MMNContentCollector/1.0 (+public visible page only)"
+    if not robots_allowed(source_url, user_agent=user_agent):
+        return {
+            "ok": False,
+            "status": "manual_required",
+            "message": "该公开链接的 robots.txt 权限无法确认或不允许读取，MMN已停止自动采集，请改用人工补全文本或授权导出文件。",
+            "source": {"account_name": account, "platform": platform_name, "source_url": source_url}
+        }
+    time.sleep(10)
+    try:
+        req = Request(source_url, headers={
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        })
+        with urlopen(req, timeout=18) as resp:
+            status = getattr(resp, "status", 200)
+            ctype = resp.headers.get("Content-Type", "")
+            data = resp.read(1024 * 768)
+    except HTTPError as exc:
+        if exc.code in (401, 403, 429):
+            return {
+                "ok": False,
+                "status": "manual_required",
+                "message": f"公开页面返回 HTTP {exc.code}，MMN已停止，不会尝试绕过登录、验证码或风控。",
+                "source": {"account_name": account, "platform": platform_name, "source_url": source_url}
+            }
+        raise
+    text = data.decode("utf-8", errors="ignore")
+    lowered = text.lower()
+    if any(term.lower() in lowered for term in CONTENT_PUBLIC_BLOCK_TERMS):
+        return {
+            "ok": False,
+            "status": "manual_required",
+            "message": "页面疑似需要登录、验证码、付费或安全验证，MMN已停止自动采集，请改用人工补全文本或授权导出文件。",
+            "source": {"account_name": account, "platform": platform_name, "source_url": source_url}
+        }
+    title = html_meta_value(text, "og:title") or html_meta_value(text, "twitter:title")
+    if not title:
+        m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        title = html_lib.unescape(re.sub(r"\s+", " ", m.group(1)).strip()) if m else "公开内容样本"
+    desc = html_meta_value(text, "description") or html_meta_value(text, "og:description")
+    plain = public_content_plain_text(text)
+    excerpt = public_content_excerpt(plain, account=account)
+    raw_text = "\n".join(x for x in [title, desc, excerpt] if x).strip()
+    if len(raw_text) < 80:
+        return {
+            "ok": False,
+            "status": "manual_required",
+            "message": "公开页面可访问，但可见文本过少，暂不能自动蒸馏。请补充正文或导入授权文件。",
+            "source": {"account_name": account, "platform": platform_name, "title": title, "source_url": source_url}
+        }
+    digest = stable_id("content-capability-public", edition, account, platform_name, source_url, file_hash(data))
+    source = {
+        "id": digest,
+        "edition": edition,
+        "account_name": account or "待确认账号",
+        "platform": platform_name,
+        "title": title[:160],
+        "publish_time": "",
+        "source_url": source_url,
+        "source_file": "MMN内置公开页采集",
+        "ingest_time": now(),
+        "interaction": {"http_status": status, "content_type": ctype},
+        "comment_summary": "",
+        "raw_text": raw_text,
+        "raw_payload_hash": digest,
+        "status": "fetched"
+    }
+    return {"ok": True, "status": "fetched", "message": "公开页面已读取并进入MMN蒸馏链路。", "source": source}
+
+def collect_public_content_capability(account, source_url, platform="all", edition="china"):
+    collected = collect_public_content_source(account, source_url, platform=platform, edition=edition)
+    if not collected.get("ok"):
+        payload = content_capability_payload(edition=edition, q=account)
+        payload.update({
+            "account": account,
+            "distillStatus": collected.get("status", "manual_required"),
+            "message": collected.get("message"),
+            "collection": collected,
+            "result": {"sources": 0, "chunks": 0}
+        })
+        return payload
+    source = collected["source"]
+    result = save_content_capability_items([source], edition=edition)
+    payload = content_capability_payload(edition=edition, q=account or source.get("account_name", ""), imported=1, result=result)
+    payload.update({
+        "account": account,
+        "distillStatus": "done",
+        "message": f"MMN已完成内置采集与能力蒸馏：沉淀 {result.get('chunks', 0)} 条能力片段。",
+        "collection": collected,
+        "evidence": [{"source": "MMN内置公开页采集", "count": 1}]
+    })
+    return payload
+
+def source_from_content_capability_row(row, edition="china"):
+    return {
+        "id": row["id"],
+        "edition": edition,
+        "account_name": row["account_name"] or "待确认账号",
+        "platform": row["platform"] or "公开内容",
+        "title": row["title"] or "内容样本",
+        "publish_time": row["publish_time"] or "",
+        "source_url": row["source_url"] or f"local://content-capability/{row['id']}",
+        "source_file": row["source_file"] or "content_capability_db",
+        "ingest_time": now(),
+        "interaction": json.loads(row["interaction_json"] or "{}"),
+        "comment_summary": row["comment_summary"] or "",
+        "raw_text": row["raw_text"] or "",
+        "raw_payload_hash": row["raw_payload_hash"] or row["id"],
+        "status": row["status"] or "fetched"
+    }
+
+def source_from_blogger_skill_row(row, account, edition="china"):
+    payload = {}
+    try:
+        payload = json.loads(row["raw_payload_json"] or "{}")
+    except Exception:
+        payload = {}
+    raw_values = " ".join(str(v or "") for v in payload.values()) if isinstance(payload, dict) else ""
+    content = field_value(payload, ["口播文案", "脚本", "字幕", "视频文案", "文案", "正文", "内容", "笔记内容", "content", "desc", "text"], "") if isinstance(payload, dict) else ""
+    raw_text = "\n".join(x for x in [row["title"] or "", content or raw_values] if x).strip()
+    digest = stable_id("content-capability-from-blogger", edition, row["id"], account, raw_text[:240])
+    return {
+        "id": digest,
+        "edition": edition,
+        "account_name": account or row["author"] or "待确认账号",
+        "platform": row["platform"] or "公开内容",
+        "title": row["title"] or "博主蒸馏样本",
+        "publish_time": row["publish_time"] or "",
+        "source_url": row["source_url"] or f"local://blogger-skill/{row['id']}",
+        "source_file": row["source_file"] or "blogger_skill_db",
+        "ingest_time": now(),
+        "interaction": {},
+        "comment_summary": "",
+        "raw_text": raw_text,
+        "raw_payload_hash": digest,
+        "status": "fetched" if raw_text else "manual_required"
+    }
+
+def account_matches_row(row, account, filename=""):
+    account = str(account or "").strip()
+    if not account:
+        return False
+    hay = " ".join([
+        filename or "",
+        field_value(row, ["账号名", "账号", "博主", "达人", "作者", "昵称", "达人昵称", "用户昵称", "source_account_name", "author"], ""),
+        field_value(row, ["视频链接", "内容链接", "笔记链接", "主页链接", "链接", "source_url", "url"], ""),
+        field_value(row, ["视频标题", "标题", "作品标题", "笔记标题", "title"], "")
+    ])
+    return account.lower() in hay.lower()
+
+def social_export_files_for_platform(platform):
+    keys = ["douyin", "xiaohongshu"] if platform in ("all", "全部平台", "") else [social_platform(platform)]
+    files = []
+    for key in keys:
+        folder = SOCIAL_PLUGIN_EXPORT_DIRS.get(key)
+        if folder and folder.exists():
+            files.extend([(key, p) for p in folder.glob("*.xlsx")])
+    return sorted(files, key=lambda item: item[1].stat().st_mtime, reverse=True)[:30]
+
+def collect_content_capability_account_sources(account, platform="all", edition="china"):
+    account = str(account or "").strip()
+    if not account:
+        raise ValueError("请先输入需要蒸馏的达人/账号名称。")
+    sources, evidence = [], []
+    with db() as conn:
+        rows = conn.execute(
+            "select * from content_capability_sources where edition=? and account_name like ? order by ingest_time desc limit 120",
+            (edition, f"%{account}%")
+        ).fetchall()
+        for row in rows:
+            sources.append(source_from_content_capability_row(row, edition=edition))
+        if rows:
+            evidence.append({"source": "内容能力蒸馏知识库", "count": len(rows)})
+        b_rows = conn.execute(
+            "select * from blogger_skill_sources where edition=? and author like ? order by ingest_time desc limit 80",
+            (edition, f"%{account}%")
+        ).fetchall()
+        for row in b_rows:
+            sources.append(source_from_blogger_skill_row(row, account, edition=edition))
+        if b_rows:
+            evidence.append({"source": "博主/达人蒸馏历史样本", "count": len(b_rows)})
+    export_hits = 0
+    for platform_key, path in social_export_files_for_platform(platform):
+        try:
+            rows = generic_rows_from_file(path.read_bytes(), path.name)
+        except Exception:
+            continue
+        for row in rows[:300]:
+            if not account_matches_row(row, account, path.name):
+                continue
+            source = normalize_content_capability_source(row, path.name, file_hash(path.read_bytes()), edition=edition)
+            source["account_name"] = account
+            source["platform"] = "小红书" if platform_key == "xiaohongshu" else "抖音"
+            if source.get("raw_text"):
+                sources.append(source)
+                export_hits += 1
+        if export_hits >= 120:
+            break
+    if export_hits:
+        evidence.append({"source": "社媒助手本地导出", "count": export_hits})
+    unique = {}
+    for source in sources:
+        unique[source["raw_payload_hash"]] = source
+    return list(unique.values()), evidence
+
+def distill_content_capability_account(account, platform="all", edition="china"):
+    sources, evidence = collect_content_capability_account_sources(account, platform=platform, edition=edition)
+    if not sources:
+        payload = content_capability_payload(edition=edition)
+        payload.update({
+            "account": account,
+            "distillStatus": "needs_source",
+            "message": f"暂未找到“{account}”的本地样本。请先用社媒助手采集该账号并导出，或使用兜底文件导入。",
+            "evidence": [],
+            "result": {"sources": 0, "chunks": 0}
+        })
+        return payload
+    result = save_content_capability_items(sources, edition=edition)
+    payload = content_capability_payload(edition=edition, q=account, imported=len(sources), result=result)
+    payload.update({
+        "account": account,
+        "distillStatus": "done",
+        "message": f"已完成“{account}”账号能力蒸馏，沉淀 {result.get('chunks', 0)} 条可调用能力片段。",
+        "evidence": evidence
+    })
+    return payload
+
+def top_values(values, limit=6):
+    counts = {}
+    for value in values:
+        value = str(value or "").strip()
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return [k for k, _ in sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]]
+
+def content_capability_creator_assets(chunks):
+    grouped = {}
+    for item in chunks:
+        account = item.get("account_name") or "待确认账号"
+        platform = item.get("platform") or "公开平台"
+        key = f"{platform}::{account}"
+        grouped.setdefault(key, {"account_name": account, "platform": platform, "items": []})["items"].append(item)
+    assets = []
+    for key, group in grouped.items():
+        items = group["items"]
+        all_tags = [tag for item in items for tag in (item.get("flat_tags") or [])]
+        topics = top_values([tag for item in items for tag in (item.get("tags", {}).get("专业领域标签") or [])], 5)
+        scenes = top_values([tag for item in items for tag in (item.get("tags", {}).get("场景标签") or [])], 5)
+        styles = top_values([tag for item in items for tag in (item.get("tags", {}).get("表达风格标签") or [])], 5)
+        scripts = top_values([item.get("knowledge_structure") for item in items], 4)
+        tasks = top_values([tag for item in items for tag in (item.get("tags", {}).get("适用任务标签") or [])], 6)
+        models = top_values([tag for item in items for tag in (item.get("tags", {}).get("车型标签") or [])], 5)
+        tech = top_values([tag for item in items for tag in (item.get("tags", {}).get("技术标签") or [])], 6)
+        account_name = group["account_name"]
+        primary_domain = topics[0] if topics else (tech[0] if tech else "汽车垂直内容")
+        primary_scene = scenes[0] if scenes else "综合场景"
+        primary_style = styles[0] if styles else "专业表达"
+        primary_script = scripts[0] if scripts else "观点拆解型"
+        sample_titles = [item.get("title") for item in items[:5] if item.get("title")]
+        title_pool = sample_titles or [f"{primary_domain}用户关心的问题怎么讲清楚"]
+        topic_calendar = []
+        for i in range(30):
+            base = title_pool[i % len(title_pool)]
+            angle = ["场景痛点", "专业拆解", "竞品对比", "风险提醒", "购买建议"][i % 5]
+            topic_calendar.append({
+                "day": i + 1,
+                "topic": f"{angle}｜{content_title_from_text(base, primary_domain)}",
+                "structure": f"{primary_script} -> 证据/体验 -> 用户翻译 -> 行动建议"
+            })
+        script_template = {
+            "opening": f"用{primary_scene}里的真实问题开场，先让用户觉得这件事和自己有关。",
+            "body": f"按{primary_script}展开，把{primary_domain}问题拆成现象、原因、影响和边界。",
+            "proof": f"优先使用{', '.join(tech[:3]) or '公开样本中的专业知识点'}作为证据，不把外部观点包装成自有事实。",
+            "ending": "结尾给出适合谁、不适合谁、下一步怎么验证。"
+        }
+        account_incubation = [
+            f"账号定位：参考{account_name}的{primary_domain}能力，但建立独立账号人格和栏目命名。",
+            f"栏目设计：{primary_scene}问题、{primary_domain}拆解、用户体感翻译、购买/试驾建议。",
+            "更新节奏：前30天先用固定结构验证选题，不追求复杂包装。",
+            "风险控制：只迁移方法论，不复制原句、标题结构和个人身份。"
+        ]
+        client_brief = {
+            "recommended_role": f"{primary_domain} / {primary_style}型内容参考",
+            "best_for": tasks[:5] or ["达人brief", "短视频脚本", "账号孵化方案"],
+            "deliverable": "输出选题方向、脚本结构、证据要求、不可触碰表达和验收标准。",
+            "guardrails": "不复制外部原文，不冒充原账号，不采集隐私评论，不突破平台限制。"
+        }
+        assets.append({
+            "id": stable_id("creator-dna", key, len(items), "|".join(sample_titles[:3])),
+            "account_name": account_name,
+            "platform": group["platform"],
+            "sample_count": len(items),
+            "account_positioning": f"{account_name}可沉淀为{primary_domain}方向的{primary_style}型内容能力样本，适合围绕{primary_scene}做汽车内容输出。",
+            "content_motifs": topics or tech or ["汽车产品认知"],
+            "topic_formula": f"{primary_scene}切入 -> {primary_domain}拆解 -> 用户听得懂的判断 -> 保留证据边界与行动建议",
+            "script_structure": primary_script,
+            "script_template": script_template,
+            "language_style": " / ".join(styles[:3] or ["专业表达", "口语化解释"]),
+            "language_rules": [
+                "先用用户能听懂的问题开场",
+                "再把专业判断拆成现象、原因、影响和验证方式",
+                "少用空泛形容词，多用场景和证据边界",
+                "结论必须保留适用范围"
+            ],
+            "trust_sources": ["公开内容样本", "用户提供/授权导入数据", "MMN结构化标签与RAG证据"],
+            "transfer_boundary": "只迁移选题逻辑、判断框架、脚本结构和表达方法；不复制原文、不冒充原账号、不搬运素材。",
+            "fit_tasks": tasks or ["达人brief", "短视频脚本", "账号孵化方案"],
+            "recommended_scenarios": [
+                "新达人账号孵化",
+                "客户达人brief",
+                "短视频脚本生成",
+                "咨询业务风格博主检索",
+                "竞品攻防话术" if "竞品对比" in scenes else "内容选题规划"
+            ],
+            "models": models,
+            "tech_tags": tech,
+            "style_tags": styles,
+            "sample_titles": sample_titles,
+            "topic_calendar_30d": topic_calendar,
+            "account_incubation_advice": account_incubation,
+            "client_brief_template": client_brief,
+            "call_actions": [
+                "按TA风格生成脚本",
+                "用TA作为benchmark孵化新账号",
+                "按客户课题检索适配达人风格"
+            ],
+            "asset_status": "已加入MMN达人库资产候选",
+            "rag_status": "已进入MMN RAG",
+            "confidence": "高" if len(items) >= 20 else ("中" if len(items) >= 5 else "待补样本"),
+            "tags": top_values(all_tags, 18)
+        })
+    return sorted(assets, key=lambda x: (-x["sample_count"], x["account_name"]))[:40]
+
+def content_capability_payload(edition="china", q="", tags=None, imported=0, result=None):
+    tags = [t for t in (tags or []) if t]
+    with db() as conn:
+        source_count = conn.execute("select count(*) from content_capability_sources where edition=?", (edition,)).fetchone()[0]
+        chunk_count = conn.execute("select count(*) from content_capability_chunks where edition=?", (edition,)).fetchone()[0]
+        rows = [rowdict(r) for r in conn.execute(
+            "select * from content_capability_chunks where edition=? order by created_at desc limit 800", (edition,)
+        ).fetchall()]
+    chunks, tag_options = [], {key: set() for key in CONTENT_CAPABILITY_TAG_TYPES}
+    for row in rows:
+        row["script_style"] = json.loads(row.pop("script_style_json") or "{}")
+        row["professional_knowledge"] = json.loads(row.pop("professional_knowledge_json") or "[]")
+        row["content_breakdown"] = json.loads(row.pop("content_breakdown_json") or "{}")
+        if not row["content_breakdown"]:
+            row["content_breakdown"] = content_item_breakdown(source_from_content_capability_row({"id": row["source_id"], "account_name": row.get("account_name"), "platform": row.get("platform"), "title": row.get("title"), "publish_time": "", "source_url": row.get("source_url"), "source_file": "", "interaction_json": "{}", "comment_summary": "", "raw_text": row.get("chunk_text", ""), "raw_payload_hash": row["id"], "status": "fetched"}, edition=edition), row.get("chunk_text", ""), row.get("tags") or {}, row.get("script_style") or {})
+        row["methodology"] = json.loads(row.pop("methodology_json") or "[]")
+        row["transferable_capabilities"] = json.loads(row.pop("transferable_capabilities_json") or "[]")
+        row["tags"] = json.loads(row.pop("tags_json") or "{}")
+        row["flat_tags"] = json.loads(row.pop("flat_tags_json") or "[]")
+        row["embedding"] = json.loads(row.pop("embedding_json") or "[]")
+        for key, values in row["tags"].items():
+            if key in tag_options:
+                tag_options[key].update(values or [])
+        hay = " ".join([row.get("title", ""), row.get("chunk_text", ""), row.get("account_name", ""), " ".join(row.get("flat_tags") or [])])
+        if q and q not in hay:
+            continue
+        if tags and not all(t in row.get("flat_tags", []) or t in hay for t in tags):
+            continue
+        chunks.append(row)
+    knowledge = [{
+        "id": stable_id("content-capability-rag", x["id"]),
+        "type": "内容能力蒸馏知识库",
+        "title": f"{x.get('account_name') or '公开账号'}｜{x.get('title') or '内容方法论'}",
+        "body": x.get("chunk_text") or "",
+        "keywords": [x.get("account_name"), x.get("platform"), *(x.get("flat_tags") or [])],
+        "tags": x.get("flat_tags") or [],
+        "targets": ["策略报告", "达人brief", "短视频脚本", "账号孵化方案", "竞品话术", "RAG知识库管理"],
+        "source": "content_capability_kb",
+        "metadata": {"account": x.get("account_name"), "platform": x.get("platform"), "source_url": x.get("source_url")}
+    } for x in chunks]
+    display_chunks, seen_display = [], set()
+    for item in chunks:
+        key = (item.get("account_name") or "", item.get("title") or "")
+        if key in seen_display:
+            continue
+        seen_display.add(key)
+        display_chunks.append(item)
+    display_chunks.extend([x for x in chunks if x not in display_chunks])
+    return {
+        "ok": True,
+        "imported": imported,
+        "stats": {"sources": source_count, "chunks": chunk_count, "matched": len(chunks), "tagTypes": len(CONTENT_CAPABILITY_TAG_TYPES)},
+        "chunks": display_chunks[:120],
+        "creatorAssets": content_capability_creator_assets(chunks),
+        "tagOptions": {k: sorted(v)[:80] for k, v in tag_options.items()},
+        "knowledgeItems": knowledge,
+        "result": result or {}
+    }
+
 def ppt_text(text, limit=280):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     return text[:limit] + ("…" if len(text) > limit else "")
@@ -5520,6 +6383,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             edition = edition_from(q.get("edition", ["china"])[0])
             self.send_json(blogger_skill_payload(edition=edition))
             return
+        if parsed.path == "/api/content-capability-kb":
+            q = parse_qs(parsed.query)
+            edition = edition_from(q.get("edition", ["china"])[0])
+            query = q.get("q", [""])[0].strip()
+            tags = []
+            for raw in q.get("tags", []):
+                tags.extend([x.strip() for x in re.split(r"[,，、|｜/]+", raw) if x.strip()])
+            self.send_json(content_capability_payload(edition=edition, q=query, tags=tags))
+            return
         if parsed.path == "/api/vertical-assets":
             q = parse_qs(parsed.query)
             platform = q.get("platform", ["all"])[0]
@@ -5677,6 +6549,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/ai/model-judgment",
                 "/api/ai/router-feedback",
                 "/api/agents/run",
+                "/api/content-capability-kb/distill-account",
+                "/api/content-capability-kb/collect-public",
             }
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
@@ -5932,6 +6806,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = self.read_json()
                 edition = edition_from(body.get("edition", "china"))
                 self.send_json(scan_blogger_skill_imports(edition=edition, limit=30))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/content-capability-kb/import-file":
+            length = int(self.headers.get("Content-Length", "0"))
+            q = parse_qs(parsed.query)
+            filename = q.get("filename", ["content_capability_material"])[0]
+            edition = edition_from(q.get("edition", ["china"])[0])
+            try:
+                data = self.rfile.read(length)
+                self.send_json(import_content_capability_file(data, filename, edition=edition, limit=120))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/content-capability-kb/distill-account":
+            try:
+                body = self.read_json()
+                edition = edition_from(body.get("edition", "china"))
+                account = str(body.get("account") or body.get("account_name") or "").strip()
+                platform = str(body.get("platform") or "all").strip()
+                self.send_json(distill_content_capability_account(account, platform=platform, edition=edition))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/content-capability-kb/collect-public":
+            try:
+                body = self.read_json()
+                edition = edition_from(body.get("edition", "china"))
+                account = str(body.get("account") or body.get("account_name") or "").strip()
+                platform = str(body.get("platform") or "all").strip()
+                source_url = str(body.get("source_url") or body.get("url") or "").strip()
+                self.send_json(collect_public_content_capability(account, source_url, platform=platform, edition=edition))
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

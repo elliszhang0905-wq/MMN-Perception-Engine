@@ -288,6 +288,7 @@
         <button type="button" data-content-view="xhsCreators">小红书达人库</button>
         <button type="button" data-content-view="founderDistill">创始人蒸馏</button>
         <button type="button" data-content-view="bloggerDistill">博主/达人蒸馏</button>
+        <button type="button" data-content-view="contentCapability">内容能力蒸馏库</button>
       </div>
       <article class="panel social-plugin-panel" id="social-plugin-panel">
         <div class="panel-title"><div><span>CHROME PLUGIN BRIDGE</span><h2>抖音 / 小红书采集插件控制台</h2></div><em id="social-plugin-status">检测中</em></div>
@@ -379,6 +380,56 @@
       </div>
       <div id="content-founder-distill-view" class="content-distill-view" hidden></div>
       <div id="content-blogger-distill-view" class="content-distill-view" hidden></div>
+      <div id="content-capability-view" class="content-distill-view" hidden>
+        <article class="panel capability-hero">
+          <div>
+            <span>CREATOR LEARNING PIPELINE</span>
+            <h2>达人内容学习与蒸馏流水线</h2>
+            <p>输入达人主页或作品链接后，MMN只读取公开可见内容；可见文本、标题、正文、封面文字/OCR文本、转写文本和评论摘要会进入结构化拆解。遇到登录、验证码、付费墙或平台风控会停止并提示你操作。最终交付达人DNA卡、脚本模板、选题公式、30天选题库、账号孵化建议和客户brief模板。</p>
+          </div>
+          <div class="capability-actions">
+            <div class="capability-account-box">
+              <input id="content-capability-account" placeholder="输入达人/账号名，例如：冷静的饺子">
+              <input id="content-capability-url" placeholder="粘贴公开主页/作品链接，可选">
+              <select id="content-capability-platform">
+                <option value="all">全部平台</option>
+                <option value="douyin">抖音</option>
+                <option value="xiaohongshu">小红书</option>
+                <option value="bilibili">B站</option>
+                <option value="zhihu">知乎</option>
+              </select>
+              <button type="button" class="primary" id="content-capability-distill">MMN开始蒸馏</button>
+            </div>
+            <small id="content-capability-collect-status" class="capability-collect-status">流水线：公开采集/授权导入 → 视频转写或文本字段读取 → 图文OCR文本读取 → 单条内容拆解 → 达人DNA资产包 → MMN达人库。</small>
+            <button type="button" class="ghost" data-file-target="content-capability-file">兜底导入样本</button>
+            <input id="content-capability-file" type="file" accept=".csv,.xlsx,.json,.txt,.md,.markdown" hidden>
+            <button type="button" class="ghost" id="content-capability-clear">清空筛选</button>
+          </div>
+        </article>
+        <div class="kpis video-kpis">
+          <article class="kpi"><span>来源样本</span><strong id="content-cap-source-count">—</strong><small>去重后入库</small></article>
+          <article class="kpi"><span>RAG片段</span><strong id="content-cap-chunk-count">—</strong><small>方法论迁移</small></article>
+          <article class="kpi"><span>当前匹配</span><strong id="content-cap-match-count">—</strong><small>标签组合检索</small></article>
+          <article class="kpi danger"><span>标签体系</span><strong id="content-cap-tag-count">—</strong><small>平台/车型/风格/任务</small></article>
+        </div>
+        <div class="capability-usecases">
+          <article><span>01</span><b>脚本模板资产</b><p>拆解开头钩子、主观点、论证结构、结尾方式，生成可迁移但不复制原文的脚本模板。</p></article>
+          <article><span>02</span><b>账号孵化资产</b><p>沉淀账号定位、内容母题、选题公式、语言风格规则和30天选题库。</p></article>
+          <article><span>03</span><b>咨询检索资产</b><p>按客户课题调用适配达人风格，输出客户brief模板和可迁移边界。</p></article>
+        </div>
+        <article class="panel capability-search-panel">
+          <div class="panel-title"><div><span>达人DNA资产检索</span><h2>按任务场景调用达人能力资产</h2></div><em id="content-capability-status">等待导入</em></div>
+          <div class="capability-search-row">
+            <div class="search"><input id="content-capability-search" placeholder="例如：底盘技术 + 专业测评 + 犀利表达 + SUV"></div>
+          </div>
+          <div id="content-capability-tags" class="capability-tag-groups"></div>
+        </article>
+        <div id="content-capability-list" class="creator-dna-grid"></div>
+        <article class="panel capability-evidence-panel">
+          <div class="panel-title"><div><span>RAG EVIDENCE</span><h2>样本片段与方法论证据</h2></div><em>折叠为辅助证据，不作为主交付物</em></div>
+          <div id="content-capability-evidence" class="capability-card-grid"></div>
+        </article>
+      </div>
     </section>
 
     <section class="page" id="contentstrategy">
@@ -771,6 +822,6 @@
   </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-content-crawl-5"></script>
+  <script src="app.js?v=beta-1.01-content-capability-kb-1"></script>
 </body>
 </html>

@@ -63,6 +63,7 @@ let modelJudgments=loadModelJudgments();
 let modelIdentities=loadModelIdentities(),modelIdentitySyncing=false;
 let founderState=loadFounderState(),founderSearch="",founderFilters={brand:"all",person:"all",topic:"all"};
 let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[]},bloggerSkillPersonFilter="";
+let contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]},contentCapabilitySearch="",contentCapabilitySelectedTags=[];
 let selectedKnowledgeCluster="";
 let ragResultsExpanded=false;
 let workspaceState=defaultWorkspaceState(),workspaceSyncTimer=null;
@@ -1540,8 +1541,8 @@ function mountContentDistillViews(){
 }
 function renderContentSubnav(){
  mountContentDistillViews();
- const subnav=document.querySelector("#content-subnav"),assetView=document.querySelector("#content-asset-view"),creatorView=document.querySelector("#creator-library-view"),founderView=document.querySelector("#content-founder-distill-view"),bloggerView=document.querySelector("#content-blogger-distill-view");
- if(!subnav||!assetView||!creatorView||!founderView||!bloggerView)return;
+ const subnav=document.querySelector("#content-subnav"),assetView=document.querySelector("#content-asset-view"),creatorView=document.querySelector("#creator-library-view"),founderView=document.querySelector("#content-founder-distill-view"),bloggerView=document.querySelector("#content-blogger-distill-view"),capabilityView=document.querySelector("#content-capability-view");
+ if(!subnav||!assetView||!creatorView||!founderView||!bloggerView||!capabilityView)return;
  const isChina=edition==="china";
  subnav.hidden=!isChina;
  if(!isChina)contentAssetView="assets";
@@ -1549,6 +1550,7 @@ function renderContentSubnav(){
  creatorView.hidden=!["douyinCreators","xhsCreators"].includes(contentAssetView);
  founderView.hidden=contentAssetView!=="founderDistill";
  bloggerView.hidden=contentAssetView!=="bloggerDistill";
+ capabilityView.hidden=contentAssetView!=="contentCapability";
  subnav.querySelectorAll("[data-content-view]").forEach(b=>b.classList.toggle("active",b.dataset.contentView===contentAssetView));
 }
 function creatorPlatformKey(){
@@ -2027,7 +2029,8 @@ function builtInRagCorpus(){
  const learned=learnings().map((x,i)=>({id:x.id||`learning_${i}`,type:"人工Learning",title:`${x.model||"车型"}｜${x.label||"人工结论"}`,body:[x.conclusion,x.recommendation,x.evidence,x.platform,x.kpi,x.stage].filter(Boolean).join(" "),keywords:extractKeywords([x.model,x.label,x.conclusion,x.recommendation,x.platform].join(" ")),tags:[x.model,x.label,x.platform,x.stage].filter(Boolean),targets:["人工结论学习","报告"],source:"learning"}));
  const judgments=(modelJudgments||[]).map((x,i)=>({id:x.knowledge_id||x.id||`model_judgment_${i}`,type:"车型判断资产",title:`${x.model_name||x.model||"车型"}｜${x.dimension||"综合判断"}`,body:[x.viewpoint,x.attribution,x.strategy_implication,x.evidence_needed].filter(Boolean).join(" "),keywords:[x.brand_name,x.model_name,x.dimension,...(x.tags||[])].filter(Boolean),tags:[x.brand_name,x.model_name,x.dimension,...(x.tags||[])].filter(Boolean),targets:["决策驾驶舱","RAG知识库管理","MMN策略"],source:"model_judgment",metadata:{entity:x.model_name||x.model,domain:"车型判断资产",module:x.dimension||"综合判断"}}));
  const blogger=(bloggerSkillState.knowledgeItems||[]).map(x=>({...x,source:x.source||"blogger_skill"}));
- return [...strategyKb.map(x=>({...x,source:x.source||"imported"})),...blogger,...knowhow,...learned,...judgments];
+ const contentCapability=(contentCapabilityState.knowledgeItems||[]).map(x=>({...x,source:x.source||"content_capability_kb"}));
+ return [...strategyKb.map(x=>({...x,source:x.source||"imported"})),...blogger,...contentCapability,...knowhow,...learned,...judgments];
 }
 function ragSearch({query="",rows=[],limit=6,filters={}}={}){
  const terms=[...new Set([...extractKeywords(query),...String(query).split(/[\\s,，、/｜|]+/),...ragTagsFromRows(rows)])].filter(x=>x&&x.length>1);
@@ -2389,6 +2392,139 @@ async function importBloggerSkillFile(file){
   toast(`MMN已完成样本蒸馏与交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
  }catch(err){toast(`样本导入失败：${err.message}`)}
 }
+function contentCapabilityQueryString(){
+ const params=new URLSearchParams({edition:activeEdition()});
+ if(contentCapabilitySearch)params.set("q",contentCapabilitySearch);
+ if(contentCapabilitySelectedTags.length)params.set("tags",contentCapabilitySelectedTags.join(","));
+ return params.toString();
+}
+async function loadContentCapabilityKb(){
+ try{
+  const data=await api(`/api/content-capability-kb?${contentCapabilityQueryString()}`);
+  contentCapabilityState={...contentCapabilityState,...data};
+  renderContentCapabilityKb();
+ }catch(err){
+  contentCapabilityState={...contentCapabilityState,error:err.message};
+  renderContentCapabilityKb();
+ }
+}
+function renderContentCapabilityKb(){
+ const root=document.querySelector("#content-capability-list");if(!root)return;
+ const evidenceRoot=document.querySelector("#content-capability-evidence");
+ const stats=contentCapabilityState.stats||{},set=(sel,text)=>{const el=document.querySelector(sel);if(el)el.textContent=text};
+ set("#content-cap-source-count",(stats.sources||0).toLocaleString());
+ set("#content-cap-chunk-count",(stats.chunks||0).toLocaleString());
+ set("#content-cap-match-count",(stats.matched||0).toLocaleString());
+ set("#content-cap-tag-count",(stats.tagTypes||0).toLocaleString());
+ set("#content-capability-status",contentCapabilityState.error?`加载失败：${contentCapabilityState.error}`:`已匹配 ${(stats.matched||0).toLocaleString()} 条能力片段`);
+ const search=document.querySelector("#content-capability-search");if(search&&search.value!==contentCapabilitySearch)search.value=contentCapabilitySearch;
+ const tagBox=document.querySelector("#content-capability-tags");
+ const tagOptions=contentCapabilityState.tagOptions||{};
+ if(tagBox){
+  const groups=["技术标签","场景标签","表达风格标签","脚本结构标签","专业领域标签","适用任务标签","车型标签","品牌标签"];
+  tagBox.innerHTML=groups.map(group=>{
+   const values=(tagOptions[group]||[]).slice(0,18);
+   if(!values.length)return "";
+   return `<section><b>${group}</b><div>${values.map(tag=>`<button type="button" class="${contentCapabilitySelectedTags.includes(tag)?"active":""}" data-content-cap-tag="${escapeAttr(tag)}">${tag}</button>`).join("")}</div></section>`;
+  }).join("")||`<p class="empty">导入样本后会形成平台、账号、车型、技术、场景、脚本结构、表达风格等标签。</p>`;
+ tagBox.querySelectorAll("[data-content-cap-tag]").forEach(btn=>btn.onclick=()=>toggleContentCapabilityTag(btn.dataset.contentCapTag));
+ }
+ const clip=(v,n=150)=>{const s=String(v||"").replace(/\s+/g," ").trim();return s.length>n?s.slice(0,n)+"…":s};
+ const dnaText=(asset,action)=>{
+  const name=asset.account_name||"该达人",domain=(asset.content_motifs||[])[0]||"汽车垂直内容",style=asset.language_style||"专业表达";
+  const formulas={
+   script:`按${name}风格生成新脚本：${asset.script_template?.opening||"场景问题开场"}；${asset.script_template?.body||"专业拆解"}；${asset.script_template?.ending||"结尾给出适合谁和验证方式"}。`,
+   incubate:`用${name}作为benchmark孵化新账号：${(asset.account_incubation_advice||[]).join(" / ")||`围绕${domain}建立固定栏目和独立账号人格。`}`,
+   match:`按客户课题检索适配达人风格：${name}适合${(asset.fit_tasks||[]).slice(0,4).join("、")}；brief要求：${asset.client_brief_template?.deliverable||"输出选题方向、证据要求和边界表达"}。`
+  };
+  return formulas[action]||"MMN已生成达人能力调用建议。";
+ };
+ const assets=contentCapabilityState.creatorAssets||[];
+ root.innerHTML=assets.length?assets.slice(0,18).map(asset=>`<article class="creator-dna-card">
+  <div class="creator-dna-head"><div><span>${asset.platform||"公开平台"} · ${asset.sample_count||0} 条样本</span><h3>${asset.account_name||"待确认账号"}</h3></div><b>${asset.confidence||"待评估"}</b></div>
+  <p class="dna-positioning">${clip(asset.account_positioning,150)}</p>
+  <div class="dna-fields">
+    <section><span>账号定位</span><p>${clip(asset.account_positioning,130)}</p></section>
+    <section><span>内容母题</span><p>${(asset.content_motifs||[]).slice(0,6).join(" / ")||"汽车产品认知"}</p></section>
+    <section><span>选题公式</span><p>${clip(asset.topic_formula,150)}</p></section>
+    <section><span>脚本模板</span><p>${clip([asset.script_template?.opening,asset.script_template?.body,asset.script_template?.ending].filter(Boolean).join(" / ")||asset.script_structure,160)}</p></section>
+    <section><span>语言规则</span><p>${(asset.language_rules||[asset.language_style||"专业表达"]).slice(0,4).join(" / ")}</p></section>
+    <section><span>可迁移边界</span><p>${clip(asset.transfer_boundary,120)}</p></section>
+    <section><span>适配任务</span><p>${(asset.fit_tasks||[]).slice(0,6).join(" / ")}</p></section>
+    <section><span>30天选题库</span><p>${(asset.topic_calendar_30d||[]).slice(0,3).map(x=>`${x.day}.${x.topic}`).join(" / ")}</p></section>
+    <section><span>客户brief模板</span><p>${clip(asset.client_brief_template?.deliverable||"输出选题方向、脚本结构、证据要求和风险边界",130)}</p></section>
+  </div>
+  <div class="dna-actions">
+    <button type="button" data-dna-action="script" data-dna-id="${escapeAttr(asset.id)}">按TA风格生成脚本</button>
+    <button type="button" data-dna-action="incubate" data-dna-id="${escapeAttr(asset.id)}">用TA作为benchmark孵化新账号</button>
+    <button type="button" data-dna-action="match" data-dna-id="${escapeAttr(asset.id)}">按客户课题检索适配达人风格</button>
+  </div>
+  <div class="capability-tags">${(asset.tags||[]).slice(0,16).map(tag=>`<em>${tag}</em>`).join("")}</div>
+  <small>${asset.asset_status||"已加入MMN达人库资产候选"}｜${asset.rag_status||"已进入MMN RAG"}｜${asset.transfer_boundary||"仅迁移方法论，不复刻原文"}</small>
+ </article>`).join(""):`<p class="empty">还没有达人DNA资产包。导入社媒助手文件或输入账号后，MMN会自动沉淀账号定位、内容母题、选题公式、脚本结构、语言风格和调用场景。</p>`;
+ root.querySelectorAll("[data-dna-action]").forEach(btn=>btn.onclick=()=>{
+  const asset=(contentCapabilityState.creatorAssets||[]).find(x=>x.id===btn.dataset.dnaId);
+  if(asset)toast(dnaText(asset,btn.dataset.dnaAction));
+ });
+ const chunks=contentCapabilityState.chunks||[];
+ if(evidenceRoot)evidenceRoot.innerHTML=chunks.length?chunks.slice(0,12).map(x=>`<article class="capability-card">
+  <div class="capability-card-head"><span>${x.platform||"公开平台"} · ${x.account_name||"公开账号"}</span><b>${x.knowledge_structure||"观点拆解"}</b></div>
+  <h3>${clip(x.title||"内容能力样本",56)}</h3>
+  <p>${clip(x.chunk_text,160)}</p>
+  <dl><dt>核心选题</dt><dd>${clip(x.content_breakdown?.core_topic,80)}</dd><dt>开头钩子</dt><dd>${clip(x.content_breakdown?.opening_hook,120)}</dd><dt>主观点</dt><dd>${clip(x.content_breakdown?.main_viewpoint,140)}</dd><dt>论证结构</dt><dd>${clip(x.content_breakdown?.argument_structure,120)}</dd><dt>可迁移方法</dt><dd>${clip(x.content_breakdown?.transferable_method,140)}</dd><dt>不可复制风险</dt><dd>${clip(x.content_breakdown?.noncopy_risk,140)}</dd></dl>
+  <div class="capability-tags">${(x.flat_tags||[]).slice(0,12).map(tag=>`<em>${tag}</em>`).join("")}</div>
+  <small>已进入MMN RAG｜仅迁移方法论，不复刻原文｜${(x.created_at||"").slice(0,10)}</small>
+ </article>`).join(""):`<p class="empty">达人DNA资产包生成后，样本片段会作为辅助证据留在这里。</p>`;
+}
+function toggleContentCapabilityTag(tag){
+ if(!tag)return;
+ contentCapabilitySelectedTags=contentCapabilitySelectedTags.includes(tag)?contentCapabilitySelectedTags.filter(x=>x!==tag):[...contentCapabilitySelectedTags,tag];
+ loadContentCapabilityKb();
+}
+async function importContentCapabilityFile(file){
+ if(!file)return;
+ try{
+  toast("正在导入内容样本并沉淀能力标签…");
+  const res=await fetch(`/api/content-capability-kb/import-file?edition=${encodeURIComponent(activeEdition())}&filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
+  const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
+  contentCapabilityState={...contentCapabilityState,...json};
+  contentAssetView="contentCapability";
+  renderContentCapabilityKb();renderStrategyKb();showPage("videos");
+  toast(`内容能力蒸馏完成：导入 ${json.imported||0} 条样本，生成 ${json.stats?.chunks||0} 条RAG能力片段`);
+ }catch(err){toast(`内容能力导入失败：${err.message}`)}
+}
+async function distillContentCapabilityAccount(){
+ const account=document.querySelector("#content-capability-account")?.value.trim();
+ const sourceUrl=document.querySelector("#content-capability-url")?.value.trim();
+ const platform=document.querySelector("#content-capability-platform")?.value||"all";
+ if(!account&&!sourceUrl){toast("请先输入达人/账号名，或粘贴公开主页/作品链接");return}
+ const btn=document.querySelector("#content-capability-distill"),old=btn?.textContent;
+ const status=document.querySelector("#content-capability-collect-status");
+ if(btn){btn.disabled=true;btn.textContent=sourceUrl?"MMN采集中…":"MMN蒸馏中…"}
+ if(status)status.textContent=sourceUrl?"MMN正在读取公开可见页面，遇到登录/验证码/风控会自动停止。":"MMN正在检索本地样本与历史蒸馏资产。";
+ try{
+  toast(sourceUrl?`MMN正在内置采集 ${account||"公开账号"} 的公开内容…`:`MMN正在检索 ${account} 的本地样本…`);
+  const endpoint=sourceUrl?"/api/content-capability-kb/collect-public":"/api/content-capability-kb/distill-account";
+  const data=await api(endpoint,{method:"POST",body:JSON.stringify({edition:activeEdition(),account,platform,source_url:sourceUrl})});
+  contentCapabilitySearch=account||data.collection?.source?.account_name||"";
+  contentCapabilityState={...contentCapabilityState,...data};
+  contentAssetView="contentCapability";
+  renderContentCapabilityKb();renderStrategyKb();showPage("videos");
+  if(data.distillStatus==="needs_source"){
+   toast(data.message||"未找到本地样本，请先采集或导入该账号内容");
+   if(status)status.textContent=data.message||"未找到本地样本。";
+  }else if(data.distillStatus==="manual_required"){
+   toast(data.message||"公开页面暂不能自动读取，请补全文本或导入授权文件");
+   if(status)status.textContent=data.message||"需要人工补全文本。";
+  }else{
+   const evidence=(data.evidence||[]).map(x=>`${x.source}${x.count?` ${x.count}条`:""}`).join("，");
+   toast(`${data.message||"账号能力蒸馏完成"}${evidence?`｜来源：${evidence}`:""}`);
+   if(status)status.textContent=`${data.message||"MMN内置采集与蒸馏完成"}${evidence?`｜来源：${evidence}`:""}`;
+   const urlInput=document.querySelector("#content-capability-url");if(urlInput)urlInput.value="";
+  }
+ }catch(err){toast(`账号蒸馏失败：${err.message}`)}
+ finally{if(btn){btn.disabled=false;btn.textContent=old}}
+}
 function modelEvidenceContext(model,label="整体判断"){
  const rowMatches=state.rows.map((r,i)=>({r,i})).filter(x=>x.r[0]===model);
  const scores=rowMatches.reduce((m,x)=>{const s=score(x.r);m.p+=s.positive;m.n+=s.negative;m.samples+=+x.r[8]||0;return m},{p:0,n:0,samples:0});
@@ -2564,7 +2700,11 @@ const bloggerSkillUrlButton=document.querySelector("#import-blogger-skill-url");
 const bloggerSkillScanButton=document.querySelector("#scan-blogger-skill");if(bloggerSkillScanButton)bloggerSkillScanButton.onclick=scanBloggerSkillImports;
 const bloggerSkillFile=document.querySelector("#blogger-skill-file");if(bloggerSkillFile)bloggerSkillFile.onchange=async e=>{const file=e.target.files[0];await importBloggerSkillFile(file);e.target.value=""};
 const bloggerSkillPersonSelect=document.querySelector("#blogger-skill-person-select");if(bloggerSkillPersonSelect)bloggerSkillPersonSelect.onchange=e=>{bloggerSkillPersonFilter=e.target.value;renderBloggerSkill()};
-document.querySelectorAll("[data-content-view]").forEach(b=>b.onclick=()=>{contentAssetView=b.dataset.contentView;creatorFilter="all";creatorSearch="";const input=document.querySelector("#creator-search");if(input)input.value="";if(contentAssetView==="bloggerDistill")loadBloggerSkill();renderVideos();if(contentAssetView==="founderDistill")renderFounderDistill();if(contentAssetView==="bloggerDistill")renderBloggerSkill()});
+const contentCapabilityFile=document.querySelector("#content-capability-file");if(contentCapabilityFile)contentCapabilityFile.onchange=async e=>{const file=e.target.files[0];await importContentCapabilityFile(file);e.target.value=""};
+const contentCapabilitySearchInput=document.querySelector("#content-capability-search");if(contentCapabilitySearchInput)contentCapabilitySearchInput.oninput=e=>{contentCapabilitySearch=e.target.value.trim();clearTimeout(contentCapabilitySearchInput._t);contentCapabilitySearchInput._t=setTimeout(loadContentCapabilityKb,260)};
+const contentCapabilityClear=document.querySelector("#content-capability-clear");if(contentCapabilityClear)contentCapabilityClear.onclick=()=>{contentCapabilitySelectedTags=[];contentCapabilitySearch="";const input=document.querySelector("#content-capability-search");if(input)input.value="";loadContentCapabilityKb()};
+const contentCapabilityDistill=document.querySelector("#content-capability-distill");if(contentCapabilityDistill)contentCapabilityDistill.onclick=distillContentCapabilityAccount;
+document.querySelectorAll("[data-content-view]").forEach(b=>b.onclick=()=>{contentAssetView=b.dataset.contentView;creatorFilter="all";creatorSearch="";const input=document.querySelector("#creator-search");if(input)input.value="";if(contentAssetView==="bloggerDistill")loadBloggerSkill();if(contentAssetView==="contentCapability")loadContentCapabilityKb();renderVideos();if(contentAssetView==="founderDistill")renderFounderDistill();if(contentAssetView==="bloggerDistill")renderBloggerSkill();if(contentAssetView==="contentCapability")renderContentCapabilityKb()});
 document.querySelectorAll("[data-creator-filter]").forEach(b=>b.onclick=()=>{creatorFilter=b.dataset.creatorFilter;document.querySelectorAll("[data-creator-filter]").forEach(x=>x.classList.toggle("active",x.dataset.creatorFilter===creatorFilter));renderCreatorLibrary()});
 const creatorSearchInput=document.querySelector("#creator-search");if(creatorSearchInput)creatorSearchInput.oninput=e=>{creatorSearch=e.target.value;renderCreatorLibrary()};
 document.querySelectorAll("[data-plugin-open]").forEach(b=>b.onclick=()=>openSocialPlugin(b.dataset.pluginOpen));
@@ -2659,6 +2799,7 @@ function startAppDataLoads(){
 	 loadSalesMarquee();
 	 loadFounderArchives();
 	 loadBloggerSkill();
+	 loadContentCapabilityKb();
 	 loadSocialPluginStatus();
  if(session){loadServerLearnings();loadWorkspace()}else renderWorkspace();
 }

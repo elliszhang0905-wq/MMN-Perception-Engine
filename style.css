@@ -271,6 +271,34 @@ button.permission-locked,.file-button.permission-locked{
 .distilled-asset-card div{display:flex;justify-content:space-between;gap:12px;align-items:center}.distilled-asset-card span{font-size:10px;color:#7b858d;font-weight:900;letter-spacing:.7px}.distilled-asset-card b{font-size:15px;color:var(--ink)}
 .distilled-asset-card p{font-size:13px;color:#303840;line-height:1.55;margin:0}.distilled-asset-card dl{display:grid;grid-template-columns:70px 1fr;gap:7px 10px;margin:0}.distilled-asset-card dt{font-size:11px;color:#7a858d;font-weight:900}.distilled-asset-card dd{font-size:12px;line-height:1.45;color:#303840;margin:0}.distilled-asset-card small{font-size:11px;color:#68727a;line-height:1.5}
 .skill-rag-card{border:1px solid var(--line);border-radius:14px;background:#fff;padding:14px;margin-bottom:10px}.skill-rag-card span{font-size:11px;color:#7a858d;font-weight:900}.skill-rag-card b{display:block;font-size:14px;color:#12181f;margin:4px 0 7px}.skill-rag-card p{font-size:13px;line-height:1.55;color:#303840;margin:0 0 8px}
+.capability-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;background:linear-gradient(135deg,#fff,#f2f5f4)}
+.capability-hero span{font-size:12px;letter-spacing:.14em;color:#74808a;font-weight:900}.capability-hero h2{margin:8px 0 8px;font-size:26px}.capability-hero p{margin:0;color:#66717a;line-height:1.65;max-width:820px}
+.capability-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.capability-account-box{display:grid;grid-template-columns:minmax(180px,.9fr) minmax(260px,1.2fr) 110px auto;gap:8px;width:min(820px,100%)}
+.capability-account-box input,.capability-account-box select{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px 14px;font-size:14px;font-weight:800;color:#20262c;box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}
+.capability-collect-status{display:block;width:100%;text-align:right;color:#7b858d;font-size:11px;line-height:1.5}
+.capability-usecases{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 18px}
+.capability-usecases article{border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#fbfbfa,#f3f5f4);padding:16px;box-shadow:0 12px 24px rgba(18,22,26,.04)}
+.capability-usecases span{display:block;font-size:11px;color:#7a858d;font-weight:900;letter-spacing:1.2px;margin-bottom:8px}
+.capability-usecases b{display:block;font-size:15px;color:#12181f;margin-bottom:8px}
+.capability-usecases p{font-size:12px;line-height:1.65;color:#5e6871;margin:0}
+.capability-search-row{display:flex;gap:12px}.capability-search-row .search{flex:1}
+.capability-tag-groups{display:grid;gap:14px;margin-top:14px}.capability-tag-groups section{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:start}.capability-tag-groups b{font-size:12px;color:#6d7882;padding-top:8px}.capability-tag-groups button{border:1px solid var(--line);background:#fff;color:#303840;border-radius:999px;padding:7px 12px;margin:0 6px 8px 0;font-size:12px;font-weight:850}.capability-tag-groups button.active{background:#20262c;color:#fff;border-color:#20262c;box-shadow:0 10px 24px rgba(18,22,26,.12)}
+.capability-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.creator-dna-grid{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:18px}
+.creator-dna-card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(180deg,#fff,#f7f8f7);padding:18px;box-shadow:0 18px 34px rgba(18,22,26,.06);display:grid;gap:14px}
+.creator-dna-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(216,222,226,.72);padding-bottom:12px}.creator-dna-head span{display:block;color:#7a858d;font-size:11px;font-weight:900;letter-spacing:.08em;margin-bottom:6px}.creator-dna-head h3{margin:0;font-size:24px;color:#12181f}.creator-dna-head b{background:#20262c;color:#fff;border-radius:999px;padding:7px 12px;font-size:12px}
+.dna-positioning{font-size:15px;line-height:1.65;color:#24303a;margin:0;font-weight:850}
+.dna-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.dna-fields section{border:1px solid #dde2e5;border-radius:14px;background:#fff;padding:12px;min-height:104px}.dna-fields span{display:block;color:#7a858d;font-size:11px;font-weight:900;margin-bottom:8px}.dna-fields p{margin:0;color:#303840;font-size:12px;line-height:1.55}
+.dna-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.dna-actions button{border:1px solid #d8dde1;border-radius:12px;background:#fff;color:#20262c;padding:12px 10px;font-size:12px;font-weight:900;cursor:pointer}.dna-actions button:hover{background:#20262c;color:#fff;border-color:#20262c;box-shadow:0 12px 26px rgba(18,22,26,.14)}
+.capability-evidence-panel{margin-top:18px}
+.capability-card{border:1px solid var(--line);border-radius:16px;background:#fff;padding:16px;display:grid;gap:10px;box-shadow:0 12px 24px rgba(18,22,26,.04)}
+.capability-card-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.capability-card-head span{color:#7a858d;font-size:11px;font-weight:900}.capability-card-head b{background:#eef3f0;color:#1b6f57;border-radius:999px;padding:5px 9px;font-size:11px}
+.capability-card h3{font-size:16px;margin:0;color:#12181f}.capability-card p{font-size:13px;line-height:1.6;color:#303840;margin:0}
+.capability-card dl{display:grid;grid-template-columns:78px 1fr;gap:7px 10px;margin:0}.capability-card dt{font-size:11px;color:#7a858d;font-weight:900}.capability-card dd{font-size:12px;line-height:1.5;margin:0;color:#303840}
+.capability-tags em{display:inline-block;font-style:normal;padding:5px 9px;border-radius:999px;background:#edf0f2;color:#303840;font-size:10px;font-weight:850;margin:0 5px 5px 0}.capability-card small{font-size:11px;color:#7a858d}
+@media(max-width:1200px){.dna-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.dna-actions{grid-template-columns:1fr}}
+@media(max-width:900px){.capability-hero{display:grid}.capability-card-grid{grid-template-columns:1fr}.capability-tag-groups section{grid-template-columns:1fr}.capability-account-box{grid-template-columns:1fr}.dna-fields,.dna-actions{grid-template-columns:1fr}}
 .founder-schedule{margin-top:14px;padding:12px;border-radius:12px;background:#f1f3f4;color:#68727a;font-size:12px}
 .founder-generator{margin-top:18px}.founder-generate-grid{display:grid;grid-template-columns:180px 180px 1fr auto;gap:12px;align-items:end}.founder-output{margin-top:16px}
 .founder-review{margin-top:14px;padding:14px;border-radius:12px;background:#eef3f1;border:1px solid #dbe4df}.founder-review b{display:block;margin-bottom:8px;color:#18805d}
