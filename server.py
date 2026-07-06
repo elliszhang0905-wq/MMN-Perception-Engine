@@ -20,7 +20,7 @@ import html as html_lib
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from threading import Timer
+from threading import Lock, Thread, Timer
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -48,16 +48,24 @@ QWEN_DEFAULT_DEEP_MODEL = "qwen3.7-max"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-reasoner"
+MMN_ROUTER_CACHE_TTL = int(os.getenv("MMN_ROUTER_CACHE_TTL", "1800"))
+MMN_FAST_MODEL_TIMEOUT = int(os.getenv("MMN_FAST_MODEL_TIMEOUT", "35"))
+MMN_DEEP_MODEL_TIMEOUT = int(os.getenv("MMN_DEEP_MODEL_TIMEOUT", "75"))
+MMN_CRITIC_TIMEOUT = int(os.getenv("MMN_CRITIC_TIMEOUT", "90"))
+ROUTER_RESPONSE_CACHE = {}
+ROUTER_CACHE_LOCK = Lock()
+ROUTER_REVIEW_LOCK = Lock()
+ROUTER_REVIEW_TASKS = {}
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
-    "modules": ["NSR", "Emotion", "Attribute", "Identity", "Positioning", "Gap", "Action", "RAG知识库", "周报生成", "高管蒸馏", "车型传播分析"],
+    "modules": ["NSR", "Emotion", "Attribute", "Identity", "Positioning", "Gap", "Action", "RAG知识库", "市场周报", "竞品传播分析", "达人蒸馏", "内容Brief", "脚本生产", "品牌/高管IP蒸馏", "策略报告输出", "营销智能体矩阵预留"],
     "workflow": ["本品", "竞品", "用户情绪", "产品属性", "身份认同", "认知空位", "传播动作"],
     "router": {
         "strategy_reasoning": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN策略推理模型"},
-        "content_delivery": {"primary": "qwen", "reviewer": "deepseek", "label": "MMN中文交付模型"},
+        "content_delivery": {"primary": "qwen", "reviewer": "", "label": "MMN中文交付快速模型"},
         "fact_explanation": {"primary": "rag", "reviewer": "qwen", "label": "MMN事实解释模型"},
-        "data_summary": {"primary": "qwen", "reviewer": "deepseek", "label": "MMN数据归纳模型"},
+        "data_summary": {"primary": "qwen", "reviewer": "", "label": "MMN标签摘要快速模型"},
         "fast_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN快速策略"},
         "complex_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN深度策略"}
     }
@@ -590,6 +598,11 @@ def infer_brand_from_model(model):
         ("MIX", "极氪"),
         ("智己", "智己"),
         ("小米", "小米汽车"),
+        ("启境GT7", "启境"),
+        ("启境", "启境"),
+        ("Qijing GT7", "启境"),
+        ("Qijing", "启境"),
+        ("QIJING", "启境"),
         ("理想", "理想"),
         ("问界", "问界"),
         ("蔚来", "蔚来"),
@@ -638,7 +651,7 @@ def infer_brand_from_model(model):
 
 KNOWN_BRANDS = {
     "沃尔沃", "阿维塔", "广汽埃安", "埃安", "奇瑞", "别克", "奥迪", "宝马", "奔驰", "本田", "东风本田", "广汽本田", "荣威",
-    "智己", "小米汽车", "特斯拉", "蔚来", "乐道", "极氪", "理想", "问界", "比亚迪",
+    "智己", "启境", "小米汽车", "特斯拉", "蔚来", "乐道", "极氪", "理想", "问界", "比亚迪",
     "吉利", "吉利银河", "领克", "零跑", "小鹏", "广汽传祺", "腾势", "深蓝",
     "长安", "长安启源", "五菱", "宝骏", "丰田", "广汽丰田", "一汽丰田", "大众", "日产",
     "MG", "smart", "firefly", "北京越野", "奔腾", "标致", "MINI", "雪铁龙", "上汽大通", "埃尚", "极狐", "东风纳米", "待人工确认"
@@ -1236,7 +1249,7 @@ FOUNDER_PUBLIC_SOURCES = [
 ]
 
 FOUNDER_NAV_NOISE_TERMS = [
-    "导航", "车型", "报价", "经销商", "图片", "视频", "新闻", "排行", "排行榜", "热搜",
+    "导航", "车型", "报价", "图片", "视频", "新闻", "排行", "排行榜", "热搜",
     "请选择品牌", "请选择车系", "紧凑型", "中型", "中大型", "大型", "小型", "微型",
     "SUV", "MPV", "两厢", "三厢", "旅行车", "新浪汽车", "腾讯汽车", "网易汽车",
 ]
@@ -1377,7 +1390,7 @@ def extract_founder_candidates(payload, week_start, week_end, source):
             "core_viewpoint": "待MMN模型清洗摘要",
             "language_style_tags": ["公开表达", topic],
             "distillable_talk": "待MMN策略模型蒸馏",
-            "prompt_template": f"请参考{person['brand']}{person['person']}的公开表达风格，围绕用户问题、事实证据和行动承诺生成高管IP话术。",
+            "prompt_template": f"请参考{person['brand']}{person['person']}的公开表达风格，围绕用户问题、事实证据和行动承诺生成高管IP表达。",
             "risk_note": "待MMN策略模型质检",
             "model_trace": {"extractor": "local-compliant-html", "mmn_strategy_model": "reserved"},
             "raw_payload_hash": payload["hash"]
@@ -1396,9 +1409,9 @@ def founder_seed_items():
 def founder_talk_prompt(profile, scene, brief, archives):
     return [
         {"role": "system", "content": (
-            "你是MMN汽车营销引擎的高管IP话术生成模块。底层主控执行引擎负责知识调用、结构化输出和常规话术生成。"
-            "请基于已归档的公开表达样本生成可直接使用的中文话术。不要声称这是高管本人原话，只能说是风格参考。"
-            "输出结构：核心话术、表达拆解、可发布版本、注意事项。"
+            "你是MMN汽车营销引擎的高管IP表达生成模块。底层主控执行引擎负责知识调用、结构化输出和常规表达生成。"
+            "请基于已归档的公开表达样本生成可直接使用的中文表达资产。不要声称这是高管本人原话，只能说是风格参考。"
+            "输出结构：核心表达、表达拆解、可发布版本、注意事项。"
             + MMN_OUTPUT_STYLE
         )},
         {"role": "user", "content": json.dumps({"profile": profile, "scene": scene, "brief": brief, "archives": archives[:8]}, ensure_ascii=False)}
@@ -1408,7 +1421,7 @@ def founder_quality_prompt(profile, scene, brief, draft):
     return [
         {"role": "system", "content": (
             "你是MMN汽车营销引擎的策略推理与质检模块。负责观点归因、语言风格蒸馏、舆论风险判断和高管IP Prompt校验。"
-            "请检查话术是否符合人物公开表达风格、是否存在过度承诺、事实不明、舆论风险或逻辑断裂。"
+            "请检查表达是否符合人物公开表达风格、是否存在过度承诺、事实不明、舆论风险或逻辑断裂。"
             "输出结构：质检结论、风险点、优化建议、最终可用Prompt。"
         )},
         {"role": "user", "content": json.dumps({"profile": profile, "scene": scene, "brief": brief, "draft": draft}, ensure_ascii=False)}
@@ -1644,12 +1657,12 @@ def infer_mmn_task_type(question="", mode="fast", explicit=""):
     fact_terms = ["参数", "销量", "价格", "售价", "配置", "上市时间", "发布时间", "交付", "尺寸", "续航", "电池", "功率", "扭矩"]
     content_terms = ["短视频", "脚本", "PPT", "文案", "报告", "长文档", "周报", "发布会", "口播", "微博", "小红书"]
     strategy_terms = ["策略", "竞品", "拆解", "压力测试", "反方", "逻辑", "打法", "营销", "怎么打", "规划"]
+    if mode == "deep" or any(x in text for x in strategy_terms):
+        return "strategy_reasoning"
     if any(x in text for x in fact_terms):
         return "fact_explanation"
     if any(x in text for x in content_terms):
         return "content_delivery"
-    if mode == "deep" or any(x in text for x in strategy_terms):
-        return "strategy_reasoning"
     return "data_summary"
 
 def route_for_task(task_type, mode="fast"):
@@ -1660,6 +1673,78 @@ def route_for_task(task_type, mode="fast"):
     if task_type == "fact_explanation":
         return MMN_STRATEGY_MODEL["router"]["fact_explanation"]
     return MMN_STRATEGY_MODEL["router"]["data_summary"]
+
+def router_cache_key(question, project, references, mode, task_type, edition):
+    ref_keys = []
+    for ref in (references or [])[:8]:
+        ref_keys.append(str(ref.get("id") or ref.get("title") or ref.get("url") or ref.get("source") or ""))
+    payload = {
+        "question": question,
+        "project": project or {},
+        "refs": ref_keys,
+        "mode": mode,
+        "task_type": task_type,
+        "edition": edition
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+def get_router_cache(cache_key):
+    with ROUTER_CACHE_LOCK:
+        item = ROUTER_RESPONSE_CACHE.get(cache_key)
+        if not item:
+            return None
+        if time.time() - item.get("created", 0) > MMN_ROUTER_CACHE_TTL:
+            ROUTER_RESPONSE_CACHE.pop(cache_key, None)
+            return None
+        payload = {**item["payload"], "cached": True}
+    if payload.get("id"):
+        decision = router_decision_payload(payload["id"])
+        if decision and decision.get("conflict", {}).get("status") != "review_pending":
+            payload.update({
+                "text": decision.get("text") or payload.get("text"),
+                "primaryText": decision.get("primaryText") or payload.get("primaryText"),
+                "reviewText": decision.get("reviewText") or payload.get("reviewText"),
+                "reviewer": decision.get("reviewer") or payload.get("reviewer"),
+                "conflict": decision.get("conflict") or payload.get("conflict"),
+                "routerDecision": decision,
+                "reviewStatus": "done"
+            })
+    return payload
+
+def set_router_cache(cache_key, payload):
+    with ROUTER_CACHE_LOCK:
+        ROUTER_RESPONSE_CACHE[cache_key] = {"created": time.time(), "payload": payload}
+        if len(ROUTER_RESPONSE_CACHE) > 80:
+            old_keys = sorted(ROUTER_RESPONSE_CACHE, key=lambda k: ROUTER_RESPONSE_CACHE[k].get("created", 0))[:-60]
+            for key in old_keys:
+                ROUTER_RESPONSE_CACHE.pop(key, None)
+
+def router_decision_payload(decision_id):
+    with db() as conn:
+        row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+    if not row:
+        return None
+    item = rowdict(row)
+    return {
+        "id": item["id"],
+        "taskType": item.get("task_type"),
+        "model": item.get("primary_provider"),
+        "reviewer": item.get("reviewer_provider"),
+        "primaryText": item.get("primary_output") or "",
+        "reviewText": item.get("reviewer_output") or "",
+        "text": "\n\n".join([
+            item.get("primary_output") or "",
+            f"MMN复核结论：{item.get('reviewer_output')}" if item.get("reviewer_output") else "",
+            f"复核状态：{item.get('conflict_status') or 'review_pending'}"
+        ]).strip(),
+        "conflict": {
+            "status": item.get("conflict_status") or "review_pending",
+            "label": "深度复核进行中" if item.get("conflict_status") == "review_pending" else ("需人工复核" if item.get("conflict_status") == "needs_human_review" else "复核完成"),
+            "confidence": item.get("confidence") or .5
+        },
+        "humanStatus": item.get("human_status"),
+        "updatedAt": item.get("updated_at")
+    }
 
 def compact_reference_sources(references):
     items = []
@@ -1705,12 +1790,12 @@ def model_task_prompt(question, project, references, task_type, role):
     ]
 
 def call_provider(provider, messages, task_type, mode="fast", reviewer=False):
-    profile = "deep" if mode == "deep" or task_type == "strategy_reasoning" else "fast"
+    profile = "deep" if task_type == "strategy_reasoning" or (reviewer and mode == "deep") else "fast"
     temperature = .18 if reviewer or task_type == "fact_explanation" else .28
     if provider == "deepseek":
-        return call_deepseek(messages, temperature=temperature, profile=profile, timeout=120 if profile == "deep" else 70, max_tokens=1200)
+        return call_deepseek(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT), max_tokens=1200)
     if provider == "qwen":
-        return call_qwen(messages, temperature=temperature, profile=profile, timeout=120 if profile == "deep" else 70)
+        return call_qwen(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT))
     raise ValueError(f"不支持的模型路由：{provider}")
 
 def output_similarity(a, b):
@@ -1770,10 +1855,67 @@ def save_router_decision(record):
         ))
     return item_id
 
-def run_mmn_task_router(question, project=None, references=None, mode="fast", task_type="", edition="china"):
+def complete_router_review(decision_id, question, project, references, task_type, route, mode, reviewer):
+    if reviewer not in {"qwen", "deepseek"}:
+        return
+    with ROUTER_REVIEW_LOCK:
+        ROUTER_REVIEW_TASKS[decision_id] = {"status": "running", "startedAt": now()}
+    errors = {}
+    try:
+        with db() as conn:
+            row = conn.execute("select primary_output from model_router_decisions where id=?", (decision_id,)).fetchone()
+        primary_text = row["primary_output"] if row else ""
+        review_prompt = model_task_prompt(question, {**(project or {}), "主分析输出": primary_text}, references, task_type, "reviewer")
+        reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
+        used_reviewer = reviewer
+    except Exception as exc:
+        errors[reviewer] = str(exc)
+        reviewer_text = "复核未完成：请人工检查逻辑漏洞、证据不足、竞品误判和策略风险。"
+        used_reviewer = "manual-required"
+        primary_text = primary_text if "primary_text" in locals() else ""
+    conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
+    stamp = now()
+    with db() as conn:
+        conn.execute("""
+            update model_router_decisions
+            set reviewer_provider=?, reviewer_output=?, conflict_status=?, confidence=?, human_status=?, knowledge_json=?, updated_at=?
+            where id=?
+        """, (
+            used_reviewer,
+            reviewer_text,
+            conflict["status"],
+            conflict["confidence"],
+            "pending" if conflict["status"] == "needs_human_review" else "not_required",
+            json.dumps({"source": "mmn_task_router", "task_type": task_type, "status": conflict["status"], "critic_errors": errors}, ensure_ascii=False),
+            stamp,
+            decision_id
+        ))
+    with ROUTER_REVIEW_LOCK:
+        ROUTER_REVIEW_TASKS[decision_id] = {"status": "done", "finishedAt": stamp, "errors": errors}
+
+def enqueue_router_review(decision_id, question, project, references, task_type, route, mode, reviewer, force=False):
+    if reviewer not in {"qwen", "deepseek"}:
+        return False
+    with ROUTER_REVIEW_LOCK:
+        if not force and ROUTER_REVIEW_TASKS.get(decision_id, {}).get("status") == "running":
+            return True
+        ROUTER_REVIEW_TASKS[decision_id] = {"status": "queued", "queuedAt": now()}
+    worker = Thread(
+        target=complete_router_review,
+        args=(decision_id, question, project or {}, references or [], task_type, route, mode, reviewer),
+        daemon=True
+    )
+    worker.start()
+    return True
+
+def run_mmn_task_router(question, project=None, references=None, mode="fast", task_type="", edition="china", async_review=True, force_review=False):
     project = project or {}
     references = references or []
     task_type = infer_mmn_task_type(question, mode, task_type)
+    cache_key = router_cache_key(question, project, references, mode, task_type, edition)
+    cached = get_router_cache(cache_key)
+    if cached and not force_review:
+        return cached
     route = route_for_task(task_type, mode)
     primary = route.get("primary")
     reviewer = route.get("reviewer")
@@ -1791,7 +1933,8 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
             used_primary = "local-rag"
     reviewer_text = ""
     used_reviewer = reviewer or ""
-    if reviewer in {"qwen", "deepseek"}:
+    should_async_review = async_review and reviewer in {"qwen", "deepseek"}
+    if reviewer in {"qwen", "deepseek"} and not should_async_review:
         try:
             review_prompt = model_task_prompt(question, {**project, "主分析输出": primary_text}, references, task_type, "reviewer")
             reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
@@ -1799,11 +1942,11 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
             errors[reviewer] = str(exc)
             reviewer_text = "复核未完成：请人工检查事实依据、逻辑漏洞和表达风险。"
             used_reviewer = "manual-required"
-    conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
+    conflict = {"status": "review_pending", "label": "深度复核进行中", "confidence": .62, "similarity": 0} if should_async_review else detect_router_conflict(primary_text, reviewer_text, task_type, references)
     final_text = "\n\n".join([
         primary_text,
         f"MMN复核结论：{reviewer_text}" if reviewer_text else "",
-        f"复核状态：{conflict['label']}"
+        "复核状态：深度复核已进入后台，前台先返回初版策略。" if should_async_review else f"复核状态：{conflict['label']}"
     ]).strip()
     decision_id = save_router_decision({
         "edition": edition,
@@ -1818,10 +1961,11 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
         "reviewer_output": reviewer_text,
         "conflict_status": conflict["status"],
         "confidence": conflict["confidence"],
-        "human_status": "pending" if conflict["status"] == "needs_human_review" else "not_required",
+        "human_status": "pending" if conflict["status"] in {"needs_human_review", "review_pending"} else "not_required",
         "knowledge": {"source": "mmn_task_router", "task_type": task_type, "status": conflict["status"]}
     })
-    return {
+    review_queued = enqueue_router_review(decision_id, question, project, references, task_type, route, mode, reviewer, force=force_review) if should_async_review else False
+    payload = {
         "ok": True,
         "id": decision_id,
         "text": final_text,
@@ -1834,10 +1978,15 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
         "modelLabel": route.get("label", "MMN多模型引擎"),
         "route": route,
         "conflict": conflict,
+        "reviewStatus": "queued" if review_queued else ("not_required" if not reviewer else "done"),
+        "asyncReview": bool(review_queued),
+        "cacheTtlSeconds": MMN_ROUTER_CACHE_TTL,
         "references": references[:8],
         "sourceTrace": compact_reference_sources(references),
         "errors": errors
     }
+    set_router_cache(cache_key, payload)
+    return payload
 
 def openai_config():
     api_key = env_value("OPENAI_API_KEY")
@@ -1989,7 +2138,7 @@ def rule_strategy(context):
         ) if relation else "垂媒侧用于校准用户真实比较语境，避免只讲孤立卖点。"
         return "\n\n".join([
             "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出",
-            "### 2. 核心结论\n" + f"{model} 当前要围绕“{top_label}”建立可被用户复述的购买理由，把“{mode}”转成内容、达人和销售可执行动作。",
+            "### 2. 核心结论\n" + f"{model} 当前要围绕“{top_label}”建立可被用户复述的购买理由，把“{mode}”转成内容、达人和内容与线索可执行动作。",
             "### 3. 当前核心问题\n" + f"用户已经把 {model} 放进 {competitors} 的比较池。下一步重点不是增加噪音，而是回答为什么此刻值得试驾。",
             "### 4. 认知资产 / 负债 / 空位\n" + f"资产是“{top_label}”；负债来自高风险疑虑；空位来自竞品没有讲清楚的真实场景。",
             "### 5. 垂媒竞争格局\n" + relation_copy,
@@ -1997,7 +2146,7 @@ def rule_strategy(context):
             "### 7. 抖音内容打法\n短视频先做“一个疑虑一个实测”，用标题直接回答用户最关心的购买问题。",
             "### 8. 小红书内容打法\n小红书负责沉淀车主账本、场景清单和避坑问答，让用户收藏后能辅助决策。",
             "### 9. 达人脚本与内容资产\n评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本统一采用：疑虑开场、实测证据、竞品对比、适合人群、试驾行动。",
-            "### 10. 行动节奏与KPI\n7天校准内容资产，14天上线证据内容，30天复盘达人与销售承接。KPI看核心标签正向声量、负向疑虑占比、竞品对比搜索、收藏评论质量、试驾/询价线索。"
+            "### 10. 行动节奏与KPI\n7天校准内容资产，14天上线证据内容，30天复盘达人与线索承接。KPI看核心标签正向声量、负向疑虑占比、竞品对比搜索、收藏评论质量、试驾/询价线索。"
         ])
     if context.get("drillType") == "content_asset_strategy":
         relations = vertical.get("relations") or []
@@ -2009,7 +2158,7 @@ def rule_strategy(context):
         return "\n".join([
             f"核心营销结论：{context.get('project',{}).get('model', context.get('drillKey','当前车型'))} 应围绕“{top_label}”采取“{mode}”策略，把决策驾驶舱、声量数据中心和垂媒竞争格局合并成一个可执行传播判断。",
             f"三大数据依据：决策驾驶舱显示正向分 {positive}、负向风险 {negative}；声量数据中心主平台为 {top_platform}；{relation_copy}",
-            f"营销动作：在 {top_platform} 优先输出证据型内容，将“{top_label}”拆成第三方实测、车主证词、场景短视频和销售FAQ；竞品表达只做同场景对比，不做参数堆砌。",
+            f"营销动作：在 {top_platform} 优先输出证据型内容，将“{top_label}”拆成第三方实测、车主证词、场景短视频和品牌FAQ；竞品表达只做同场景对比，不做参数堆砌。",
             "KPI：核心标签正向声量提升、负向疑虑评论占比下降、垂媒正向排名提升、竞品对比搜索占比提升、试驾/询价线索提升。"
         ])
     if context.get("drillType") == "cognition_strategy":
@@ -2024,13 +2173,13 @@ def rule_strategy(context):
         return "\n".join([
             f"核心认知判断：{project.get('model', context.get('drillKey','当前车型'))} 要把“{asset.get('label', top_label)}”做成认知资产，把“{risk.get('label','购买疑虑')}”用证据优先修复，并围绕“{space.get('label','竞品空位')}”建立与 {competitor} 的差异化购买理由。",
             f"资产负债机会：资产来自{asset.get('label', top_label)}，负债来自{risk.get('label','高风险疑虑')}，机会来自{space.get('label','可抢占空位')}；声量主平台是 {top_platform}。",
-            f"策略动作：在 {top_platform} 用第三方实测、车主证词、场景短视频和销售FAQ承接认知诊断；竞品表达只做真实场景对比，不做参数堆砌。",
+            f"策略动作：在 {top_platform} 用第三方实测、车主证词、场景短视频和品牌FAQ承接认知诊断；竞品表达只做真实场景对比，不做参数堆砌。",
             "KPI：核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。"
         ])
     return "\n".join([
         f"核心判断：当前围绕“{top_label}”应采取“{mode}”策略。",
         f"关键触发点：样本量 {summary.get('samples', 0)}，正向分 {positive}，负向风险 {negative}。",
-        f"平台动作：优先在 {top_platform} 制作证据型内容，并将高频问题转成FAQ、短视频脚本和销售话术。",
+        f"平台动作：优先在 {top_platform} 制作证据型内容，并将高频问题转成FAQ、短视频脚本和品牌传播口径。",
         "证据链：第三方实测、真实车主反馈、官方解释三类素材同步沉淀。",
         "KPI：情绪负向占比下降、目标标签正向声量提升、收藏/询价/试驾线索改善。"
     ])
@@ -2183,7 +2332,7 @@ SEMANTIC_KEYWORDS = {
         ("空间舒适", r"空间|二排|后排|座椅|舒适|头部|腿部|后备箱|儿童座椅"),
         ("安全质量", r"安全|碰撞|电池|自燃|质量|异响|品控|故障|耐久"),
         ("价格权益", r"价格|贵|便宜|权益|优惠|金融|保值|用车成本|保险|电耗|油耗|能耗"),
-        ("品牌服务", r"品牌|服务|售后|交付|门店|补能|换电|充电|口碑"),
+        ("品牌服务", r"品牌|服务|售后|交付|补能|换电|充电|口碑"),
         ("外观内饰", r"外观|颜值|造型|内饰|材质|豪华|设计")
     ],
     "emotion_tendency": [
@@ -2454,10 +2603,10 @@ def identity_needs_deepseek_review(items):
 def model_judgment_prompt(text, project):
     return [
         {"role": "system", "content": (
-            "你是MMN营销引擎的车型判断资产分析模块。用户会输入一句或一段对某台车的市场/营销/销售判断。"
+            "你是MMN营销引擎的车型判断资产分析模块。用户会输入一句或一段对某台车的市场/营销/传播判断。"
             "你必须识别品牌、车型、判断维度、核心观点、归因、策略动作、还缺什么证据，并输出JSON。"
             "只返回JSON，不要Markdown。字段：brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, tags, confidence。"
-            "dimension从市场/营销/销售/竞品/内容/渠道/产品/价格/用户心智/综合判断中选择最合适的一项。"
+            "dimension从市场/营销/传播/竞品/内容/渠道/产品/价格/用户心智/综合判断中选择最合适的一项。"
             "不要编造数据；如果车型或品牌不确定，用当前项目兜底并把confidence设为low。"
             + MMN_OUTPUT_STYLE
         )},
@@ -2478,9 +2627,9 @@ def local_model_judgment(text, project):
         "model_name": model or (project or {}).get("model") or "待识别车型",
         "dimension": "用户心智" if re.search(r"认知|理解|心智|身份|定位", text or "") else "综合判断",
         "viewpoint": str(text or "").strip()[:220],
-        "attribution": "当前输入更像一条人工专业判断，需要继续用声量、垂媒、内容和销售线索验证。",
-        "strategy_implication": "先把该判断拆成可验证证据，再决定内容、渠道和销售话术优先级。",
-        "evidence_needed": "需要补充平台声量、竞品对比、用户评论原文、销售反馈或转化线索。",
+        "attribution": "当前输入更像一条人工专业判断，需要继续用声量、垂媒、内容和意向线索验证。",
+        "strategy_implication": "先把该判断拆成可验证证据，再决定内容、渠道和品牌传播口径优先级。",
+        "evidence_needed": "需要补充平台声量、竞品对比、用户评论原文、市场反馈或转化线索。",
         "tags": ["车型判断", "人工观点", "MMN学习"],
         "confidence": "low"
     }
@@ -2602,14 +2751,14 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         creator_names = " / ".join([x.get("name") for x in creators if x.get("name")][:3]) or "评测型达人、生活方式达人、真实车主"
         category = summary.get("topCategory") or top_label
         return "\n\n".join([
-            "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出｜面向品牌市场、销售转化与达人合作团队",
+            "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出｜面向品牌市场、市场转化与达人合作团队",
             "### 2. 核心结论\n" + f"{model} 的内容策略不能只看发布量，而要把“{top_label}”做成用户能理解的购买理由。下一轮传播建议采用“证据先行、场景解释、竞品校准”的打法：先修复“{risk_label}”，再放大已有正向认知。",
             "### 3. 当前核心问题\n" + f"用户已经把 {model} 放进 {competitor_text} 的比较池。真正的问题不是用户没看到车型，而是看到之后还缺少一句稳定判断：为什么在同样预算、同样使用场景下，选择 {model} 更合理。",
-            "### 4. 认知资产 / 负债 / 空位\n" + f"资产：围绕“{top_label}”继续放大，把它变成短视频标题、垂媒解释和销售话术。\n负债：围绕“{risk_label}”先给证据，不急着喊卖点。\n空位：把竞品没有讲透的家庭、通勤、长途、补能、智能驾驶边界，转成用户能马上代入的选择题。",
+            "### 4. 认知资产 / 负债 / 空位\n" + f"资产：围绕“{top_label}”继续放大，把它变成短视频标题、垂媒解释和品牌传播口径。\n负债：围绕“{risk_label}”先给证据，不急着喊卖点。\n空位：把竞品没有讲透的家庭、通勤、长途、补能、智能驾驶边界，转成用户能马上代入的选择题。",
             "### 5. 垂媒竞争格局\n" + (f"{relation.get('platform','垂媒')} {relation.get('period','当前周期')}显示，{model}与{relation.get('competitor', competitor_text)}处在“{relation.get('status','竞争对比')}”关系。垂媒内容要少讲配置清单，多讲用户为什么会把两台车放在一起比。" if relation else f"垂媒格局用于校准比较语境：{model}不是孤立被讨论，而是在与{competitor_text}的真实选择关系中被评价。"),
             "### 6. 声量与用户情绪\n" + f"主平台建议优先看 {top_platform}。当前内容资产主类为“{category}”；策略上要把高声量内容从“看热闹”改成“能帮用户做决定”。如果声量集中在争议点，就用第三方实测和真实车主回答；如果声量集中在卖点，就用场景化脚本提高转化效率。",
             "### 7. 抖音内容打法\n" + f"抖音负责把疑虑拍成验证。建议三类脚本：第一类“一个疑虑一个实测”，第二类“一个竞品一个同场景对比”，第三类“一个场景一个车主回答”。标题不要写抽象卖点，直接写用户会搜的问题，例如“为什么这台车值得试驾”。",
-            "### 8. 小红书内容打法\n" + "小红书负责把决策材料沉淀下来。建议做家庭用车账本、通勤体验、长途补能、老人小孩乘坐、智能驾驶接管边界、真实花费清单。每篇笔记都要能被收藏，并且能被销售和达人二次复用。",
+            "### 8. 小红书内容打法\n" + "小红书负责把决策材料沉淀下来。建议做家庭用车账本、通勤体验、长途补能、老人小孩乘坐、智能驾驶接管边界、真实花费清单。每篇笔记都要能被收藏，并且能被品牌和达人二次复用。",
             "### 9. 达人脚本与内容资产\n" + f"达人组合建议调用：{creator_names}。评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本资产统一沉淀为五段式：疑虑开场、实测证据、竞品对比、适合人群、试驾行动。当前内容资产可先围绕“{category}”做第一批脚本库。",
             "### 10. 行动节奏与KPI\n" + "7天：完成自动抓取、分类和脚本方向筛选；14天：上线疑虑验证内容和达人同场景对比；30天：复盘内容质量与线索转化。\nKPI：核心标签正向声量提升、负向疑虑评论占比下降、竞品对比搜索提升、收藏/评论质量提升、试驾/询价线索提升。\n策略复核：方案已按可验证证据、竞品关系和内容资产复用价值完成校准。"
         ])
@@ -2640,7 +2789,7 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
             f"3. 垂媒竞争格局：{relation.get('platform','垂媒')} {relation.get('period','')} 显示与 {competitor} 的关系为“{relation.get('status','竞争对比')}”，需要把对比从参数表转为真实场景。",
             "",
             "### 营销动作",
-            f"1. 内容动作：围绕“{top_label}”做第三方实测、车主证词、场景短视频和销售FAQ四类资产。",
+            f"1. 内容动作：围绕“{top_label}”做第三方实测、车主证词、场景短视频和品牌FAQ四类资产。",
             f"2. 竞品动作：对 {competitor} 做同场景对比，标题直接回答用户为什么选择 {project.get('model', context.get('drillKey', '本品'))}。",
             "3. 达人动作：评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。",
             "",
@@ -2679,14 +2828,14 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
             f"{model} 的认知策略不是看单个正负面，而是把“{asset.get('label','已有好评')}”沉淀为资产，把“{risk.get('label','购买疑虑')}”用证据修复，把“{space.get('label','可抢占空位')}”转成与 {competitor} 的可传播差异。",
             "",
             "### 资产负债机会",
-            f"1. 资产：{asset.get('label','核心正向标签')} 可继续放大，适合进入短视频钩子、垂媒解释和销售话术。",
+            f"1. 资产：{asset.get('label','核心正向标签')} 可继续放大，适合进入短视频钩子、垂媒解释和品牌传播口径。",
             f"2. 负债：{risk.get('label','高风险疑虑')} 需要优先修复，先给证据再谈卖点。",
             f"3. 机会：{space.get('label','认知空位')} 可作为下一轮抢位主题，和 {competitor} 做同场景对比。",
             "",
             "### 策略动作",
             f"1. 平台动作：在 {top_platform} 先做“一个疑虑一个证据”的内容包，标题直接回答用户问题。",
             f"2. 竞品动作：{relation_copy}",
-            "3. 协同动作：评测达人负责证据，车主/KOC负责真实场景，销售端同步FAQ承接询价和试驾。",
+            "3. 协同动作：评测达人负责证据，车主/KOC负责真实场景，品牌端同步FAQ承接询价和试驾。",
             "",
             "### KPI",
             f"核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。当前NSR {summary.get('nsr', 0)} 可作为复盘基线。",
@@ -2701,7 +2850,7 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         "核心判断：综合多模型与规则引擎结果，优先采用可被当前数据和RAG依据支持的策略，不采纳无证据扩展。",
         "共同建议：围绕高声量标签建立“数据拆解 → 证据链 → 平台内容 → KPI复盘”的闭环。",
         "分歧处理：若模型表述不一致，以本地规则引擎的样本量、情绪风险和平台分布为底线，以RAG引用作为策略依据。",
-        "平台打法：优先选择当前拆解中的高声量平台，输出短视频/种草/垂媒解释/销售话术四类资产。",
+        "平台打法：优先选择当前拆解中的高声量平台，输出短视频/种草/垂媒解释/品牌传播口径四类资产。",
         "内容资产需求：补齐原始评论、标题、字幕、话题、作者类型、互动量和商业化/自然声量标记。",
         "下一步行动：把融合策略保存为Learning，并在下一轮导入后比较情绪占比、标签声量和转化指标变化。",
         "",
@@ -2911,7 +3060,7 @@ def classify_video_title(title):
     for name, pattern in rules:
         if re.search(pattern, t, re.I):
             return name
-    if re.search(r"汽车|新能源|SUV|MPV|轿车|车系|车型|试驾|评测|体验|懂车|车主|4S|门店|订单|销量", t, re.I):
+    if re.search(r"汽车|新能源|SUV|MPV|轿车|车系|车型|试驾|评测|体验|懂车|车主|权益|线索|销量", t, re.I):
         return "综合评测"
     return "综合评测"
 
@@ -2936,6 +3085,14 @@ def infer_model(text):
         "全新理想L8": "理想L8",
         "理想L9": "理想L9",
         "理想L7": "理想L7",
+        "Lixiang L8": "理想L8",
+        "Li Auto L8": "理想L8",
+        "Qijing GT7": "启境GT7",
+        "启境GT7": "启境GT7",
+        "启境 GT7": "启境GT7",
+        "Zeekr 8X": "极氪8X",
+        "极氪8X": "极氪8X",
+        "极氪 8X": "极氪8X",
         "Model 3": "Model 3",
         "Model Y": "Model Y",
         "蔚来ET5T": "蔚来ET5T",
@@ -2948,6 +3105,170 @@ def infer_model(text):
     brand = r"(智己|理想|蔚来|极氪|小米|特斯拉|问界|小鹏|腾势|领克|比亚迪)"
     m = re.search(brand + r"(?:全新|新款|新)?\s*([A-Za-z]{0,4}\d[A-Za-z0-9]{0,4})", s, re.I)
     return (m.group(1) + m.group(2)).replace(" ", "") if m else ""
+
+def normalize_consulting_model(value, filename="", text=""):
+    cleaned = str(value or "").strip()
+    if cleaned:
+        return infer_model(cleaned) or cleaned
+    stem = Path(filename or "").stem
+    m = re.search(r"_(Lixiang L8|Qijing GT7|Zeekr 8X|理想L8|启境GT7|极氪8X)(?:\(|\.|_|$)", stem, re.I)
+    if m:
+        return infer_model(m.group(1)) or m.group(1)
+    return infer_model(text) or "待识别车型"
+
+def normalize_consulting_platform(value, url="", filename=""):
+    text = " ".join(str(x or "") for x in (value, url, filename))
+    mapped = infer_platform(text)
+    if mapped:
+        return mapped
+    s = str(value or "").strip()
+    platform_map = {
+        "bilibili": "B站",
+        "视频号": "微信视频号",
+        "微信": "微信",
+        "懂车帝": "懂车帝",
+        "汽车之家": "汽车之家",
+        "易车": "易车",
+        "微博": "微博",
+        "今日头条": "今日头条",
+        "小红书": "小红书",
+        "抖音": "抖音",
+    }
+    return platform_map.get(s, s or "其他")
+
+def classify_consulting_topic(text):
+    t = str(text or "")
+    rules = [
+        ("价格权益", "价格", "价格|售价|权益|优惠|补贴|尾款|金融|性价比|贵|便宜|值不值|20\\.99|32\\.99"),
+        ("智能化", "辅助/自动驾驶", "智驾|智能驾驶|自动驾驶|ADS|NOA|激光雷达|乾崑|泊车|L3|辅助驾驶|RCA"),
+        ("智能化", "智能座舱", "座舱|车机|中控|语音|屏幕|鸿蒙|OTA|导航"),
+        ("动力操控", "动力与操控", "动力|加速|零百|四驱|三电机|操控|底盘|悬架|空悬|刹车|麋鹿|赛道|滤震"),
+        ("安全质量", "安全", "安全|气囊|防碰撞|电池防护|热失控|碰撞|笼式车身|刮底|玄盾|CAS"),
+        ("安全质量", "质量", "质量|故障|异响|投诉|品控|召回|耐久|翻车|问题"),
+        ("空间舒适", "空间", "空间|后排|二排|后备箱|装载|家用|家庭|露营|亲子"),
+        ("空间舒适", "舒适性", "舒适|静谧|NVH|座椅|通勤|长途|空调"),
+        ("造型设计", "外观", "外观|颜值|设计|车漆|灯|轮毂|猎装|轿跑|溜背|紫|配色"),
+        ("造型设计", "内饰", "内饰|真皮|豪华|氛围|材质|质感|奶白"),
+        ("品牌信任", "品牌信任", "华为|广汽|品牌|背靠|信任|大厂|合作|问界|赛力斯"),
+        ("上市发布", "上市发布", "上市|发布|正式上市|预售|发布会|首发|黄景瑜"),
+    ]
+    for category, label, pattern in rules:
+        if re.search(pattern, t, re.I):
+            return category, label
+    return "整体口碑", "总体口碑"
+
+def infer_consulting_emotion(text):
+    t = str(text or "")
+    if re.search(r"垃圾|骗子|太差|失望|后悔|不值|劝退|翻车|拉胯|槽点|担心|焦虑|质疑|问题|故障|投诉|吐槽|刺眼|扎心", t, re.I):
+        return "失望"
+    if re.search(r"封神|拉满|圈粉|天花板|不错|推荐|满意|稳|强|真香|惊喜|理性之选|安全感|实力|在线", t, re.I):
+        return "认可"
+    if re.search(r"期待|等等|观望|看看|关注|想试驾|种草|心动", t, re.I):
+        return "期待"
+    if re.search(r"吗|？|\\?|到底|玄乎|但|可是|不过|早干嘛|靠谱吗", t, re.I):
+        return "怀疑"
+    return "认可"
+
+def consulting_identity_for(label, text=""):
+    if label in ("价格", "用车成本"):
+        return "价格敏感用户"
+    if label in ("空间", "舒适性", "安全"):
+        return "家庭用户"
+    if label in ("辅助/自动驾驶", "智能座舱"):
+        return "科技用户"
+    if label == "动力与操控":
+        return "性能用户"
+    if label in ("外观", "内饰"):
+        return "增量人群"
+    if re.search(r"车主|提车|用车|试驾", str(text or "")):
+        return "高影响力车主"
+    return "目标核心人群"
+
+def consulting_intent_for(platform, label, text=""):
+    t = str(text or "")
+    if re.search(r"试驾|购车|下订|锁单|尾款|门店|价格|上市|权益|推荐|不买|劝退", t, re.I):
+        return "高意向"
+    if platform in ("汽车之家", "懂车帝", "易车") or label in ("价格", "安全", "质量", "辅助/自动驾驶"):
+        return "高意向"
+    if platform in ("抖音", "小红书", "微博", "今日头条"):
+        return "中意向"
+    return "低意向"
+
+def consulting_row_weight(row, filename):
+    is_reply = "回帖" in str(filename or "")
+    if is_reply:
+        return 1
+    values = [num(row.get(k)) for k in ("interaction", "reply_no", "likes", "repost_no")]
+    weight = max(values + [1])
+    return int(min(max(weight, 1), 5000))
+
+def consulting_traffic_type(row, text):
+    pgcugc = str(row.get("pgcugc") or "").strip().lower()
+    author = str(row.get("author") or "")
+    hay = " ".join([pgcugc, author, text])
+    if re.search(r"pgc|kol|官方|品牌|用户中心|汽车园|4s|门店|经销|广告|合作|投放", hay, re.I):
+        return "商业化声量"
+    if re.search(r"ugc|车主|真实|提车|用车|体验|试驾|自来水|评论", hay, re.I):
+        return "自然声量"
+    return "未识别"
+
+def build_dataset_from_consulting_rows(rows, filename, replace=False):
+    source_rows = []
+    for row in rows:
+        title = field_value(row, ["title", "标题", "内容标题", "主贴标题"])
+        content = field_value(row, ["content", "正文", "内容", "评论内容", "回帖内容", "comment"])
+        text = re.sub(r"\s+", " ", f"{title} {content}").strip()
+        if not text:
+            continue
+        model = normalize_consulting_model(field_value(row, ["brand", "车型", "车系", "model"]), filename, text)
+        platform = normalize_consulting_platform(field_value(row, ["website", "platform", "平台", "来源"]), field_value(row, ["url", "链接"]), filename)
+        category, label = classify_consulting_topic(text)
+        emotion = infer_consulting_emotion(text)
+        identity = consulting_identity_for(label, text)
+        intent = consulting_intent_for(platform, label, text)
+        traffic = consulting_traffic_type(row, text)
+        weight = consulting_row_weight(row, filename)
+        source_rows.append((model, platform, category, label, emotion, identity, intent, traffic, weight, text))
+    if not source_rows:
+        raise ValueError("未识别到可导入的原始声量数据。请确认文件包含 title/content/website/brand 等字段。")
+
+    models = sorted({x[0] for x in source_rows if x[0]})
+    own_model = next((m for m in models if "启境" in m), models[0])
+    impact = {"安全":5,"质量":5,"辅助/自动驾驶":4.6,"动力与操控":4.4,"价格":4.2,"智能座舱":4.2,"空间":4.0,"舒适性":3.9,"品牌信任":4.1,"外观":3.4,"内饰":3.3,"上市发布":3.8,"总体口碑":4.0}
+    growth = {"抖音":1.35,"小红书":1.20,"微博":1.15,"微信视频号":1.08,"B站":1.10,"汽车之家":1.15,"懂车帝":1.20,"易车":1.10,"今日头条":1.05,"微信":1.05}
+    aggregate = {}
+    examples = {}
+    for model, platform, category, label, emotion, identity, intent, traffic, weight, text in source_rows:
+        key = (model, "本品" if model == own_model else "竞品", platform, category, label, emotion, identity, intent, impact.get(label, 3.5), growth.get(platform, 1.0), 4 if model != own_model else 3, traffic)
+        aggregate[key] = aggregate.get(key, 0) + weight
+        if key not in examples:
+            examples[key] = text[:140]
+    out_rows = []
+    for key, count in sorted(aggregate.items(), key=lambda item: -item[1]):
+        out_rows.append(list(key[:8]) + [count, key[8], key[9], key[10], key[11], examples.get(key, "")])
+    platforms = {"抖音":1.25,"小红书":1.15,"微博":1.1,"懂车帝":1.2,"汽车之家":1.15,"易车":1.1,"微信":1.05,"B站":1.1,"微信视频号":1.08,"今日头条":1.05,"其他":0.95}
+    return {
+        "datasetVersion": "raw_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:48],
+        "sourceNote": f"已从《{filename}》导入原始声量数据，识别车型：{'、'.join(models)}；已按标签聚合 {len(out_rows)} 组。",
+        "config": {"project": f"{own_model}认知诊断｜原始声量导入", "brand": own_model, "model": own_model, "competitor": " / ".join([m for m in models if m != own_model]), "targetIdentity": "目标核心人群", "budget": 800, "priorityThreshold": 60, "riskThreshold": 500},
+        "platforms": platforms,
+        "rows": out_rows,
+        "models": models,
+        "sourceRowCount": len(source_rows),
+        "aggregatedRowCount": len(out_rows),
+        "replace": replace
+    }
+
+def build_dataset_from_any_file(data, filename):
+    lower = (filename or "").lower()
+    if lower.endswith(".xlsx"):
+        try:
+            return build_dataset_from_workbook(data, filename)
+        except Exception:
+            return build_dataset_from_consulting_rows(generic_rows_from_file(data, filename), filename, replace=True)
+    if lower.endswith(".csv"):
+        return build_dataset_from_consulting_rows(generic_rows_from_file(data, filename), filename, replace=False)
+    raise ValueError("当前声量导入支持 .csv 和 .xlsx 文件。")
 
 def build_video_dataset_from_workbook(data, filename):
     sheets = read_xlsx_cells(data)
@@ -4731,7 +5052,6 @@ def blogger_skill_model_distill(profile, samples):
     } for s in samples[:12]]
     errors = {}
     qwen_result = {}
-    deepseek_review = ""
     try:
         qwen_result = parse_json_object(call_qwen([
             {"role": "system", "content": (
@@ -4758,25 +5078,12 @@ def blogger_skill_model_distill(profile, samples):
         for key in ["comparison_logic", "evidence_preference", "reusable_agent_instruction", "script_template", "report_template"]:
             if qwen_result.get(key):
                 profile[key] = str(qwen_result[key])
-    try:
-        deepseek_review = call_deepseek([
-            {"role": "system", "content": (
-                "你是MMN策略推理与质检模型。请对博主能力蒸馏结果做质检，检查是否存在："
-                "原文搬运、过度模仿个人身份、证据不足、工程归因跳跃、营销表达风险。"
-                "输出不超过220字，必须给出可执行修正建议。"
-            )},
-            {"role": "user", "content": json.dumps({"distilled_profile": profile, "sample_count": len(samples)}, ensure_ascii=False)}
-        ], temperature=.15, profile="fast", timeout=90, max_tokens=500)
-    except Exception as exc:
-        errors["deepseek"] = str(exc)
     profile["professional_background"] = (
-        f"{profile.get('professional_background','')} MMN模型链路：主控蒸馏"
-        f"{'已完成' if qwen_result else '未完成'}，策略质检{'已完成' if deepseek_review else '未完成'}。"
+        f"{profile.get('professional_background','')} MMN模型链路：快速模型完成达人能力蒸馏"
+        f"{'，已补充结构化能力字段' if qwen_result else '，本次使用本地规则结构化'}；深度质检在策略生成阶段按需后台触发。"
     ).strip()
-    if deepseek_review:
-        profile["risk_expression_patterns"] = list(dict.fromkeys([*profile.get("risk_expression_patterns", []), deepseek_review]))
     profile["updated_at"] = now()
-    profile["model_trace"] = {"qwen": bool(qwen_result), "deepseek": bool(deepseek_review), "errors": errors}
+    profile["model_trace"] = {"fast_model": bool(qwen_result), "critic": "deferred", "errors": errors}
     return attach_blogger_assets(profile, samples)
 
 def save_blogger_skill_items(sources, edition="china"):
@@ -5140,7 +5447,7 @@ def content_capability_tags(source):
     })
     tasks = ["达人brief", "短视频脚本", "账号孵化方案"]
     if "竞品对比" in scene or re.search(r"攻防|反驳|竞品", text):
-        tasks.append("竞品攻防话术")
+        tasks.append("竞品攻防表达")
     if re.search(r"策略|报告|客户|结论", text):
         tasks.append("营销策略输出")
     confidence = "高可信" if source.get("source_url", "").startswith("http") and len(source.get("raw_text", "")) > 80 else "中可信"
@@ -5765,7 +6072,7 @@ def content_capability_creator_assets(chunks):
                 "客户达人brief",
                 "短视频脚本生成",
                 "咨询业务风格博主检索",
-                "竞品攻防话术" if "竞品对比" in scenes else "内容选题规划"
+                "竞品攻防表达" if "竞品对比" in scenes else "内容选题规划"
             ],
             "models": models,
             "tech_tags": tech,
@@ -5822,7 +6129,7 @@ def content_capability_payload(edition="china", q="", tags=None, imported=0, res
         "body": x.get("chunk_text") or "",
         "keywords": [x.get("account_name"), x.get("platform"), *(x.get("flat_tags") or [])],
         "tags": x.get("flat_tags") or [],
-        "targets": ["策略报告", "达人brief", "短视频脚本", "账号孵化方案", "竞品话术", "RAG知识库管理"],
+        "targets": ["策略报告", "达人brief", "短视频脚本", "账号孵化方案", "竞品传播口径", "RAG知识库管理"],
         "source": "content_capability_kb",
         "metadata": {"account": x.get("account_name"), "platform": x.get("platform"), "source_url": x.get("source_url")}
     } for x in chunks]
@@ -6038,7 +6345,7 @@ def make_strategy_pptx(payload):
     # 2 Executive answer
     s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Executive answer", f"{model} 不是缺曝光，而是缺一个可被复述的购买理由", "把数据诊断翻译成管理层可决策的传播主线")
     textbox(s, .78, 2.28, 11.75, .72, core_sentence, 22, ink, True)
-    bullet_card(s, .78, 3.35, 3.75, 2.55, "先修复", [f"围绕“{risk_label}”先给证据", "第三方实测优先于口号", "销售FAQ同步承接询价"], red)
+    bullet_card(s, .78, 3.35, 3.75, 2.55, "先修复", [f"围绕“{risk_label}”先给证据", "第三方实测优先于口号", "品牌FAQ同步承接询价"], red)
     bullet_card(s, 4.82, 3.35, 3.75, 2.55, "再放大", [f"把“{top_label}”做成内容母题", "车主证词强化可信度", "场景化表达降低理解成本"], green)
     bullet_card(s, 8.86, 3.35, 3.75, 2.55, "后转化", ["抖音做疑虑验证", "小红书做决策清单", "达人脚本沉淀为资产"], blue)
     footer(s, "决策驾驶舱识别优先标签 + 声量平台校准 + 垂媒竞品关系复核 -> 形成一条主策略")
@@ -6105,10 +6412,10 @@ def make_strategy_pptx(payload):
     for i, (t, bs, c) in enumerate([
         ("家庭用车账本", ["老人小孩乘坐", "二排/后备箱/储物", "真实花费"], green),
         ("长途与补能", ["路线任务", "补能时间", "舒适边界"], amber),
-        ("避坑问答", ["价格/信任/能耗疑虑", "销售FAQ", "车主评论补证"], red)
+        ("避坑问答", ["价格/信任/能耗疑虑", "品牌FAQ", "车主评论补证"], red)
     ]):
         bullet_card(s, .8+i*4.08, 2.35, 3.65, 3.18, t, bs, c)
-    footer(s, "小红书内容 = 决策清单 -> 收藏传播 -> 销售承接")
+    footer(s, "小红书内容 = 决策清单 -> 收藏传播 -> 线索承接")
 
     # 10 Creators
     s = prs.slides.add_slide(prs.slide_layouts[6]); slide_bg(s); header(s, "Creator assets", "达人不是投放清单，而是证据生产系统", "把达人能力沉淀成可复用脚本资产")
@@ -6137,7 +6444,7 @@ def make_strategy_pptx(payload):
     rect(s, 8.75, 5.08, 3.8, 1.12, RGBColor(245, 248, 246), RGBColor(198, 219, 209))
     textbox(s, 9.0, 5.32, 3.25, .24, "车型图双模态复核规则", 11, ink, True)
     textbox(s, 9.0, 5.68, 3.25, .28, clean(visual_review.get("rule") or "封面车型图必须由MMN视觉识别与策略主控双重复核。", 90), 8, muted)
-    footer(s, "策略动作 -> 内容产出 -> 平台反馈 -> 销售线索 -> 回写MMN知识库")
+    footer(s, "策略动作 -> 内容产出 -> 平台反馈 -> 意向线索 -> 回写MMN知识库")
 
     out = BytesIO()
     prs.save(out)
@@ -6454,6 +6761,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return
             self.send_json({"ok": True, "agentRun": payload})
             return
+        if parsed.path == "/api/ai/router-review":
+            q = parse_qs(parsed.query)
+            decision_id = q.get("id", [""])[0]
+            if not decision_id:
+                self.send_json({"ok": False, "error": "缺少路由决策ID"}, 400)
+                return
+            payload = router_decision_payload(decision_id)
+            if not payload:
+                self.send_json({"ok": False, "error": "未找到该路由结果"}, 404)
+                return
+            with ROUTER_REVIEW_LOCK:
+                task = ROUTER_REVIEW_TASKS.get(decision_id, {})
+            self.send_json({"ok": True, "decision": payload, "reviewTask": task})
+            return
         super().do_GET()
 
     def do_DELETE(self):
@@ -6548,6 +6869,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/ai/model-identities",
                 "/api/ai/model-judgment",
                 "/api/ai/router-feedback",
+                "/api/ai/router-review",
                 "/api/agents/run",
                 "/api/content-capability-kb/distill-account",
                 "/api/content-capability-kb/collect-public",
@@ -6727,6 +7049,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/import-data-file":
+            length = int(self.headers.get("Content-Length", "0"))
+            filename = parse_qs(parsed.query).get("filename", ["原始声量数据.csv"])[0]
+            try:
+                data = self.rfile.read(length)
+                result = build_dataset_from_any_file(data, filename)
+                self.send_json({"ok": True, "dataset": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/import-rag-file":
             length = int(self.headers.get("Content-Length", "0"))
             filename = parse_qs(parsed.query).get("filename", ["rag_material"])[0]
@@ -6868,7 +7200,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 except Exception as exc:
                     errors["qwen"] = str(exc)
                     draft = "\n".join([
-                        f"核心话术：围绕{brief or scene}，用{profile.get('brand','品牌')}{person}公开表达中常见的用户视角、事实证据和行动承诺来组织内容。",
+                        f"核心表达：围绕{brief or scene}，用{profile.get('brand','品牌')}{person}公开表达中常见的用户视角、事实证据和行动承诺来组织内容。",
                         "表达拆解：先讲用户问题，再讲产品/技术逻辑，最后给出后续动作。",
                         "可发布版本：这件事我们先回到用户真实场景里看。用户关心的不是概念，而是每天用起来是否更安心、更高效、更有确定性。",
                         "注意事项：当前为本地规则兜底生成，正式发布前需要人工复核事实依据。"
@@ -6885,14 +7217,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "role": profile.get("role") or "",
                     "published_at": shanghai_now().date().isoformat(),
                     "platform": "MMN高管蒸馏",
-                    "source_name": "MMN高管IP话术生成",
+                    "source_name": "MMN高管IP表达生成",
                     "source_url": f"local://founder-generated/{quote(person)}/{generated_hash}",
                     "event_type": scene,
-                    "original_summary": brief or f"{person}{scene}高管IP话术生成",
+                    "original_summary": brief or f"{person}{scene}高管IP表达生成",
                     "core_viewpoint": f"围绕“{brief or scene}”生成可复用高管表达资产。",
                     "language_style_tags": ["MMN蒸馏", scene, *profile.get("styleTags", [])[:4]],
                     "distillable_talk": draft,
-                    "prompt_template": f"请参考{profile.get('brand','')}{person}已归档公开表达风格，面向{scene}输出高管IP话术。",
+                    "prompt_template": f"请参考{profile.get('brand','')}{person}已归档公开表达风格，面向{scene}输出高管IP表达。",
                     "risk_note": review,
                     "model_trace": {"source": "mmn-founder-talk", "errors": errors},
                     "raw_payload_hash": generated_hash
@@ -6981,12 +7313,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "modelLabel": routed["modelLabel"],
                     "route": routed["route"],
                     "conflict": routed["conflict"],
+                    "reviewStatus": routed.get("reviewStatus"),
+                    "asyncReview": routed.get("asyncReview"),
+                    "cacheTtlSeconds": routed.get("cacheTtlSeconds"),
+                    "cached": routed.get("cached", False),
                     "sourceTrace": routed["sourceTrace"],
                     "references": references[:8],
                     "errors": routed["errors"],
                     "qwen": qwen_config(mode),
                     "deepseek": deepseek_config(mode)
                 })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/ai/router-review":
+            try:
+                body = self.read_json()
+                decision_id = str(body.get("id") or "").strip()
+                if not decision_id:
+                    raise ValueError("缺少路由决策ID。")
+                with db() as conn:
+                    row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+                if not row:
+                    raise ValueError("未找到该路由结果。")
+                current = rowdict(row)
+                project = json.loads(current.get("project_json") or "{}")
+                references = json.loads(current.get("references_json") or "[]")
+                task_type = current.get("task_type") or "strategy_reasoning"
+                mode = "deep" if body.get("mode") == "deep" or task_type == "strategy_reasoning" else "fast"
+                route = route_for_task(task_type, mode)
+                reviewer = current.get("reviewer_provider") if current.get("reviewer_provider") in {"qwen", "deepseek"} else route.get("reviewer")
+                queued = enqueue_router_review(decision_id, current.get("question") or "", project, references, task_type, route, mode, reviewer, force=True)
+                if not queued:
+                    raise ValueError("当前任务没有可用的后台复核模型。")
+                self.send_json({"ok": True, "id": decision_id, "reviewStatus": "queued", "decision": router_decision_payload(decision_id)})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -7133,26 +7493,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 qwen_text = deepseek_text = openai_text = None
                 errors = {}
                 rules = rule_strategy(context)
-                if qwen_config()["configured"]:
+                drill_type = str(context.get("drillType") or "")
+                primary_provider = "deepseek" if drill_type in {"strategy_ppt_brief", "cognition_strategy", "content_asset_strategy"} else "qwen"
+                if primary_provider == "deepseek" and deepseek_config("deep")["configured"]:
                     try:
-                        qwen_text = call_qwen(llm_strategy_prompt(context, "千问"))
-                    except Exception as exc:
-                        errors["qwen"] = str(exc)
-                if deepseek_config()["configured"]:
-                    try:
-                        deepseek_text = call_deepseek(llm_strategy_prompt(context, "DeepSeek策略质检"), temperature=.2)
+                        deepseek_text = call_deepseek(llm_strategy_prompt(context, "MMN策略主控"), temperature=.22, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT)
                     except Exception as exc:
                         errors["deepseek"] = str(exc)
-                if openai_config()["configured"]:
+                if not deepseek_text and qwen_config("fast")["configured"]:
                     try:
-                        openai_text = call_openai(llm_strategy_prompt(context, "ChatGPT/OpenAI"))
+                        qwen_text = call_qwen(llm_strategy_prompt(context, "MMN快速主控"), temperature=.25, profile="fast", timeout=MMN_FAST_MODEL_TIMEOUT)
                     except Exception as exc:
-                        errors["openai"] = str(exc)
+                        errors["qwen"] = str(exc)
                 fused = fuse_strategy(context, qwen_text=qwen_text, deepseek_text=deepseek_text, openai_text=openai_text, rule_text=rules)
                 self.send_json({
                     "ok": True,
                     "text": fused,
                     "parts": {"qwen": qwen_text, "deepseek": deepseek_text, "openai": openai_text, "rules": rules},
+                    "reviewStatus": "critic_deferred",
+                    "modelLabel": "MMN分层推理策略",
                     "errors": errors,
                     "qwen": qwen_config(),
                     "deepseek": deepseek_config(),
@@ -7168,7 +7527,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         filename = parse_qs(parsed.query).get("filename", ["导入数据.xlsx"])[0]
         try:
             data = self.rfile.read(length)
-            result = build_dataset_from_workbook(data, filename)
+            result = build_dataset_from_any_file(data, filename)
             self.send_json({"ok": True, "dataset": result})
         except Exception as exc:
             self.send_json({"ok": False, "error": str(exc)}, 400)

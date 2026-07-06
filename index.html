@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-content-crawl-5">
+  <link rel="stylesheet" href="style.css?v=beta-1.01-ui-focus-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -38,20 +38,32 @@
         <button type="button" data-edition="global">出海版</button>
       </div>
     </div>
-    <nav id="nav">
-      <button class="active" data-page="dashboard">决策驾驶舱</button>
-      <button data-page="data">声量数据中心</button>
-      <button data-page="cognition">认知赛道诊断</button>
-      <button data-page="vertical">垂媒竞争格局</button>
-      <button data-page="videos">内容资产中心</button>
-      <button data-page="contentstrategy">MMN策略输出</button>
-      <button data-page="actions">行动与预算</button>
-      <button data-page="knowhow">打法知识库</button>
-      <button data-page="strategykb">RAG知识库管理</button>
-      <button data-page="learning">人工结论学习</button>
-      <button data-page="architecture">版本架构</button>
-      <button data-page="workspace">空间与权限</button>
-      <button data-page="config">项目与权重</button>
+    <nav id="nav" aria-label="MMN主导航">
+      <div class="nav-section primary-nav">
+        <span>核心工作流</span>
+        <button class="active" data-page="dashboard">决策驾驶舱</button>
+        <button data-page="contentstrategy">MMN策略输出</button>
+        <button data-page="strategykb">RAG策略台</button>
+        <button data-page="videos">内容资产</button>
+      </div>
+      <details class="nav-section" open>
+        <summary>诊断下钻</summary>
+        <button data-page="data">声量数据</button>
+        <button data-page="cognition">认知诊断</button>
+        <button data-page="vertical">竞品格局</button>
+        <button data-page="actions">行动预算</button>
+      </details>
+      <details class="nav-section">
+        <summary>资产沉淀</summary>
+        <button data-page="knowhow">打法知识库</button>
+        <button data-page="learning">人工结论</button>
+      </details>
+      <details class="nav-section">
+        <summary>系统设置</summary>
+        <button data-page="workspace">空间权限</button>
+        <button data-page="config">项目权重</button>
+        <button data-page="architecture">版本架构</button>
+      </details>
     </nav>
     <div class="side-note">
       <span class="pulse"></span>
@@ -92,20 +104,12 @@
           <button class="ghost" data-page-jump="data">查看数据表</button>
         </div>
       </div>
-      <article class="panel model-judgment-panel">
-        <div class="panel-title">
-          <div><span>车型判断工作台</span><h2>想到一台车，就把判断交给MMN沉淀</h2></div>
-          <em>自动识别品牌 / 车型 / 观点 / 下一步动作</em>
-        </div>
-        <form id="model-judgment-form" class="model-judgment-form">
-          <textarea name="judgment" rows="3" placeholder="例如：奥迪E5现在最大问题不是产品力，而是用户还没理解它和上汽奥迪、传统奥迪之间的关系，上市传播要先解决身份认知。"></textarea>
-          <div class="model-judgment-actions">
-            <span>输入你的市场、营销、销售判断，系统会归因拆解并写入车型资产。</span>
-            <button type="submit" class="primary" id="model-judgment-submit">交给MMN学习</button>
-          </div>
-        </form>
-        <div id="model-judgment-result" class="model-judgment-result"></div>
-      </article>
+      <div class="dashboard-flow">
+        <div><span>01</span><b>导入数据</b><small>声量、竞品、内容资产</small></div>
+        <div><span>02</span><b>看诊断</b><small>资产、负债、机会排序</small></div>
+        <div><span>03</span><b>看证据</b><small>RAG依据与人工结论</small></div>
+        <div><span>04</span><b>出策略</b><small>初版输出与后台复核</small></div>
+      </div>
       <div class="kpis">
         <article class="kpi"><span>口碑健康 NSR</span><strong id="kpi-nsr">—</strong><small id="kpi-nsr-note"></small></article>
         <article class="kpi"><span>目标人群穿透 IPS</span><strong id="kpi-ips">—</strong><small>目标身份有效评论占比</small></article>
@@ -148,13 +152,27 @@
         <div class="map-summary" id="map-summary"></div>
         <div class="table-wrap mini"><table id="opportunity-table"></table></div>
       </article>
+      <article class="panel model-judgment-panel compact-judgment">
+        <div class="panel-title">
+          <div><span>车型判断沉淀</span><h2>把临时判断写回MMN策略资产</h2></div>
+          <em>自动拆解品牌 / 车型 / 归因 / 下一步动作</em>
+        </div>
+        <form id="model-judgment-form" class="model-judgment-form">
+          <textarea name="judgment" rows="3" placeholder="例如：奥迪E5现在最大问题不是产品力，而是用户还没理解它和上汽奥迪、传统奥迪之间的关系，上市传播要先解决身份认知。"></textarea>
+          <div class="model-judgment-actions">
+            <span>适合记录会议判断、客户反馈和策略假设。</span>
+            <button type="submit" class="primary" id="model-judgment-submit">沉淀为资产</button>
+          </div>
+        </form>
+        <div id="model-judgment-result" class="model-judgment-result"></div>
+      </article>
     </section>
 
     <section class="page" id="data">
       <div class="toolbar">
         <div>
           <button class="primary" id="add-row">新增数据</button>
-          <button type="button" class="primary file-button" data-file-target="xlsx-file">导入数据</button><input class="file-input-hidden" id="xlsx-file" type="file" accept=".xlsx">
+          <button type="button" class="primary file-button" data-file-target="xlsx-file">导入数据</button><input class="file-input-hidden" id="xlsx-file" type="file" accept=".xlsx,.csv">
           <button type="button" class="ghost file-button" data-file-target="csv-file">导入 CSV</button><input class="file-input-hidden" id="csv-file" type="file" accept=".csv">
           <button class="ghost" id="download-template">下载 CSV 模板</button>
         </div>
@@ -486,13 +504,13 @@
     <section class="page" id="founder">
       <div class="section-intro">
         <div><p class="eyebrow">FOUNDER DISTILLATION</p><h2>创始人蒸馏</h2></div>
-        <button class="primary" id="run-founder-distill">MMN蒸馏话术</button>
+        <button class="primary" id="run-founder-distill">MMN蒸馏表达</button>
       </div>
       <div class="founder-hero panel">
         <div>
           <span>公开表达归档 / 高管IP Prompt / 双模型质检</span>
-          <h2>把新势力创始人和高管的公开表达，沉淀为可调用的话术资产</h2>
-          <p>每周归档公开互联网环境中的发言内容，按品牌、人物、平台、时间和话题类型分类，蒸馏人物语言风格、品牌叙事框架、技术表达方式、用户沟通方式和舆论攻防话术。</p>
+          <h2>把新势力创始人和高管的公开表达，沉淀为可调用的表达资产</h2>
+          <p>每周归档公开互联网环境中的发言内容，按品牌、人物、平台、时间和话题类型分类，蒸馏人物语言风格、品牌叙事框架、技术表达方式、用户沟通方式和舆论攻防表达。</p>
         </div>
         <div class="founder-status">
           <b>每周巡检</b>
@@ -513,17 +531,17 @@
           <div id="founder-archive-list" class="founder-archive-list"></div>
         </article>
         <article class="panel">
-          <div class="panel-title"><div><span>人物风格蒸馏</span><h2>语言风格、叙事框架与攻防话术</h2></div><em id="founder-distill-source">选择人物后生成</em></div>
+          <div class="panel-title"><div><span>人物风格蒸馏</span><h2>语言风格、叙事框架与攻防表达</h2></div><em id="founder-distill-source">选择人物后生成</em></div>
           <div id="founder-profile" class="founder-profile"></div>
         </article>
       </div>
       <article class="panel founder-generator">
-        <div class="panel-title"><div><span>高管 IP 话术生成</span><h2>发布会 / 微博 / 短视频口播 / 内部汇报 / 危机回应</h2></div><em>MMN交叉质检</em></div>
+        <div class="panel-title"><div><span>高管 IP 表达生成</span><h2>发布会 / 微博 / 短视频口播 / 内部汇报 / 危机回应</h2></div><em>MMN交叉质检</em></div>
         <div class="founder-generate-grid">
           <div class="field"><label>选择人物</label><select id="founder-speaker"></select></div>
           <div class="field"><label>输出场景</label><select id="founder-scene"><option>发布会</option><option>微博</option><option>短视频口播</option><option>内部汇报</option><option>危机回应</option></select></div>
           <div class="field"><label>话题方向</label><input id="founder-brief" placeholder="例如：解释智驾路线、回应价格争议、发布新车技术叙事"></div>
-          <button class="primary" id="founder-generate">生成高管IP话术</button>
+          <button class="primary" id="founder-generate">生成高管IP表达</button>
         </div>
         <div id="founder-output" class="founder-output"></div>
       </article>
@@ -637,11 +655,11 @@
         <div class="header-actions"><button class="primary" id="import-rag-seed">导入MMN训练包v1</button><button class="ghost" id="clear-strategy-kb">清空策略知识库</button></div>
       </div>
       <article class="panel">
-        <div class="panel-title"><div><span>MMN策略对话台</span><h2>输入一个问题，交付可执行营销策略</h2></div><em>RAG巡检 → MMN策略模型</em></div>
+        <div class="panel-title"><div><span>MMN策略对话台</span><h2>输入一个问题，交付可执行营销策略</h2></div><em>RAG巡检 → 初版策略 → 后台复核</em></div>
         <div class="rag-console">
           <div class="search"><input id="rag-query" placeholder="例如：小红书自然声量低，价格焦虑高，下一步怎么打？"></div>
           <button class="primary" id="run-rag-search">MMN快速策略</button>
-          <button class="ghost" id="run-rag-deep-strategy">MMN深度策略</button>
+          <button class="ghost" id="run-rag-deep-strategy">深度复核策略</button>
         </div>
         <div class="rag-filters">
           <select id="rag-platform"><option value="">全部平台</option><option>抖音</option><option>小红书</option><option>懂车帝</option><option>汽车之家</option><option>微博</option><option>B站</option></select>
@@ -661,7 +679,7 @@
           <div class="panel-title"><div><span>知识导入</span><h2>粘贴文本或上传RAG材料</h2></div><em>支持 jsonl / csv / md / json / zip</em></div>
           <div class="kb-import">
             <button type="button" class="primary file-button" data-file-target="strategy-kb-file">上传RAG材料</button><input class="file-input-hidden" id="strategy-kb-file" type="file" accept=".txt,.md,.json,.jsonl,.csv,.zip">
-            <textarea id="strategy-kb-input" placeholder="把你和模型、团队或客户关于汽车营销、车型判断、内容打法、客户汇报的话题粘贴到这里。系统会归纳为可复用知识卡。"></textarea>
+            <textarea id="strategy-kb-input" placeholder="把你和模型、团队或客户关于汽车营销、车型判断、内容打法、客户策略汇报的话题粘贴到这里。系统会归纳为可复用知识卡。"></textarea>
             <div class="dialog-actions"><button class="primary" id="import-strategy-kb">归纳并导入知识库</button></div>
           </div>
         </article>
@@ -676,7 +694,7 @@
           <div><b>决策驾驶舱</b><span>补充认知诊断解释和策略判断依据</span></div>
           <div><b>内容资产中心</b><span>补充标题分类、内容打法和平台表达规则</span></div>
           <div><b>垂媒竞争格局</b><span>补充正反向 PK 关系的解读方法</span></div>
-          <div><b>打法知识库 / 报告</b><span>补充建议、证据链、KPI 和客户汇报话术</span></div>
+          <div><b>打法知识库 / 报告</b><span>补充建议、证据链、KPI 和客户策略汇报表达</span></div>
         </div>
       </article>
     </section>
