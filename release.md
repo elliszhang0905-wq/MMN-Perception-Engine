@@ -169,6 +169,7 @@ MMN研发团队
 - 新增页面结构 JSON、预览图、自动校验报告和示例 PPTX 产物。
 - 自动校验覆盖中文溢出、元素重叠、标题层级、图表可读性、品牌配色、页码、目录一致性和 PPTX 页数一致性。
 - 更新研发档案和智能体交接手册。
+- 优化 Dockerfile 与定时任务脚本，移除云端镜像构建对 apt 安装 curl/nodejs 的依赖，改用 Python 标准库完成健康检查和内部定时 POST 调用，降低服务器构建网络风险。
 
 ## 影响范围
 
@@ -185,6 +186,7 @@ MMN研发团队
 - `node --check src/ppt-agent/export_preview.mjs` 通过。
 - `node --check src/ppt-agent/validate_deck.mjs` 通过。
 - `skills/mmn-consulting-pptx/SKILL.md` 通过 skill 校验。
+- `pnpm release:gate` 通过。
 
 ## 发布要求
 
