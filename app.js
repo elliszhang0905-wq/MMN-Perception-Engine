@@ -534,9 +534,21 @@ let session=loadSession(),serverLearnings=[];
 function loadSession(){try{return JSON.parse(localStorage.getItem("mmnCommercialSession"))||null}catch{return null}}
 function saveSession(s){session=s;localStorage.setItem("mmnCommercialSession",JSON.stringify(s));renderAccount()}
 function authHeaders(extra={}){return session?.token?{"Authorization":`Bearer ${session.token}`,...extra}:extra}
+const MMN_PUBLIC_API_ORIGIN="http://121.40.60.90";
+function shouldRetryPublicApi(path,res,raw){
+ return path.startsWith("/api/")&&location.hostname!=="121.40.60.90"&&location.hostname!=="localhost"&&location.hostname!=="127.0.0.1"&&(res.status===404||res.status===403||/<!doctype|<html/i.test(raw||""));
+}
 async function api(path,options={}){
- const res=await fetch(path,{headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})}),...options});
+ const request=target=>fetch(target,{headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})}),...options});
+ let res=await request(path);
  const raw=await res.text();
+ if(shouldRetryPublicApi(path,res,raw)){
+  res=await request(MMN_PUBLIC_API_ORIGIN+path);
+  return parseApiResponse(res,await res.text());
+ }
+ return parseApiResponse(res,raw);
+}
+function parseApiResponse(res,raw){
  let data=null;
  try{data=raw?JSON.parse(raw):{}}catch{
   if(res.status===401||res.status===403)throw new Error("登录状态已失效，请刷新页面后重新登录。");
@@ -958,6 +970,23 @@ async function buildFallbackDashboardTopicPlan(payload,modelText="",modelLabel="
  plan.modelLabel=`${modelLabel} + topic_planning_engine`;
  return plan;
 }
+function localTopicItem(id,topic,stage,goal,priority,competitors){
+ const comp=competitors.length?competitors.join(" / "):"核心竞品";
+ return{id,topic,taxonomy:["媒体角度","单车类",stage,goal],communicationStages:[stage],applicableModels:["全车型"],contentGoals:[goal],userDecisionStages:["兴趣建立","方案比较","下单转化"],creatorTypes:["专业汽车评测达人","家庭场景KOC","车主口碑达人"],recommendedFormats:["短视频","图文长帖","直播切片"],priority,fitReason:`围绕${state.config.model}在${stage}的核心购买理由，把${comp}对比、真实场景和转化疑虑拆成可传播内容。`,conditions:["当前车型与传播目标已明确","需要快速形成选题排期"],exclusions:["缺少车型定位时不建议直接投放","重大舆情期需先做风险复核"]};
+}
+function buildLocalDashboardTopicPlan(payload,reason=""){
+ const summary=payload.project||{},model=summary.model||state.config.model||"当前车型",stage=payload.launchStage||summary.stage||"上市中",goal=payload.communicationGoal||"建立核心购买理由",competitors=payload.competitors||[];
+ const topics=[
+  localTopicItem("local_compare",`产品竞争分析：${model} 对比 ${competitors[0]||"核心竞品"}`,stage,"竞品比较",96,competitors),
+  localTopicItem("local_scene",`${model} 家庭场景真实用车选题`,stage,"场景种草",92,competitors),
+  localTopicItem("local_owner",`${model} 车主口碑与高频疑虑澄清`,stage,"口碑验证",90,competitors),
+  localTopicItem("local_cost",`${model} 用车成本、权益与保值解释`,stage,"转化承接",86,competitors),
+  localTopicItem("local_tech",`${model} 核心技术与智能体验拆解`,stage,"卖点教育",84,competitors),
+  localTopicItem("local_store",`${model} 到店试驾与下订决策内容`,stage,"到店转化",82,competitors)
+ ];
+ const phaseStrategy=`${model}在${stage}先用竞品对比建立搜索入口，再用场景实测和车主口碑补齐信任，最后用权益和试驾内容承接转化。`;
+ return{engine:"local_topic_planning_fallback",taxonomyVersion:"2026-07-09.mmn.local-topic-fallback.v1",inputSummary:{brand:summary.brand||state.config.brand||"",model,launchStage:stage,coreSellingPoints:payload.coreSellingPoints||[],competitors,budgetTier:String(payload.budget||state.config.budget||"预算待定"),targetAudience:payload.targetAudience||state.config.targetIdentity||"目标购车人群",communicationGoal:goal},taxonomy:topics,selectedTopics:topics,phases:[{phase:stage,strategy:phaseStrategy,topics:topics.slice(0,4)}],creatorMatches:topics.slice(0,5).map((x,i)=>({topic:x.topic,primaryCreatorType:x.creatorTypes[i%3],backupCreatorType:x.creatorTypes[(i+1)%3],brief:`用${x.recommendedFormats[0]}讲清${x.topic}；必须出现车型、场景、对比对象和明确购买理由。`})),schedule:topics.slice(0,6).map((x,i)=>({week:`第${i+1}周`,phase:stage,topic:x.topic,format:x.recommendedFormats[i%3],kpi:i<2?"搜索讨论与完播率":"互动咨询与到店线索"})),strategyConclusion:`${phaseStrategy}${reason?` 本次为前端兜底规划，原因：${reason}`:""}`,modelNarrative:"当前入口未稳定命中MMN后端接口，页面先基于车型、阶段、目标、竞品和预算生成可执行选题；接口恢复后仍会优先使用旗舰策略模型结果。",modelLabel:"前端兜底选题规划"};
+}
 async function runDashboardTopicPlanning(){
 	 const model=syncDashboardModelFromControls();
 	 const stage=document.querySelector("#dashboard-topic-stage")?.value||state.config.stage||"上市中";
@@ -986,11 +1015,14 @@ async function runDashboardTopicPlanning(){
   save();
   renderDashboardTopicPlanner();
   toast("MMN深度策略已生成车型传播选题规划");
- }catch(err){
-  dashboardTopicPlanState={loading:false,result:null,error:err.message};
-  const box=document.querySelector("#dashboard-topic-plan");
-  if(box)box.innerHTML=`<p class="empty">MMN深度选题规划生成失败：${escapeHtml(err.message)}</p>`;
-  toast(`选题规划生成失败：${err.message}`);
+	 }catch(err){
+  const report=reportPayload();
+  const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+  const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
+  const fallback=buildLocalDashboardTopicPlan(dashboardTopicPlanningPayload({model,stage,goal,report,competitors,coreSellingPoints}),err.message);
+  dashboardTopicPlanState={loading:false,result:fallback,error:""};
+  renderDashboardTopicPlanner();
+  toast("接口暂未命中，已先生成本地兜底选题规划");
  }
 }
 function renderModelJudgmentWorkbench(){
