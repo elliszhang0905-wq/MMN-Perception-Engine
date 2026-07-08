@@ -534,7 +534,17 @@ let session=loadSession(),serverLearnings=[];
 function loadSession(){try{return JSON.parse(localStorage.getItem("mmnCommercialSession"))||null}catch{return null}}
 function saveSession(s){session=s;localStorage.setItem("mmnCommercialSession",JSON.stringify(s));renderAccount()}
 function authHeaders(extra={}){return session?.token?{"Authorization":`Bearer ${session.token}`,...extra}:extra}
-async function api(path,options={}){const res=await fetch(path,{headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})}),...options});const data=await res.json();if(!data.ok)throw new Error(data.error||"请求失败");return data}
+async function api(path,options={}){
+ const res=await fetch(path,{headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})}),...options});
+ const raw=await res.text();
+ let data=null;
+ try{data=raw?JSON.parse(raw):{}}catch{
+  if(res.status===401||res.status===403)throw new Error("登录状态已失效，请刷新页面后重新登录。");
+  throw new Error("服务器返回了页面内容，不是接口数据。请刷新页面后重试；如果仍失败，说明当前入口没有命中MMN接口。");
+ }
+ if(!res.ok||!data.ok)throw new Error(data.error||`请求失败：HTTP ${res.status}`);
+ return data;
+}
 async function initCloudLoginGate(){
  const screen=document.querySelector("#cloud-login-screen"),form=document.querySelector("#cloud-login-form"),msg=document.querySelector("#cloud-login-message");
  if(!screen||!form)return true;
