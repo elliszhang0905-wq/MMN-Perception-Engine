@@ -1,0 +1,404 @@
+{
+  "pptx": "/Users/ellis/Documents/MMN汽车营销引擎/china-auto-marketing-engine/output/ppt-agent/mmn-strategy-deck.pptx",
+  "slideCount": 5,
+  "slides": [
+    {
+      "pageNumber": 1,
+      "shapeCount": 7,
+      "textItems": [
+        {
+          "name": "Text 1",
+          "text": "MMN多模态策略输出 | Strategy Brief",
+          "left": 658368,
+          "top": 566928,
+          "width": 4754880,
+          "height": 228600
+        },
+        {
+          "name": "Text 2",
+          "text": "MMN汽车营销策略报告",
+          "left": 658368,
+          "top": 2029968,
+          "width": 8046720,
+          "height": 960120
+        },
+        {
+          "name": "Text 3",
+          "text": "从品牌声量、用户认知到内容 Brief 的策略输出链路",
+          "left": 676656,
+          "top": 3154680,
+          "width": 7680960,
+          "height": 493776
+        },
+        {
+          "name": "Text 6",
+          "text": "1/5",
+          "left": 11094415,
+          "top": 6473952,
+          "width": 594360,
+          "height": 164592
+        }
+      ]
+    },
+    {
+      "pageNumber": 2,
+      "shapeCount": 13,
+      "textItems": [
+        {
+          "name": "Text 0",
+          "text": "目录",
+          "left": 502920,
+          "top": 201168,
+          "width": 2377440,
+          "height": 201168
+        },
+        {
+          "name": "Text 1",
+          "text": "目录",
+          "left": 502920,
+          "top": 384048,
+          "width": 9326880,
+          "height": 530352
+        },
+        {
+          "name": "Text 2",
+          "text": "01",
+          "left": 914400,
+          "top": 1481328,
+          "width": 438912,
+          "height": 274320
+        },
+        {
+          "name": "Text 3",
+          "text": "一、核心判断",
+          "left": 1481328,
+          "top": 1444752,
+          "width": 7132320,
+          "height": 365760
+        },
+        {
+          "name": "Text 4",
+          "text": "exec-summary",
+          "left": 8961120,
+          "top": 1481328,
+          "width": 1234440,
+          "height": 219456
+        },
+        {
+          "name": "Text 5",
+          "text": "02",
+          "left": 914400,
+          "top": 2441448,
+          "width": 438912,
+          "height": 274320
+        },
+        {
+          "name": "Text 6",
+          "text": "二、传播机会拆解",
+          "left": 1481328,
+          "top": 2404872,
+          "width": 7132320,
+          "height": 365760
+        },
+        {
+          "name": "Text 7",
+          "text": "growth-waterfall",
+          "left": 8961120,
+          "top": 2441448,
+          "width": 1234440,
+          "height": 219456
+        },
+        {
+          "name": "Text 8",
+          "text": "03",
+          "left": 914400,
+          "top": 3401568,
+          "width": 438912,
+          "height": 274320
+        },
+        {
+          "name": "Text 9",
+          "text": "三、内容行动路线",
+          "left": 1481328,
+          "top": 3364992,
+          "width": 7132320,
+          "height": 365760
+        },
+        {
+          "name": "Text 10",
+          "text": "roadmap",
+          "left": 8961120,
+          "top": 3401568,
+          "width": 1234440,
+          "height": 219456
+        },
+        {
+          "name": "Text 12",
+          "text": "2/5",
+          "left": 11094415,
+          "top": 6473952,
+          "width": 594360,
+          "height": 164592
+        }
+      ]
+    },
+    {
+      "pageNumber": 3,
+      "shapeCount": 18,
+      "textItems": [
+        {
+          "name": "Text 0",
+          "text": "核心判断",
+          "left": 502920,
+          "top": 201168,
+          "width": 2377440,
+          "height": 201168
+        },
+        {
+          "name": "Text 1",
+          "text": "核心判断：品牌传播的约束正在从声量转向认知效率",
+          "left": 502920,
+          "top": 384048,
+          "width": 9326880,
+          "height": 530352
+        },
+        {
+          "name": "Text 3",
+          "text": "未来 90 天应优先管理品牌心智锚点、内容证据强度和达人扩散效率。",
+          "left": 914400,
+          "top": 1408176,
+          "width": 10149840,
+          "height": 310896
+        },
+        {
+          "name": "Text 5",
+          "text": "认知空位",
+          "left": 914400,
+          "top": 2816352,
+          "width": 2423160,
+          "height": 201168
+        },
+        {
+          "name": "Text 6",
+          "text": "3 个",
+          "left": 914400,
+          "top": 3246120,
+          "width": 2194560,
+          "height": 502920
+        },
+        {
+          "name": "Text 7",
+          "text": "用户讨论中仍存在可抢占的核心心智标签",
+          "left": 914400,
+          "top": 3986784,
+          "width": 2651760,
+          "height": 384048
+        },
+        {
+          "name": "Text 9",
+          "text": "内容证据",
+          "left": 4617720,
+          "top": 2816352,
+          "width": 2423160,
+          "height": 201168
+        },
+        {
+          "name": "Text 10",
+          "text": "62%",
+          "left": 4617720,
+          "top": 3246120,
+          "width": 2194560,
+          "height": 502920
+        },
+        {
+          "name": "Text 11",
+          "text": "高互动内容更多来自真实场景与对比证据",
+          "left": 4617720,
+          "top": 3986784,
+          "width": 2651760,
+          "height": 384048
+        },
+        {
+          "name": "Text 13",
+          "text": "达人扩散",
+          "left": 8321040,
+          "top": 2816352,
+          "width": 2423160,
+          "height": 201168
+        },
+        {
+          "name": "Text 14",
+          "text": "2.1x",
+          "left": 8321040,
+          "top": 3246120,
+          "width": 2194560,
+          "height": 502920
+        },
+        {
+          "name": "Text 15",
+          "text": "垂类达人复用 Brief 后互动效率更高",
+          "left": 8321040,
+          "top": 3986784,
+          "width": 2651760,
+          "height": 384048
+        },
+        {
+          "name": "Text 17",
+          "text": "3/5",
+          "left": 11094415,
+          "top": 6473952,
+          "width": 594360,
+          "height": 164592
+        }
+      ]
+    },
+    {
+      "pageNumber": 4,
+      "shapeCount": 7,
+      "textItems": [
+        {
+          "name": "Text 0",
+          "text": "传播机会",
+          "left": 502920,
+          "top": 201168,
+          "width": 2377440,
+          "height": 201168
+        },
+        {
+          "name": "Text 1",
+          "text": "传播机会拆解：三类策略动作贡献主要认知增量",
+          "left": 502920,
+          "top": 384048,
+          "width": 9326880,
+          "height": 530352
+        },
+        {
+          "name": "Text 2",
+          "text": "先统一品牌心智锚点，再把卖点转成可验证的内容证据。",
+          "left": 8275320,
+          "top": 1417320,
+          "width": 2743200,
+          "height": 658368
+        },
+        {
+          "name": "Text 3",
+          "text": "达人 Brief 应围绕平台语境、内容场景和复盘指标形成闭环。",
+          "left": 8275320,
+          "top": 2468880,
+          "width": 2743200,
+          "height": 658368
+        },
+        {
+          "name": "Text 5",
+          "text": "4/5",
+          "left": 11094415,
+          "top": 6473952,
+          "width": 594360,
+          "height": 164592
+        }
+      ]
+    },
+    {
+      "pageNumber": 5,
+      "shapeCount": 16,
+      "textItems": [
+        {
+          "name": "Text 0",
+          "text": "行动路线",
+          "left": 502920,
+          "top": 201168,
+          "width": 2377440,
+          "height": 201168
+        },
+        {
+          "name": "Text 1",
+          "text": "90 天内容行动路线：先固化策略口径，再规模化内容供给",
+          "left": 502920,
+          "top": 384048,
+          "width": 9326880,
+          "height": 530352
+        },
+        {
+          "name": "Text 3",
+          "text": "0-30 天",
+          "left": 914400,
+          "top": 1719072,
+          "width": 1463040,
+          "height": 219456
+        },
+        {
+          "name": "Text 4",
+          "text": "统一口径",
+          "left": 914400,
+          "top": 2139696,
+          "width": 2560320,
+          "height": 347472
+        },
+        {
+          "name": "Text 5",
+          "text": "确定心智锚点\n沉淀证据素材\n建立内容 Brief 模板",
+          "left": 1005840,
+          "top": 2907792,
+          "width": 2487168,
+          "height": 1298448
+        },
+        {
+          "name": "Text 7",
+          "text": "31-60 天",
+          "left": 4645152,
+          "top": 1719072,
+          "width": 1463040,
+          "height": 219456
+        },
+        {
+          "name": "Text 8",
+          "text": "小步验证",
+          "left": 4645152,
+          "top": 2139696,
+          "width": 2560320,
+          "height": 347472
+        },
+        {
+          "name": "Text 9",
+          "text": "试点达人矩阵\nA/B 测试内容角度\n复盘平台互动质量",
+          "left": 4736592,
+          "top": 2907792,
+          "width": 2487168,
+          "height": 1298448
+        },
+        {
+          "name": "Text 11",
+          "text": "61-90 天",
+          "left": 8375904,
+          "top": 1719072,
+          "width": 1463040,
+          "height": 219456
+        },
+        {
+          "name": "Text 12",
+          "text": "规模复制",
+          "left": 8375904,
+          "top": 2139696,
+          "width": 2560320,
+          "height": 347472
+        },
+        {
+          "name": "Text 13",
+          "text": "扩大优质 Brief\n形成品牌表达库\n输出月度策略报告",
+          "left": 8467344,
+          "top": 2907792,
+          "width": 2487168,
+          "height": 1298448
+        },
+        {
+          "name": "Text 15",
+          "text": "5/5",
+          "left": 11094415,
+          "top": 6473952,
+          "width": 594360,
+          "height": 164592
+        }
+      ]
+    }
+  ]
+}

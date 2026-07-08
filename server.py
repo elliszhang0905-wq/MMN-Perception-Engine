@@ -2933,9 +2933,117 @@ def emotion_neg(nsr, label):
     if label in ("价格", "用车成本"): return "焦虑"
     return "怀疑"
 
+def cell_text(value):
+    return str(value or "").strip()
+
+def workbook_label_meta(label):
+    impact = {"安全":5,"质量":5,"辅助/自动驾驶":4.6,"动力与操控":4.4,"价格":4.2,"智能座舱":4.2,"空间":4.0,"舒适性":3.9,"用车成本":3.8,"品牌口碑":4.1,"品牌信任":4.1,"外观":3.4,"内饰":3.3,"用户服务":3.6,"总体口碑":4.0}
+    identity = {"价格":"价格敏感用户","用车成本":"价格敏感用户","空间":"家庭用户","舒适性":"家庭用户","安全":"家庭用户","智能座舱":"科技用户","辅助/自动驾驶":"科技用户","动力与操控":"性能用户","外观":"增量人群","内饰":"增量人群","品牌口碑":"目标核心人群","品牌信任":"目标核心人群","质量":"目标核心人群","用户服务":"目标核心人群","总体口碑":"目标核心人群"}
+    category = {"价格":"价格权益","用车成本":"价格权益","动力与操控":"动力操控","辅助/自动驾驶":"智能化","智能座舱":"智能化","空间":"空间舒适","舒适性":"空间舒适","安全":"安全质量","质量":"安全质量","外观":"造型设计","内饰":"造型设计","品牌口碑":"品牌信任","品牌信任":"品牌信任","用户服务":"服务体验","总体口碑":"整体口碑"}
+    return category.get(label, label), identity.get(label, "目标核心人群"), impact.get(label, 3.5)
+
+def extract_workbook_label(text):
+    m = re.search(r"【([^】]+)】", cell_text(text))
+    return m.group(1).strip() if m else ""
+
+def build_dataset_from_summary_workbook(cells, filename):
+    rows = sheet_rows(cells)
+    volume_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "声量"), None)
+    interaction_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "互动量"), None)
+    if volume_header is None:
+        raise ValueError("未识别到汇总表中的声量区块。")
+
+    platform_cols = []
+    for c, value in enumerate(rows[volume_header][1:], start=1):
+        name = cell_text(value)
+        if name and name not in ("全网",):
+            platform_cols.append((c, "B站" if name.lower() == "bilibili" else name))
+
+    model_rows = []
+    for r in range(volume_header + 1, min(volume_header + 8, len(rows))):
+        model = cell_text(rows[r][0] if rows[r] else "")
+        if infer_model(model) or re.search(r"[A-Za-z]*\d|启境|理想|极氪|智己|小米|蔚来|问界", model):
+            model_rows.append((r, infer_model(model) or model))
+    if not model_rows:
+        raise ValueError("未识别到汇总表中的车型行。")
+
+    sentiment_by_model = {}
+    for row_idx, model in model_rows:
+        sentiment_by_model[model] = {
+            "positive": share_num(rows[row_idx][13] if len(rows[row_idx]) > 13 else 0),
+            "negative": share_num(rows[row_idx][15] if len(rows[row_idx]) > 15 else 0),
+            "nsr": share_num(rows[row_idx][16] if len(rows[row_idx]) > 16 else 0),
+        }
+
+    opinion_cols = {}
+    for row in rows[:15]:
+        for c, value in enumerate(row):
+            text = cell_text(value)
+            if " | " in text and "主要观点" in text:
+                model = infer_model(text.split("|", 1)[0]) or text.split("|", 1)[0].strip()
+                opinion_cols[model] = c
+
+    labels_by_model = {model: [] for _, model in model_rows}
+    section = "positive"
+    for r, row in enumerate(rows):
+        section_text = " ".join(cell_text(v) for v in row if v)
+        if "主要正面观点" in section_text:
+            section = "positive"
+        if "主要负面观点" in section_text:
+            section = "negative"
+        for model, col in opinion_cols.items():
+            if col >= len(row):
+                continue
+            label = extract_workbook_label(row[col])
+            if not label:
+                continue
+            share = share_num(row[col + 1] if col + 1 < len(row) else 0)
+            if share:
+                labels_by_model.setdefault(model, []).append((label, section, share))
+
+    own_model = next((m for _, m in model_rows if "启境" in m), next((m for _, m in model_rows if "智己" in m), model_rows[0][1]))
+    growth = {"抖音":1.35,"小红书":1.20,"微博":1.20,"微信视频号":1.15,"B站":1.10,"汽车垂媒":1.15,"今日头条":1.05,"快手":1.05,"其他":1.0}
+    out_rows = []
+    for row_idx, model in model_rows:
+        labels = labels_by_model.get(model) or [("总体口碑", "positive", 1)]
+        for col, platform in platform_cols:
+            vol = num(rows[row_idx][col] if col < len(rows[row_idx]) else 0)
+            if not vol:
+                continue
+            for label, section, share in labels:
+                count = round(vol * share)
+                if not count:
+                    continue
+                nsr = sentiment_by_model.get(model, {}).get("nsr", 0)
+                category, identity, impact = workbook_label_meta(label)
+                emotion = emotion_pos(nsr) if section == "positive" else emotion_neg(-abs(nsr or 0.3), label)
+                intent = "高意向" if platform in ("抖音", "微博", "汽车垂媒") or label in ("价格", "安全", "质量", "辅助/自动驾驶") else "中意向"
+                competition = 5 if label in ("价格", "动力与操控", "辅助/自动驾驶", "智能座舱") else 4
+                out_rows.append([model, "本品" if model == own_model else "竞品", platform, category, label, emotion, identity, intent, count, impact, growth.get(platform, 1.0), competition])
+
+    if not out_rows:
+        raise ValueError("汇总表已识别，但没有生成可导入的声量标签。")
+    platforms = {"抖音":1.25,"小红书":1.15,"微博":1.1,"懂车帝":1.2,"汽车之家":1.15,"微信":1.05,"B站":1.1,"线下活动":1.3,"垂媒车主口碑":1.25,"汽车垂媒":1.25,"微信视频号":1.08,"今日头条":1.05,"快手":1.05,"其他":0.95}
+    models = [m for _, m in model_rows]
+    return {
+        "datasetVersion": "summary_xlsx_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:32],
+        "sourceNote": f"已从《{filename}》导入产品评价汇总表，识别车型：{'、'.join(models)}；已按声量、情感与主要观点生成 {len(out_rows)} 组诊断数据。",
+        "config": {"project": f"{own_model}认知诊断｜产品评价导入", "brand": own_model, "model": own_model, "competitor": " / ".join([m for m in models if m != own_model]), "targetIdentity": "目标核心人群", "budget": 800, "priorityThreshold": 60, "riskThreshold": 500},
+        "platforms": platforms,
+        "rows": out_rows,
+        "models": models,
+        "sourceRowCount": len(model_rows),
+        "aggregatedRowCount": len(out_rows),
+        "replace": True
+    }
+
 def build_dataset_from_workbook(data, filename):
     sheets = read_xlsx_cells(data)
     cells = sheets.get("数据整理") or next(iter(sheets.values()))
+    try:
+        return build_dataset_from_summary_workbook(cells, filename)
+    except ValueError:
+        pass
     models = [gv(cells, r, 1) for r in range(10, 16) if isinstance(gv(cells, r, 1), str)]
     if not models:
         raise ValueError("未识别到车型列表。请确认 Excel 中包含“数据整理”页和车型行。")

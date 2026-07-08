@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "checkedAt": "2026-07-08T08:30:01.405Z",
+  "rules": [
+    "chinese-overflow",
+    "element-overlap",
+    "title-hierarchy",
+    "chart-readability",
+    "brand-color",
+    "page-number-sequence",
+    "toc-consistency",
+    "pptx-slide-count"
+  ],
+  "issueCount": 0,
+  "issues": []
+}

@@ -1,0 +1,84 @@
+{
+  "meta": {
+    "title": "MMN汽车营销策略报告",
+    "subtitle": "品牌传播与内容机会诊断示例",
+    "author": "MMN PPT Agent",
+    "date": "2026-07-08"
+  },
+  "brand": {
+    "primary": "10263F",
+    "secondary": "D3A64F",
+    "accent": "2B7A78",
+    "danger": "B54747",
+    "neutral": "F5F2EA",
+    "text": "18212B",
+    "muted": "667085",
+    "background": "FFFFFF",
+    "fontFace": "Microsoft YaHei"
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "type": "cover",
+      "section": "开场",
+      "title": "MMN汽车营销策略报告",
+      "subtitle": "从品牌声量、用户认知到内容 Brief 的策略输出链路",
+      "kicker": "MMN多模态策略输出 | Strategy Brief",
+      "pageNumber": 1
+    },
+    {
+      "id": "toc",
+      "type": "toc",
+      "section": "目录",
+      "title": "目录",
+      "items": [
+        { "label": "一、核心判断", "targetSlideId": "exec-summary" },
+        { "label": "二、传播机会拆解", "targetSlideId": "growth-waterfall" },
+        { "label": "三、内容行动路线", "targetSlideId": "roadmap" }
+      ],
+      "pageNumber": 2
+    },
+    {
+      "id": "exec-summary",
+      "type": "summary",
+      "section": "核心判断",
+      "title": "核心判断：品牌传播的约束正在从声量转向认知效率",
+      "insight": "未来 90 天应优先管理品牌心智锚点、内容证据强度和达人扩散效率。",
+      "cards": [
+        { "label": "认知空位", "value": "3 个", "note": "用户讨论中仍存在可抢占的核心心智标签" },
+        { "label": "内容证据", "value": "62%", "note": "高互动内容更多来自真实场景与对比证据" },
+        { "label": "达人扩散", "value": "2.1x", "note": "垂类达人复用 Brief 后互动效率更高" }
+      ],
+      "pageNumber": 3
+    },
+    {
+      "id": "growth-waterfall",
+      "type": "chart",
+      "section": "传播机会",
+      "title": "传播机会拆解：三类策略动作贡献主要认知增量",
+      "chart": {
+        "kind": "bar",
+        "unit": "指数",
+        "categories": ["基准认知", "心智锚点", "证据内容", "达人分发", "目标认知"],
+        "values": [100, 18, 14, 11, 143]
+      },
+      "notes": [
+        "先统一品牌心智锚点，再把卖点转成可验证的内容证据。",
+        "达人 Brief 应围绕平台语境、内容场景和复盘指标形成闭环。"
+      ],
+      "pageNumber": 4
+    },
+    {
+      "id": "roadmap",
+      "type": "roadmap",
+      "section": "行动路线",
+      "title": "90 天内容行动路线：先固化策略口径，再规模化内容供给",
+      "phases": [
+        { "name": "0-30 天", "headline": "统一口径", "items": ["确定心智锚点", "沉淀证据素材", "建立内容 Brief 模板"] },
+        { "name": "31-60 天", "headline": "小步验证", "items": ["试点达人矩阵", "A/B 测试内容角度", "复盘平台互动质量"] },
+        { "name": "61-90 天", "headline": "规模复制", "items": ["扩大优质 Brief", "形成品牌表达库", "输出月度策略报告"] }
+      ],
+      "pageNumber": 5
+    }
+  ]
+}

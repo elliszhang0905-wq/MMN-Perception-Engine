@@ -1,0 +1,822 @@
+{
+  "meta": {
+    "title": "MMN汽车营销策略报告",
+    "subtitle": "品牌传播与内容机会诊断示例",
+    "author": "MMN PPT Agent",
+    "date": "2026-07-08"
+  },
+  "brand": {
+    "primary": "10263F",
+    "secondary": "D3A64F",
+    "accent": "2B7A78",
+    "danger": "B54747",
+    "neutral": "F5F2EA",
+    "text": "18212B",
+    "muted": "667085",
+    "background": "FFFFFF",
+    "fontFace": "Microsoft YaHei"
+  },
+  "slides": [
+    {
+      "id": "cover",
+      "type": "cover",
+      "section": "开场",
+      "title": "MMN汽车营销策略报告",
+      "subtitle": "从品牌声量、用户认知到内容 Brief 的策略输出链路",
+      "kicker": "MMN多模态策略输出 | Strategy Brief",
+      "pageNumber": 1,
+      "elements": [
+        {
+          "id": "cover-gold-bar",
+          "role": "accent",
+          "x": 0,
+          "y": 0,
+          "w": 0.18,
+          "h": 7.5,
+          "fill": "D3A64F",
+          "line": "D3A64F"
+        },
+        {
+          "id": "cover-kicker",
+          "role": "kicker",
+          "x": 0.72,
+          "y": 0.62,
+          "w": 5.2,
+          "h": 0.25,
+          "text": "MMN多模态策略输出 | Strategy Brief",
+          "fontSize": 9,
+          "color": "D3A64F"
+        },
+        {
+          "id": "cover-title",
+          "role": "title",
+          "x": 0.72,
+          "y": 2.22,
+          "w": 8.8,
+          "h": 1.05,
+          "text": "MMN汽车营销策略报告",
+          "fontSize": 28,
+          "color": "FFFFFF",
+          "level": 1
+        },
+        {
+          "id": "cover-subtitle",
+          "role": "subtitle",
+          "x": 0.74,
+          "y": 3.45,
+          "w": 8.4,
+          "h": 0.54,
+          "text": "从品牌声量、用户认知到内容 Brief 的策略输出链路",
+          "fontSize": 13,
+          "color": "E6EBF0"
+        },
+        {
+          "id": "cover-signal",
+          "role": "visual",
+          "x": 10.45,
+          "y": 1.08,
+          "w": 1.95,
+          "h": 4.6,
+          "fill": "D3A64F",
+          "line": "D3A64F"
+        },
+        {
+          "id": "cover-footer-line",
+          "role": "divider",
+          "x": 0.55,
+          "y": 6.96,
+          "w": 12.233,
+          "h": 0,
+          "line": "D9DEE5"
+        },
+        {
+          "id": "cover-page",
+          "role": "page-number",
+          "x": 12.133000000000001,
+          "y": 7.08,
+          "w": 0.65,
+          "h": 0.18,
+          "text": "1/5",
+          "fontSize": 7.5,
+          "color": "667085"
+        }
+      ]
+    },
+    {
+      "id": "toc",
+      "type": "toc",
+      "section": "目录",
+      "title": "目录",
+      "items": [
+        {
+          "label": "一、核心判断",
+          "targetSlideId": "exec-summary"
+        },
+        {
+          "label": "二、传播机会拆解",
+          "targetSlideId": "growth-waterfall"
+        },
+        {
+          "label": "三、内容行动路线",
+          "targetSlideId": "roadmap"
+        }
+      ],
+      "pageNumber": 2,
+      "elements": [
+        {
+          "id": "toc-section",
+          "role": "section-label",
+          "x": 0.55,
+          "y": 0.22,
+          "w": 2.6,
+          "h": 0.22,
+          "text": "目录",
+          "fontSize": 7.5,
+          "color": "D3A64F"
+        },
+        {
+          "id": "toc-title",
+          "role": "title",
+          "x": 0.55,
+          "y": 0.42,
+          "w": 10.2,
+          "h": 0.58,
+          "text": "目录",
+          "fontSize": 19,
+          "color": "10263F",
+          "level": 1
+        },
+        {
+          "id": "toc-toc-num-1",
+          "role": "toc-number",
+          "x": 1,
+          "y": 1.62,
+          "w": 0.48,
+          "h": 0.3,
+          "text": "01",
+          "fontSize": 12,
+          "color": "D3A64F"
+        },
+        {
+          "id": "toc-toc-1",
+          "role": "toc-item",
+          "x": 1.62,
+          "y": 1.58,
+          "w": 7.8,
+          "h": 0.4,
+          "text": "一、核心判断",
+          "fontSize": 16,
+          "color": "18212B"
+        },
+        {
+          "id": "toc-toc-target-1",
+          "role": "toc-target",
+          "x": 9.8,
+          "y": 1.62,
+          "w": 1.35,
+          "h": 0.24,
+          "text": "exec-summary",
+          "fontSize": 8,
+          "color": "667085"
+        },
+        {
+          "id": "toc-toc-num-2",
+          "role": "toc-number",
+          "x": 1,
+          "y": 2.67,
+          "w": 0.48,
+          "h": 0.3,
+          "text": "02",
+          "fontSize": 12,
+          "color": "D3A64F"
+        },
+        {
+          "id": "toc-toc-2",
+          "role": "toc-item",
+          "x": 1.62,
+          "y": 2.63,
+          "w": 7.8,
+          "h": 0.4,
+          "text": "二、传播机会拆解",
+          "fontSize": 16,
+          "color": "18212B"
+        },
+        {
+          "id": "toc-toc-target-2",
+          "role": "toc-target",
+          "x": 9.8,
+          "y": 2.67,
+          "w": 1.35,
+          "h": 0.24,
+          "text": "growth-waterfall",
+          "fontSize": 8,
+          "color": "667085"
+        },
+        {
+          "id": "toc-toc-num-3",
+          "role": "toc-number",
+          "x": 1,
+          "y": 3.72,
+          "w": 0.48,
+          "h": 0.3,
+          "text": "03",
+          "fontSize": 12,
+          "color": "D3A64F"
+        },
+        {
+          "id": "toc-toc-3",
+          "role": "toc-item",
+          "x": 1.62,
+          "y": 3.68,
+          "w": 7.8,
+          "h": 0.4,
+          "text": "三、内容行动路线",
+          "fontSize": 16,
+          "color": "18212B"
+        },
+        {
+          "id": "toc-toc-target-3",
+          "role": "toc-target",
+          "x": 9.8,
+          "y": 3.72,
+          "w": 1.35,
+          "h": 0.24,
+          "text": "roadmap",
+          "fontSize": 8,
+          "color": "667085"
+        },
+        {
+          "id": "toc-footer-line",
+          "role": "divider",
+          "x": 0.55,
+          "y": 6.96,
+          "w": 12.233,
+          "h": 0,
+          "line": "D9DEE5"
+        },
+        {
+          "id": "toc-page",
+          "role": "page-number",
+          "x": 12.133000000000001,
+          "y": 7.08,
+          "w": 0.65,
+          "h": 0.18,
+          "text": "2/5",
+          "fontSize": 7.5,
+          "color": "667085"
+        }
+      ]
+    },
+    {
+      "id": "exec-summary",
+      "type": "summary",
+      "section": "核心判断",
+      "title": "核心判断：品牌传播的约束正在从声量转向认知效率",
+      "insight": "未来 90 天应优先管理品牌心智锚点、内容证据强度和达人扩散效率。",
+      "cards": [
+        {
+          "label": "认知空位",
+          "value": "3 个",
+          "note": "用户讨论中仍存在可抢占的核心心智标签"
+        },
+        {
+          "label": "内容证据",
+          "value": "62%",
+          "note": "高互动内容更多来自真实场景与对比证据"
+        },
+        {
+          "label": "达人扩散",
+          "value": "2.1x",
+          "note": "垂类达人复用 Brief 后互动效率更高"
+        }
+      ],
+      "pageNumber": 3,
+      "elements": [
+        {
+          "id": "exec-summary-section",
+          "role": "section-label",
+          "x": 0.55,
+          "y": 0.22,
+          "w": 2.6,
+          "h": 0.22,
+          "text": "核心判断",
+          "fontSize": 7.5,
+          "color": "D3A64F"
+        },
+        {
+          "id": "exec-summary-title",
+          "role": "title",
+          "x": 0.55,
+          "y": 0.42,
+          "w": 10.2,
+          "h": 0.58,
+          "text": "核心判断：品牌传播的约束正在从声量转向认知效率",
+          "fontSize": 19,
+          "color": "10263F",
+          "level": 1
+        },
+        {
+          "id": "exec-summary-insight-bg",
+          "role": "insight-band",
+          "x": 0.72,
+          "y": 1.28,
+          "w": 11.9,
+          "h": 1,
+          "fill": "F5F2EA",
+          "line": "F5F2EA"
+        },
+        {
+          "id": "exec-summary-insight",
+          "role": "insight",
+          "x": 1,
+          "y": 1.54,
+          "w": 11.1,
+          "h": 0.34,
+          "text": "未来 90 天应优先管理品牌心智锚点、内容证据强度和达人扩散效率。",
+          "fontSize": 15,
+          "color": "10263F"
+        },
+        {
+          "id": "exec-summary-card-1",
+          "role": "metric-card",
+          "x": 0.72,
+          "y": 2.78,
+          "w": 3.55,
+          "h": 2.45,
+          "fill": "FFFFFF",
+          "line": "D9DEE5"
+        },
+        {
+          "id": "exec-summary-card-label-1",
+          "role": "metric-label",
+          "x": 1,
+          "y": 3.08,
+          "w": 2.65,
+          "h": 0.22,
+          "text": "认知空位",
+          "fontSize": 9,
+          "color": "667085"
+        },
+        {
+          "id": "exec-summary-card-value-1",
+          "role": "metric-value",
+          "x": 1,
+          "y": 3.55,
+          "w": 2.4,
+          "h": 0.55,
+          "text": "3 个",
+          "fontSize": 26,
+          "color": "2B7A78"
+        },
+        {
+          "id": "exec-summary-card-note-1",
+          "role": "body",
+          "x": 1,
+          "y": 4.36,
+          "w": 2.9,
+          "h": 0.42,
+          "text": "用户讨论中仍存在可抢占的核心心智标签",
+          "fontSize": 9.5,
+          "color": "18212B"
+        },
+        {
+          "id": "exec-summary-card-2",
+          "role": "metric-card",
+          "x": 4.77,
+          "y": 2.78,
+          "w": 3.55,
+          "h": 2.45,
+          "fill": "FFFFFF",
+          "line": "D9DEE5"
+        },
+        {
+          "id": "exec-summary-card-label-2",
+          "role": "metric-label",
+          "x": 5.05,
+          "y": 3.08,
+          "w": 2.65,
+          "h": 0.22,
+          "text": "内容证据",
+          "fontSize": 9,
+          "color": "667085"
+        },
+        {
+          "id": "exec-summary-card-value-2",
+          "role": "metric-value",
+          "x": 5.05,
+          "y": 3.55,
+          "w": 2.4,
+          "h": 0.55,
+          "text": "62%",
+          "fontSize": 26,
+          "color": "10263F"
+        },
+        {
+          "id": "exec-summary-card-note-2",
+          "role": "body",
+          "x": 5.05,
+          "y": 4.36,
+          "w": 2.9,
+          "h": 0.42,
+          "text": "高互动内容更多来自真实场景与对比证据",
+          "fontSize": 9.5,
+          "color": "18212B"
+        },
+        {
+          "id": "exec-summary-card-3",
+          "role": "metric-card",
+          "x": 8.82,
+          "y": 2.78,
+          "w": 3.55,
+          "h": 2.45,
+          "fill": "FFFFFF",
+          "line": "D9DEE5"
+        },
+        {
+          "id": "exec-summary-card-label-3",
+          "role": "metric-label",
+          "x": 9.1,
+          "y": 3.08,
+          "w": 2.65,
+          "h": 0.22,
+          "text": "达人扩散",
+          "fontSize": 9,
+          "color": "667085"
+        },
+        {
+          "id": "exec-summary-card-value-3",
+          "role": "metric-value",
+          "x": 9.1,
+          "y": 3.55,
+          "w": 2.4,
+          "h": 0.55,
+          "text": "2.1x",
+          "fontSize": 26,
+          "color": "10263F"
+        },
+        {
+          "id": "exec-summary-card-note-3",
+          "role": "body",
+          "x": 9.1,
+          "y": 4.36,
+          "w": 2.9,
+          "h": 0.42,
+          "text": "垂类达人复用 Brief 后互动效率更高",
+          "fontSize": 9.5,
+          "color": "18212B"
+        },
+        {
+          "id": "exec-summary-footer-line",
+          "role": "divider",
+          "x": 0.55,
+          "y": 6.96,
+          "w": 12.233,
+          "h": 0,
+          "line": "D9DEE5"
+        },
+        {
+          "id": "exec-summary-page",
+          "role": "page-number",
+          "x": 12.133000000000001,
+          "y": 7.08,
+          "w": 0.65,
+          "h": 0.18,
+          "text": "3/5",
+          "fontSize": 7.5,
+          "color": "667085"
+        }
+      ]
+    },
+    {
+      "id": "growth-waterfall",
+      "type": "chart",
+      "section": "传播机会",
+      "title": "传播机会拆解：三类策略动作贡献主要认知增量",
+      "chart": {
+        "kind": "bar",
+        "unit": "指数",
+        "categories": [
+          "基准认知",
+          "心智锚点",
+          "证据内容",
+          "达人分发",
+          "目标认知"
+        ],
+        "values": [
+          100,
+          18,
+          14,
+          11,
+          143
+        ]
+      },
+      "notes": [
+        "先统一品牌心智锚点，再把卖点转成可验证的内容证据。",
+        "达人 Brief 应围绕平台语境、内容场景和复盘指标形成闭环。"
+      ],
+      "pageNumber": 4,
+      "elements": [
+        {
+          "id": "growth-waterfall-section",
+          "role": "section-label",
+          "x": 0.55,
+          "y": 0.22,
+          "w": 2.6,
+          "h": 0.22,
+          "text": "传播机会",
+          "fontSize": 7.5,
+          "color": "D3A64F"
+        },
+        {
+          "id": "growth-waterfall-title",
+          "role": "title",
+          "x": 0.55,
+          "y": 0.42,
+          "w": 10.2,
+          "h": 0.58,
+          "text": "传播机会拆解：三类策略动作贡献主要认知增量",
+          "fontSize": 19,
+          "color": "10263F",
+          "level": 1
+        },
+        {
+          "id": "growth-waterfall-chart",
+          "role": "chart",
+          "x": 0.78,
+          "y": 1.35,
+          "w": 7.7,
+          "h": 4.45,
+          "categories": [
+            "基准认知",
+            "心智锚点",
+            "证据内容",
+            "达人分发",
+            "目标认知"
+          ],
+          "values": [
+            100,
+            18,
+            14,
+            11,
+            143
+          ],
+          "fontSize": 8,
+          "color": "18212B"
+        },
+        {
+          "id": "growth-waterfall-note-1",
+          "role": "body",
+          "x": 9.05,
+          "y": 1.55,
+          "w": 3,
+          "h": 0.72,
+          "text": "先统一品牌心智锚点，再把卖点转成可验证的内容证据。",
+          "fontSize": 10.5,
+          "color": "18212B"
+        },
+        {
+          "id": "growth-waterfall-note-2",
+          "role": "body",
+          "x": 9.05,
+          "y": 2.7,
+          "w": 3,
+          "h": 0.72,
+          "text": "达人 Brief 应围绕平台语境、内容场景和复盘指标形成闭环。",
+          "fontSize": 10.5,
+          "color": "18212B"
+        },
+        {
+          "id": "growth-waterfall-footer-line",
+          "role": "divider",
+          "x": 0.55,
+          "y": 6.96,
+          "w": 12.233,
+          "h": 0,
+          "line": "D9DEE5"
+        },
+        {
+          "id": "growth-waterfall-page",
+          "role": "page-number",
+          "x": 12.133000000000001,
+          "y": 7.08,
+          "w": 0.65,
+          "h": 0.18,
+          "text": "4/5",
+          "fontSize": 7.5,
+          "color": "667085"
+        }
+      ]
+    },
+    {
+      "id": "roadmap",
+      "type": "roadmap",
+      "section": "行动路线",
+      "title": "90 天内容行动路线：先固化策略口径，再规模化内容供给",
+      "phases": [
+        {
+          "name": "0-30 天",
+          "headline": "统一口径",
+          "items": [
+            "确定心智锚点",
+            "沉淀证据素材",
+            "建立内容 Brief 模板"
+          ]
+        },
+        {
+          "name": "31-60 天",
+          "headline": "小步验证",
+          "items": [
+            "试点达人矩阵",
+            "A/B 测试内容角度",
+            "复盘平台互动质量"
+          ]
+        },
+        {
+          "name": "61-90 天",
+          "headline": "规模复制",
+          "items": [
+            "扩大优质 Brief",
+            "形成品牌表达库",
+            "输出月度策略报告"
+          ]
+        }
+      ],
+      "pageNumber": 5,
+      "elements": [
+        {
+          "id": "roadmap-section",
+          "role": "section-label",
+          "x": 0.55,
+          "y": 0.22,
+          "w": 2.6,
+          "h": 0.22,
+          "text": "行动路线",
+          "fontSize": 7.5,
+          "color": "D3A64F"
+        },
+        {
+          "id": "roadmap-title",
+          "role": "title",
+          "x": 0.55,
+          "y": 0.42,
+          "w": 10.2,
+          "h": 0.58,
+          "text": "90 天内容行动路线：先固化策略口径，再规模化内容供给",
+          "fontSize": 19,
+          "color": "10263F",
+          "level": 1
+        },
+        {
+          "id": "roadmap-phase-1",
+          "role": "phase-card",
+          "x": 0.72,
+          "y": 1.52,
+          "w": 3.55,
+          "h": 4.6,
+          "fill": "F5F2EA",
+          "line": "D9DEE5"
+        },
+        {
+          "id": "roadmap-phase-name-1",
+          "role": "phase-label",
+          "x": 1,
+          "y": 1.88,
+          "w": 1.6,
+          "h": 0.24,
+          "text": "0-30 天",
+          "fontSize": 9,
+          "color": "D3A64F"
+        },
+        {
+          "id": "roadmap-phase-headline-1",
+          "role": "subtitle",
+          "x": 1,
+          "y": 2.34,
+          "w": 2.8,
+          "h": 0.38,
+          "text": "统一口径",
+          "fontSize": 16,
+          "color": "10263F"
+        },
+        {
+          "id": "roadmap-phase-items-1",
+          "role": "body",
+          "x": 1.1,
+          "y": 3.18,
+          "w": 2.72,
+          "h": 1.42,
+          "text": "确定心智锚点沉淀证据素材建立内容 Brief 模板",
+          "fontSize": 10.2,
+          "color": "18212B"
+        },
+        {
+          "id": "roadmap-phase-2",
+          "role": "phase-card",
+          "x": 4.8,
+          "y": 1.52,
+          "w": 3.55,
+          "h": 4.6,
+          "fill": "FFFFFF",
+          "line": "D3A64F"
+        },
+        {
+          "id": "roadmap-phase-name-2",
+          "role": "phase-label",
+          "x": 5.08,
+          "y": 1.88,
+          "w": 1.6,
+          "h": 0.24,
+          "text": "31-60 天",
+          "fontSize": 9,
+          "color": "D3A64F"
+        },
+        {
+          "id": "roadmap-phase-headline-2",
+          "role": "subtitle",
+          "x": 5.08,
+          "y": 2.34,
+          "w": 2.8,
+          "h": 0.38,
+          "text": "小步验证",
+          "fontSize": 16,
+          "color": "10263F"
+        },
+        {
+          "id": "roadmap-phase-items-2",
+          "role": "body",
+          "x": 5.18,
+          "y": 3.18,
+          "w": 2.72,
+          "h": 1.42,
+          "text": "试点达人矩阵A/B 测试内容角度复盘平台互动质量",
+          "fontSize": 10.2,
+          "color": "18212B"
+        },
+        {
+          "id": "roadmap-phase-3",
+          "role": "phase-card",
+          "x": 8.88,
+          "y": 1.52,
+          "w": 3.55,
+          "h": 4.6,
+          "fill": "FFFFFF",
+          "line": "D9DEE5"
+        },
+        {
+          "id": "roadmap-phase-name-3",
+          "role": "phase-label",
+          "x": 9.16,
+          "y": 1.88,
+          "w": 1.6,
+          "h": 0.24,
+          "text": "61-90 天",
+          "fontSize": 9,
+          "color": "D3A64F"
+        },
+        {
+          "id": "roadmap-phase-headline-3",
+          "role": "subtitle",
+          "x": 9.16,
+          "y": 2.34,
+          "w": 2.8,
+          "h": 0.38,
+          "text": "规模复制",
+          "fontSize": 16,
+          "color": "10263F"
+        },
+        {
+          "id": "roadmap-phase-items-3",
+          "role": "body",
+          "x": 9.260000000000002,
+          "y": 3.18,
+          "w": 2.72,
+          "h": 1.42,
+          "text": "扩大优质 Brief形成品牌表达库输出月度策略报告",
+          "fontSize": 10.2,
+          "color": "18212B"
+        },
+        {
+          "id": "roadmap-footer-line",
+          "role": "divider",
+          "x": 0.55,
+          "y": 6.96,
+          "w": 12.233,
+          "h": 0,
+          "line": "D9DEE5"
+        },
+        {
+          "id": "roadmap-page",
+          "role": "page-number",
+          "x": 12.133000000000001,
+          "y": 7.08,
+          "w": 0.65,
+          "h": 0.18,
+          "text": "5/5",
+          "fontSize": 7.5,
+          "color": "667085"
+        }
+      ]
+    }
+  ],
+  "generatedAt": "2026-07-08T08:30:00.551Z"
+}

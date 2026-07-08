@@ -138,3 +138,54 @@ MMN研发团队
 ## 发布要求
 
 本次同步必须包含代码、研发档案、交接手册和发布记录。服务器仍作为稳定演示环境，后续业务功能仍以本地为主开发与验证。
+
+---
+
+# MMN Perception Engine 发布记录补充
+
+## 发布日期
+
+2026-07-08
+
+## 发布版本
+
+beta 1.01
+
+## 发布负责人
+
+MMN研发团队
+
+## 发布目标
+
+将 MMN PPT Agent 工作流同步到 GitHub 与服务器演示环境，使 MMN 具备可编辑、可复用、可校验的商业咨询型 PPTX 生成基础设施。
+
+## 本次变更
+
+- 新增 `skills/mmn-consulting-pptx/SKILL.md`，沉淀 MMN 专用 PPT Agent 工作规范。
+- 新增 `src/ppt-agent/`，以 PptxGenJS 作为可编辑 `.pptx` 主生成引擎。
+- 新增 MarkItDown 资料解析脚本、python-pptx 读取检查脚本和一键运行脚本。
+- 新增 Marp CLI 结构版演示稿生成能力。
+- 新增 Mermaid CLI 流程图、逻辑图生成能力。
+- 新增页面结构 JSON、预览图、自动校验报告和示例 PPTX 产物。
+- 自动校验覆盖中文溢出、元素重叠、标题层级、图表可读性、品牌配色、页码、目录一致性和 PPTX 页数一致性。
+- 更新研发档案和智能体交接手册。
+
+## 影响范围
+
+- 新增独立 PPT Agent 报告输出基础设施。
+- 不替换现有 MMN 首页、策略驾驶舱、内容资产中心和既有策略报告接口。
+- 不改变数据库结构，不清空既有数据，不修改云端登录权限。
+
+## 本地测试结果
+
+- `bash scripts/run_mmn_ppt_agent.sh` 通过。
+- PPT Agent 校验报告 `ok: true`，`issueCount: 0`。
+- `python3 -m py_compile server.py` 通过。
+- `node --check src/ppt-agent/generate_deck.mjs` 通过。
+- `node --check src/ppt-agent/export_preview.mjs` 通过。
+- `node --check src/ppt-agent/validate_deck.mjs` 通过。
+- `skills/mmn-consulting-pptx/SKILL.md` 通过 skill 校验。
+
+## 发布要求
+
+本次同步必须包含代码、依赖锁文件、PPT Agent 示例输入、示例输出产物、研发档案、交接手册和发布记录。服务器发布后需执行云端健康检查并记录结果。

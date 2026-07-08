@@ -18,6 +18,7 @@ MMN 的核心资产包括：
 - 内容资产、达人资产、垂媒正反向排名、车型资产
 - 创始人蒸馏、博主/达人蒸馏、内容能力蒸馏
 - 策略报告、达人 brief、短视频脚本、账号孵化方案、竞品传播口径输出规范
+- 可编辑商业咨询型 PPTX、页面结构 JSON、预览图和自动校验报告输出规范
 - 市场周报、客户策略汇报、品牌/高管 IP 表达资产
 - 模型调度、RAG 检索、人工复核和研发档案机制
 
@@ -76,6 +77,13 @@ git@github.com:elliszhang0905-wq/MMN-Perception-Engine.git
 | `README_DEPLOY.md` | 云端部署说明 |
 | `docs/mmn-strategy-model.md` | MMN Strategy Model 说明 |
 | `docs/研发档案/` | 每次迭代的研发记录 |
+| `skills/mmn-consulting-pptx/SKILL.md` | MMN PPT Agent 工作规范 |
+| `src/ppt-agent/` | PptxGenJS 主生成、预览导出和自动校验流水线 |
+| `examples/ppt-agent/input/` | PPT Agent 示例页面结构、Marp 草稿和 Mermaid 逻辑图 |
+| `output/ppt-agent/` | PPT Agent 示例产物、预览图、校验报告和结构稿 |
+| `scripts/run_mmn_ppt_agent.sh` | 一键运行 MMN PPT Agent 工作流 |
+| `scripts/mmn_ppt_ingest_sources.py` | MarkItDown 资料解析入口 |
+| `scripts/mmn_ppt_inspect.py` | python-pptx PPTX 读取检查入口 |
 | `deploy.sh` | 服务器部署入口 |
 | `rollback.sh` | 服务器回滚入口 |
 | `test_mmn_cloud.sh` | 云端功能检查脚本 |
@@ -236,6 +244,14 @@ node --check app.js
 ```bash
 curl http://127.0.0.1:8765/api/health
 ```
+
+PPT Agent 检查：
+
+```bash
+bash scripts/run_mmn_ppt_agent.sh
+```
+
+该命令应生成 `output/ppt-agent/mmn-strategy-deck.pptx`、页面结构 JSON、预览图、校验报告、Marp 结构稿和 Mermaid 逻辑图。交付口径必须保持 MMN 品牌营销、内容策略和策略报告输出场景，不得混入 Credo 门店销售场景。
 
 ## 11. GitHub 版本管理流程
 

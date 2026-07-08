@@ -4,11 +4,23 @@
   "private": true,
   "scripts": {
     "release:gate": "bash scripts/release_gate.sh",
-    "test:openai": "node scripts/test_openai_client.mjs"
+    "test:openai": "node scripts/test_openai_client.mjs",
+    "ppt:generate": "node src/ppt-agent/generate_deck.mjs --input examples/ppt-agent/input/page-structure.json --outdir output/ppt-agent",
+    "ppt:preview": "node src/ppt-agent/export_preview.mjs --input output/ppt-agent/page-structure.generated.json --outdir output/ppt-agent/previews",
+    "ppt:validate": "node src/ppt-agent/validate_deck.mjs --structure output/ppt-agent/page-structure.generated.json --pptx output/ppt-agent/mmn-strategy-deck.pptx --out output/ppt-agent/validation-report.json",
+    "ppt:marp": "marp examples/ppt-agent/input/structure-deck.md --pptx --allow-local-files -o output/ppt-agent/structure-deck.marp.pptx",
+    "ppt:mermaid": "mmdc -i examples/ppt-agent/input/growth-logic.mmd -o output/ppt-agent/mmn-logic.png -b transparent",
+    "ppt:build": "pnpm ppt:generate && pnpm ppt:preview && pnpm ppt:validate"
   },
   "dependencies": {
+    "@marp-team/marp-cli": "^4.0.0",
+    "@mermaid-js/mermaid-cli": "^11.4.2",
     "dotenv": "^16.4.7",
-    "openai": "^6.10.0"
+    "fast-xml-parser": "^4.5.3",
+    "jszip": "^3.10.1",
+    "openai": "^6.10.0",
+    "pptxgenjs": "^3.12.0",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "playwright": "^1.53.0"
