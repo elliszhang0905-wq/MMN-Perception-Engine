@@ -191,3 +191,18 @@ MMN研发团队
 ## 发布要求
 
 本次同步必须包含代码、依赖锁文件、PPT Agent 示例输入、示例输出产物、研发档案、交接手册和发布记录。服务器发布后需执行云端健康检查并记录结果。
+
+## 云端发布结果
+
+- GitHub Commit：`a7bbfe5 fix: stabilize MMN Docker build`
+- 服务器目录：`/opt/mmn-perception-engine`
+- 服务器拉取版本：`a7bbfe5`
+- 发布前数据备份：`backups/mmn_backup_20260708_163756.tar.gz`
+- 容器状态：`mmn-app` healthy，`mmn-db` healthy，`mmn-scheduler` healthy，`mmn-web` running。
+- 健康检查：`http://121.40.60.90/api/health` 返回 `ok: true`、`version: beta 1.01`。
+- 公网基础检查：`bash scripts/test_mmn_cloud.sh http://121.40.60.90` 通过首页与健康接口检查。
+- 服务器 PPT Agent 产物确认：`output/ppt-agent/mmn-strategy-deck.pptx`、`page-structure.generated.json`、`validation-report.json`、预览图、Marp 结构稿和 Mermaid 图均已存在。
+
+## 发布结论
+
+MMN PPT Agent 工作流已同步至 GitHub 与阿里云服务器。服务器当前运行版本健康，PPT Agent 代码、示例输入、示例输出和所有记录已完成同步。
