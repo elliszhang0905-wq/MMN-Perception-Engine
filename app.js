@@ -66,6 +66,7 @@ let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},source
 let contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]},contentCapabilitySearch="",contentCapabilitySelectedTags=[];
 let selectedKnowledgeCluster="";
 let ragResultsExpanded=false;
+let dashboardTopicPlanState={loading:false,result:null,error:""};
 let workspaceState=defaultWorkspaceState(),workspaceSyncTimer=null;
 let salesMarquee={edition:"china",status:"loading",items:[{text:"正在连接懂车帝销量榜..."}],note:""};
 const editions={
@@ -895,17 +896,54 @@ function renderModelSwitcher(){
  const activeModels=activeGroup.models;
  wrap.innerHTML=`<div class="dash-model-selects"><select id="dash-brand-select" aria-label="选择品牌">${groups.map(g=>`<option value="${escapeAttr(g.brand)}" ${g.brand===dashBrandOpen?"selected":""}>${g.brand}</option>`).join("")}</select><select id="dash-model-select" aria-label="选择车型">${activeModels.map(m=>`<option value="${escapeAttr(m)}" ${m===state.config.model?"selected":""}>${m}</option>`).join("")}</select></div>`;
  const brandSelect=wrap.querySelector("#dash-brand-select"),modelSelect=wrap.querySelector("#dash-model-select");
- brandSelect.onchange=()=>{dashBrandOpen=brandSelect.value;renderModelSwitcher()};
- modelSelect.onchange=()=>{applyModelSelection(modelSelect.value);dashBrandOpen=brandForDisplay(modelSelect.value);save();render();toast(`已切换为 ${modelSelect.value}`)};
+	 brandSelect.onchange=()=>{dashBrandOpen=brandSelect.value;renderModelSwitcher()};
+ modelSelect.onchange=()=>{applyModelSelection(modelSelect.value);dashBrandOpen=brandForDisplay(modelSelect.value);dashboardTopicPlanState={loading:false,result:null,error:""};save();render();toast(`已切换为 ${modelSelect.value}`)};
 }
 function renderDashboard(a){
  const top=[...a.labels].sort((x,y)=>Math.max(y.op,y.on)-Math.max(x.op,x.on)).slice(0,6),max=Math.max(...top.flatMap(x=>[x.op,x.on]),1);
  document.querySelector("#asset-chart").innerHTML=top.length?top.map(x=>`<div class="bar-row"><b>${x.label}</b><div class="tracks"><i class="pos" style="width:${x.op/max*100}%"></i><i class="neg" style="width:${x.on/max*100}%"></i></div><span class="bar-value">${Math.round(x.op-x.on).toLocaleString()}</span></div>`).join(""):`<div class="empty-state">暂无 ${state.config.model} 的认知资产数据，请先导入该车型声量数据。</div>`;
  const selected=a.labels.filter(x=>x.priority>0).slice(0,4);document.querySelector("#top-actions").innerHTML=selected.map(x=>{const ac=actionFor(x);return`<div class="action-card ${ac.type==="风险修复"?"risk":""}"><div><b>${ac.type} · ${x.label}</b><p>${ac.proposition}</p></div><span class="score">${x.priority.toFixed(1)}</span></div>`}).join("")||"<p>暂无可执行建议，请补充数据。</p>";
- renderModelJudgmentWorkbench();
- renderDashboardData(a);
+	 renderModelJudgmentWorkbench();
+ renderDashboardTopicPlanner(a);
+	 renderDashboardData(a);
  renderDashboardCognition(a);
  renderOpportunityMap(a);
+}
+function renderDashboardTopicPlanner(a=analysis()){
+ const box=document.querySelector("#dashboard-topic-plan");
+ if(!box)return;
+ const stage=document.querySelector("#dashboard-topic-stage");
+ if(stage&&!state.config.stage)state.config.stage=stage.value||"上市中";
+ if(dashboardTopicPlanState.loading){
+  box.innerHTML=`<div class="topic-plan-loading"><b>MMN正在生成车型传播选题规划</b><span>${state.config.model} · ${state.config.competitor||"核心竞品"} · ${state.config.targetIdentity||"目标人群"}</span></div>`;
+  return;
+ }
+ if(dashboardTopicPlanState.result){
+  box.innerHTML=renderTopicPlanPanel(dashboardTopicPlanState.result);
+  return;
+ }
+ const labels=(a.labels||[]).filter(x=>x.priority>0).slice(0,5).map(x=>x.label).join(" / ")||"核心卖点";
+ box.innerHTML=`<div class="topic-plan-empty"><b>${state.config.model} 选题规划待生成</b><span>当前诊断重点：${escapeHtml(labels)}｜竞品：${escapeHtml(state.config.competitor||"待补充")}</span></div>`;
+}
+async function runDashboardTopicPlanning(){
+ const stage=document.querySelector("#dashboard-topic-stage")?.value||state.config.stage||"上市中";
+ const goal=document.querySelector("#dashboard-topic-goal")?.value?.trim()||"建立核心购买理由并抢占竞品对比搜索";
+ state.config.stage=stage;
+ dashboardTopicPlanState={loading:true,result:null,error:""};
+ renderDashboardTopicPlanner();
+ try{
+  const report=reportPayload();
+  const data=await api("/api/topic-planning/run",{method:"POST",body:JSON.stringify({edition:activeEdition(),question:goal,project:strategyProjectContext(),signal:report,launchStage:stage,coreSellingPoints:(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean),competitors:String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean),budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal})});
+  dashboardTopicPlanState={loading:false,result:data.topicPlan,error:""};
+  save();
+  renderDashboardTopicPlanner();
+  toast("车型传播选题规划已生成");
+ }catch(err){
+  dashboardTopicPlanState={loading:false,result:null,error:err.message};
+  const box=document.querySelector("#dashboard-topic-plan");
+  if(box)box.innerHTML=`<p class="empty">选题规划生成失败：${escapeHtml(err.message)}</p>`;
+  toast(`选题规划生成失败：${err.message}`);
+ }
 }
 function renderModelJudgmentWorkbench(){
  const box=document.querySelector("#model-judgment-result");if(!box)return;
@@ -2144,7 +2182,7 @@ function renderRagResults(){
  document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();pulseFocus("#rag-results-toggle");if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
 }
 function strategyProjectContext(){
- return{edition:activeEdition(),brand:state.config.brand,model:state.config.model,project:state.config.project,competitor:state.config.competitor,targetIdentity:state.config.targetIdentity};
+ return{edition:activeEdition(),brand:state.config.brand,model:state.config.model,project:state.config.project,competitor:state.config.competitor,targetIdentity:state.config.targetIdentity,budget:state.config.budget,stage:state.config.stage||"上市中"};
 }
 async function submitModelJudgment(e){
  e.preventDefault();
@@ -2168,6 +2206,9 @@ async function submitModelJudgment(e){
 }
 function markdownish(text){
  return publicMmnText(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
+}
+function escapeHtml(text){
+ return String(text??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 function publicMmnText(text){
  return String(text||"").trim().replace(/Qwen|千问/gi,"MMN主控").replace(/DeepSeek/gi,"MMN质检");
@@ -2206,6 +2247,7 @@ function renderMmnStrategyBubble({query,references,data,cached=false}){
  const decision=data.routerDecision||data;
  const conflict=decision.conflict||data.conflict||null;
  const evidence=data.evidence||data.agentRun?.evidence||[];
+ const topicPlan=data.topicPlan||data.agentRun?.final_output?.topicPlan||null;
  const qaLabel=qa?qa.verdict==="pass"?"Evidence QA 通过":qa.verdict==="needs_review"?"Evidence QA 待复核":"Evidence QA 未通过":"Evidence QA 未运行";
  const qaClass=qa?.verdict==="pass"?"pass":qa?.verdict==="fail"?"fail":"review";
  const findings=(qa?.findings||[]).slice(0,3);
@@ -2214,12 +2256,25 @@ function renderMmnStrategyBubble({query,references,data,cached=false}){
  const reviewActions=isReviewPending?`<div class="router-review-actions"><button type="button" class="primary" data-router-deep-review="${decision.id||data.id||""}">深度复核</button><button type="button" class="ghost" data-router-refresh-review="${decision.id||data.id||""}">刷新复核</button></div>`:conflict?.status==="needs_human_review"?`<div class="router-review-actions"><button type="button" class="ghost" data-router-choice="primary">采纳主分析</button><button type="button" class="ghost" data-router-choice="reviewer">采纳复核意见</button><button type="button" class="primary" data-router-choice="manual">保存人工结论</button></div>`:"";
  const conflictHtml=conflict?`<div class="agent-run-panel ${conflict.status==="aligned"?"pass":"review"}"><div><b>${conflict.label||"MMN交叉复核"}</b><span>任务：${decision.taskType||data.taskType||"strategy"} · 置信度 ${Math.round((conflict.confidence||0)*100)}% · 主分析 ${decision.model||data.model||"MMN"} · 复核 ${decision.reviewer||data.reviewer||"后台critic"}</span></div>${reviewActions}</div>`:"";
  const phaseCopy=isReviewPending?"后台深度复核进行中，初版结果可先使用":data.cached?"命中缓存":data.asyncReview?"已进入后台复核":"策略链路完成";
- box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${query.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${data.modelLabel||"MMN智能策略"}</b><span>RAG巡检 + ${modelCopy}${cachedCopy} · ${phaseCopy}</span></div>${qaHtml}${conflictHtml}<div class="mmn-ai-content">${markdownish(data.text)}</div><button type="button" class="rag-summary-pill" id="rag-results-toggle"><b>查看引用依据：${evidence.length||references.length} 条</b><span>点击展开本次策略引用了哪些知识</span></button><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
+ box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${escapeHtml(query)}</div><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${data.modelLabel||"MMN智能策略"}</b><span>RAG巡检 + ${modelCopy}${cachedCopy} · ${phaseCopy}</span></div>${qaHtml}${conflictHtml}<div class="mmn-ai-content">${markdownish(data.text)}</div>${renderTopicPlanPanel(topicPlan)}<button type="button" class="rag-summary-pill" id="rag-results-toggle"><b>查看引用依据：${evidence.length||references.length} 条</b><span>点击展开本次策略引用了哪些知识</span></button><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
  document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
  document.querySelectorAll("[data-router-choice]").forEach(btn=>btn.onclick=()=>confirmRouterDecision(btn.dataset.routerChoice,decision));
  document.querySelectorAll("[data-router-deep-review]").forEach(btn=>btn.onclick=()=>requestDeepRouterReview(btn.dataset.routerDeepReview,query,references,data));
  document.querySelectorAll("[data-router-refresh-review]").forEach(btn=>btn.onclick=()=>refreshRouterReview(btn.dataset.routerRefreshReview,query,references,data));
  if(isReviewPending&&(decision.id||data.id))scheduleRouterReviewPoll(decision.id||data.id,query,references,data);
+}
+function renderTopicPlanPanel(plan){
+ if(!plan)return"";
+ const summary=plan.inputSummary||{};
+ const phases=(plan.phases||[]).slice(0,4);
+ const creators=(plan.creatorMatches||[]).slice(0,5);
+ const schedule=(plan.schedule||[]).slice(0,8);
+ const selected=(plan.selectedTopics||[]).slice(0,6);
+ const topicCards=selected.map(x=>`<article><span>${escapeHtml((x.taxonomy||[]).join(" / "))}</span><b>${escapeHtml(x.topic)}</b><p>${escapeHtml(x.fitReason)}</p><small>阶段：${escapeHtml((x.communicationStages||[]).join("、"))}｜目标：${escapeHtml((x.contentGoals||[]).join("、"))}｜优先级 ${escapeHtml(x.priority)}</small></article>`).join("");
+ const phaseHtml=phases.map(x=>`<div><b>${escapeHtml(x.phase)}</b><span>${escapeHtml(x.strategy)}</span><small>${(x.topics||[]).slice(0,3).map(t=>escapeHtml(t.topic)).join(" / ")}</small></div>`).join("");
+ const creatorHtml=creators.map(x=>`<tr><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.primaryCreatorType)}</td><td>${escapeHtml(x.backupCreatorType)}</td><td>${escapeHtml(x.brief)}</td></tr>`).join("");
+ const scheduleHtml=schedule.map(x=>`<tr><td>${escapeHtml(x.week)}</td><td>${escapeHtml(x.phase)}</td><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.format)}</td><td>${escapeHtml(x.kpi)}</td></tr>`).join("");
+ return`<section class="topic-plan-panel"><div class="topic-plan-head"><div><b>车型传播选题规划器</b><span>${escapeHtml(plan.taxonomyVersion)} · ${escapeHtml(summary.model||"当前车型")} · ${escapeHtml(summary.launchStage||"上市阶段")} · ${escapeHtml(summary.budgetTier||"预算层级")}</span></div><em>${escapeHtml(plan.engine||"topic_planning_engine")}</em></div><p class="topic-plan-conclusion">${escapeHtml(plan.strategyConclusion||"")}</p><div class="topic-phase-grid">${phaseHtml}</div><div class="topic-card-grid">${topicCards}</div><div class="topic-table-wrap"><table><thead><tr><th>选题</th><th>主达人</th><th>备选达人</th><th>Brief要点</th></tr></thead><tbody>${creatorHtml}</tbody></table></div><div class="topic-table-wrap"><table><thead><tr><th>周期</th><th>阶段</th><th>选题</th><th>形式</th><th>KPI</th></tr></thead><tbody>${scheduleHtml}</tbody></table></div></section>`;
 }
 function immediateStrategyDraft(query,references,mode){
  const titles=references.slice(0,3).map(x=>x.title).filter(Boolean).join("、")||"当前知识库";
@@ -2250,7 +2305,8 @@ async function runMmnSmartStrategy(mode="fast"){
  toast(`${label}已先给出RAG初稿，模型完成后会自动刷新`);
  try{
   let data;
-  const payload={org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),question:query,project:strategyProjectContext(),references,mode,signal:reportPayload()};
+  const report=reportPayload();
+  const payload={org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),question:query,project:strategyProjectContext(),references,mode,signal:report,launchStage:document.querySelector("#rag-stage")?.value||state.config.stage||"上市中",coreSellingPoints:(report.knowhow||[]).slice(0,6).map(x=>x.label||x.message).filter(Boolean),competitors:String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean),budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:query};
   try{
    data=await api("/api/agents/run",{method:"POST",body:JSON.stringify(payload)});
   }catch(agentErr){
@@ -2796,7 +2852,16 @@ if(semanticClearButton)semanticClearButton.onclick=()=>{
  semanticState={result:null,schema:null};
  const input=document.querySelector("#semantic-input");if(input)input.value="";
  renderSemanticResult();
- toast("语义识别内容已清空");
+	 toast("语义识别内容已清空");
+	};
+const dashboardTopicRun=document.querySelector("#dashboard-topic-run");
+if(dashboardTopicRun)dashboardTopicRun.onclick=runDashboardTopicPlanning;
+const dashboardTopicStage=document.querySelector("#dashboard-topic-stage");
+if(dashboardTopicStage)dashboardTopicStage.onchange=()=>{
+ state.config.stage=dashboardTopicStage.value;
+ dashboardTopicPlanState={loading:false,result:null,error:""};
+ save();
+ renderDashboardTopicPlanner();
 };
 document.querySelector("#sync-project-state").onclick=()=>syncProjectSnapshot(false);
 const extendedHeaders=[...headers,"声量类型","关键词/原文"];

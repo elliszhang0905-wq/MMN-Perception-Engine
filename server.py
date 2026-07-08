@@ -1674,6 +1674,381 @@ def route_for_task(task_type, mode="fast"):
         return MMN_STRATEGY_MODEL["router"]["fact_explanation"]
     return MMN_STRATEGY_MODEL["router"]["data_summary"]
 
+TOPIC_PLANNING_TAXONOMY = [
+    {
+        "id": "pre_price_guess",
+        "topic": "价格竞猜",
+        "taxonomy": ["媒体角度", "单车类", "上市前期", "价格"],
+        "stages": ["上市前期"],
+        "models": ["全车型"],
+        "goals": ["预热讨论", "价格锚点", "竞品卡位"],
+        "decisionStages": ["兴趣激发", "方案比较"],
+        "creatorTypes": ["垂媒评论员", "价格敏感型KOC", "行业观察号"],
+        "formats": ["价格带竞猜图文", "竞品价格对比短视频", "评论区投票"],
+        "priority": 82,
+        "conditions": ["官方价格未发布", "竞品价格带清晰", "目标人群对价格敏感"],
+        "antiConditions": ["价格权益已明确公布", "车型主打豪华品牌溢价且不宜卷低价"],
+        "keywords": ["价格", "售价", "预算", "竞品", "预售"]
+    },
+    {
+        "id": "pre_spy_config",
+        "topic": "官图发布 / 谍照曝光 / 申报图曝光",
+        "taxonomy": ["媒体角度", "单车类", "上市前期", "外观配置"],
+        "stages": ["上市前期"],
+        "models": ["全车型"],
+        "goals": ["建立第一眼识别", "制造信息增量", "提前解释设计语言"],
+        "decisionStages": ["兴趣激发"],
+        "creatorTypes": ["汽车资讯号", "设计审美达人", "垂媒快讯号"],
+        "formats": ["九宫格解析", "设计细节短视频", "申报信息长图"],
+        "priority": 78,
+        "conditions": ["有可公开图片或申报信息", "外观/尺寸/配置有差异点"],
+        "antiConditions": ["图片清晰度不足", "外观争议较大但暂无官方解释素材"],
+        "keywords": ["官图", "谍照", "申报", "设计", "外观", "配置"]
+    },
+    {
+        "id": "pre_tech_trial",
+        "topic": "核心技术/平台解读 / 试验解读 / 静态品鉴",
+        "taxonomy": ["媒体角度", "单车类", "上市前期", "技术预热"],
+        "stages": ["上市前期"],
+        "models": ["新能源", "智能车", "性能车", "全车型"],
+        "goals": ["建立技术可信度", "降低理解门槛", "提前占住核心卖点"],
+        "decisionStages": ["认知建立", "信任形成"],
+        "creatorTypes": ["技术解析达人", "垂媒评测编辑", "工程师型KOL"],
+        "formats": ["技术拆解视频", "静态讲解图文", "平台能力问答"],
+        "priority": 88,
+        "conditions": ["核心卖点包含平台/电池/智驾/底盘/安全", "有实验、白皮书或工程素材"],
+        "antiConditions": ["技术证据不足", "卖点更偏情绪审美而非工程优势"],
+        "keywords": ["技术", "平台", "智驾", "电池", "底盘", "安全", "试验"]
+    },
+    {
+        "id": "launch_product_decode",
+        "topic": "上市发布 / 产品综合解读 / 车型配置导购",
+        "taxonomy": ["媒体角度", "单车类", "上市中", "发布承接"],
+        "stages": ["上市中"],
+        "models": ["全车型"],
+        "goals": ["承接发布信息", "翻译购买理由", "降低配置选择成本"],
+        "decisionStages": ["方案比较", "购买临门"],
+        "creatorTypes": ["垂媒导购号", "品牌内容号", "配置研究型达人"],
+        "formats": ["上市信息速览", "一图看懂配置", "配置怎么选短视频"],
+        "priority": 92,
+        "conditions": ["价格和权益已公布", "配置梯度较复杂", "需要快速承接搜索流量"],
+        "antiConditions": ["上市信息尚不完整", "无法确认配置权益"],
+        "keywords": ["上市", "发布", "配置", "导购", "权益", "版本"]
+    },
+    {
+        "id": "launch_core_advantage",
+        "topic": "核心优势解读：设计/空间/性能/智能座舱/智驾/安全/续航能耗",
+        "taxonomy": ["媒体角度", "单车类", "上市中", "核心优势"],
+        "stages": ["上市中", "上市后期"],
+        "models": ["全车型"],
+        "goals": ["把卖点转成用户可复述理由", "形成内容资产", "支撑竞品对位"],
+        "decisionStages": ["认知建立", "方案比较", "信任形成"],
+        "creatorTypes": ["垂媒评测达人", "技术解析达人", "生活方式达人", "家庭用户KOC"],
+        "formats": ["单卖点短视频", "场景化图文", "实测证据卡", "FAQ问答"],
+        "priority": 96,
+        "conditions": ["核心卖点明确", "至少有一条可验证证据", "能映射真实用户场景"],
+        "antiConditions": ["卖点只停留在口号", "缺少竞品或用户问题语境"],
+        "keywords": ["卖点", "设计", "空间", "性能", "座舱", "智驾", "安全", "续航", "能耗"]
+    },
+    {
+        "id": "post_dynamic_review",
+        "topic": "到店实拍试驾 / 静态评测 / 动态评测 / 油耗续航测试 / 智驾体验",
+        "taxonomy": ["媒体角度", "单车类", "上市后期", "实测评测"],
+        "stages": ["上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["补足证据链", "处理疑虑", "推动试驾询价"],
+        "decisionStages": ["信任形成", "购买临门"],
+        "creatorTypes": ["专业评测达人", "真实车主KOC", "场景实测达人"],
+        "formats": ["实测视频", "到店体验Vlog", "长测图文", "清单式测评"],
+        "priority": 94,
+        "conditions": ["有试驾车或展车", "用户疑虑集中在体验/能耗/智驾/空间", "需要转化承接"],
+        "antiConditions": ["测试条件不可控", "车辆状态不具备公开评测条件"],
+        "keywords": ["试驾", "实拍", "评测", "油耗", "续航", "智驾", "体验", "到店"]
+    },
+    {
+        "id": "post_sales_owner",
+        "topic": "销量解读 / 终端热销 / 用车成本 / 保养费用 / OTA升级 / 改装文化",
+        "taxonomy": ["媒体角度", "单车类", "上市后期", "销售口碑"],
+        "stages": ["上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["建立热销与口碑信任", "强化持有成本优势", "沉淀车主社区"],
+        "decisionStages": ["信任形成", "复购推荐"],
+        "creatorTypes": ["行业数据号", "车主KOC", "用车账本达人", "改装圈层达人"],
+        "formats": ["销量战报解读", "车主账本图文", "OTA体验短视频", "改装案例合集"],
+        "priority": 76,
+        "conditions": ["销量/订单/交付或OTA有可公开信息", "有车主样本或真实用车素材"],
+        "antiConditions": ["销量表现不足且缺少解释角度", "保养成本暂无可信依据"],
+        "keywords": ["销量", "热销", "用车成本", "保养", "OTA", "车主", "改装"]
+    },
+    {
+        "id": "compare_matrix",
+        "topic": "产品竞争分析：双车/多车横评、导购、同类车型对比",
+        "taxonomy": ["媒体角度", "多车类", "竞争分析"],
+        "stages": ["上市中", "上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["明确竞品差异", "抢占比较搜索", "给用户选择理由"],
+        "decisionStages": ["方案比较", "购买临门"],
+        "creatorTypes": ["垂媒横评达人", "导购型达人", "参数党KOC"],
+        "formats": ["双车对比视频", "横评长图", "配置对比表", "场景化对比"],
+        "priority": 90,
+        "conditions": ["竞品明确", "用户已进入比较池", "本品至少有一项场景优势"],
+        "antiConditions": ["竞品资料不足", "本品短板无法解释且容易被放大"],
+        "keywords": ["竞品", "对比", "横评", "双车", "多车", "导购", "配置"]
+    },
+    {
+        "id": "industry_hotspot",
+        "topic": "碰撞测试成绩 / 行业政策风向 / 高热车型贴靠 / 汽车奖项活动",
+        "taxonomy": ["热点传播", "行业热点传播"],
+        "stages": ["上市前期", "上市中", "上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["借势放大", "提升行业可信度", "把热点转成车型论据"],
+        "decisionStages": ["兴趣激发", "信任形成"],
+        "creatorTypes": ["行业观察号", "安全测试达人", "政策解读达人", "活动现场达人"],
+        "formats": ["热点快评", "政策影响卡片", "奖项背书短视频", "安全测试解读"],
+        "priority": 70,
+        "conditions": ["热点与车型卖点强相关", "来源可信且时间窗口新鲜"],
+        "antiConditions": ["强行蹭热点", "热点争议方向与品牌价值冲突"],
+        "keywords": ["碰撞", "政策", "奖项", "活动", "行业", "热点"]
+    },
+    {
+        "id": "social_hotspot",
+        "topic": "节日热点 / 车主事件 / 技术迭代 / 新能源冬季用车 / 公益事件",
+        "taxonomy": ["热点传播", "社会热点传播"],
+        "stages": ["上市中", "上市后期", "销售期"],
+        "models": ["新能源", "家庭车", "智能车", "全车型"],
+        "goals": ["进入大众语境", "用社会议题承接产品价值", "提升讨论参与度"],
+        "decisionStages": ["兴趣激发", "身份认同"],
+        "creatorTypes": ["生活方式达人", "车主KOC", "科技趋势达人", "本地城市达人"],
+        "formats": ["节日场景短视频", "事件观点图文", "用车清单", "公益议题内容"],
+        "priority": 68,
+        "conditions": ["热点与人群/用车场景自然相关", "有明确品牌态度或产品证据"],
+        "antiConditions": ["涉及事故、公益或争议但没有事实边界", "容易被理解为借势消费事件"],
+        "keywords": ["节日", "车主事件", "AI", "智驾", "新能源", "冬季", "公益", "热点"]
+    },
+    {
+        "id": "deep_topic",
+        "topic": "高层访谈 / 自驾游记 / 工厂揭秘 / 产品技术分析 / 品牌融资发展",
+        "taxonomy": ["深度选题", "品牌与产品深度"],
+        "stages": ["上市前期", "上市中", "上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["建立品牌信任", "解释复杂战略", "沉淀长线内容资产"],
+        "decisionStages": ["认知建立", "信任形成", "身份认同"],
+        "creatorTypes": ["深度访谈媒体", "长测达人", "产业分析师", "品牌故事作者"],
+        "formats": ["深度访谈", "工厂探访视频", "长测游记", "技术长文"],
+        "priority": 74,
+        "conditions": ["品牌或技术有可讲述的深层素材", "预算允许深度制作", "需要补强信任资产"],
+        "antiConditions": ["项目只需要短期转化", "素材开放度不足或高层观点未经确认"],
+        "keywords": ["访谈", "长测", "工厂", "技术分析", "品牌", "融资", "深度"]
+    },
+    {
+        "id": "owner_story",
+        "topic": "车主口碑 / 首批车主口碑 / 用户购车分析 / 用户试驾 / 车主故事",
+        "taxonomy": ["用户角度", "单车类", "真实用户"],
+        "stages": ["上市中", "上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["补足真实信任", "形成身份认同", "处理购买疑虑"],
+        "decisionStages": ["信任形成", "购买临门", "复购推荐"],
+        "creatorTypes": ["真实车主KOC", "家庭用户KOC", "城市生活达人", "圈层用户代表"],
+        "formats": ["车主访谈", "购车账本", "试驾Vlog", "用车日记"],
+        "priority": 86,
+        "conditions": ["有真实车主或试驾用户样本", "目标人群需要同类人背书"],
+        "antiConditions": ["首批车主样本不可验证", "内容过度脚本化影响可信度"],
+        "keywords": ["车主", "口碑", "用户", "试驾", "购车", "故事"]
+    },
+    {
+        "id": "multi_owner_event",
+        "topic": "多车选购 / 车友活动 / 用户到店看车 / 场景化用车",
+        "taxonomy": ["用户角度", "多车类", "社区与场景"],
+        "stages": ["上市后期", "销售期"],
+        "models": ["全车型"],
+        "goals": ["激活社区讨论", "把比较转成场景选择", "沉淀长期口碑"],
+        "decisionStages": ["方案比较", "身份认同", "复购推荐"],
+        "creatorTypes": ["车友会KOC", "本地生活达人", "家庭出行达人", "导购型达人"],
+        "formats": ["车友活动短视频", "多车选购清单", "场景化用车图文", "城市体验路线"],
+        "priority": 72,
+        "conditions": ["有线下活动或真实场景素材", "目标用户存在圈层或城市属性"],
+        "antiConditions": ["活动组织弱且素材不可控", "内容目标是全国统一发布而非社区扩散"],
+        "keywords": ["车友", "活动", "多车", "选购", "场景", "到店", "城市"]
+    }
+]
+
+STAGE_ORDER = ["上市前期", "上市中", "上市后期", "销售期"]
+CREATOR_POOL = {
+    "高预算": ["头部垂媒评测达人", "产业深度媒体", "头部生活方式达人"],
+    "中预算": ["腰部垂媒达人", "区域生活方式达人", "技术解析达人", "真实车主KOC"],
+    "低预算": ["真实车主KOC", "本地KOC", "品牌自有账号", "销售线索承接号"]
+}
+
+def split_terms(value):
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    return [x.strip() for x in re.split(r"[,，/、\n]+", str(value or "")) if x.strip()]
+
+def normalize_launch_stage(value):
+    text = str(value or "").strip()
+    if any(x in text for x in ["上市前", "预热", "预售", "亮相"]):
+        return "上市前期"
+    if any(x in text for x in ["上市中", "发布", "上市发布", "上市期"]):
+        return "上市中"
+    if any(x in text for x in ["上市后", "销售", "售卖", "促销", "交付"]):
+        return "销售期" if "销售" in text or "促销" in text else "上市后期"
+    return "上市中"
+
+def budget_tier(value):
+    text = str(value or "").strip()
+    nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", text)]
+    if any(x in text for x in ["高", "充足", "大", "百万"]) or (nums and max(nums) >= 100):
+        return "高预算"
+    if any(x in text for x in ["低", "小", "有限", "少"]) or (nums and max(nums) < 30):
+        return "低预算"
+    return "中预算"
+
+def score_topic(item, context):
+    stage = context["stage"]
+    text = context["text"]
+    score = item["priority"]
+    if stage in item["stages"]:
+        score += 22
+    elif stage == "销售期" and "上市后期" in item["stages"]:
+        score += 14
+    else:
+        score -= 20
+    if any(k and k in text for k in item.get("keywords", [])):
+        score += 16
+    if any(goal and goal in text for goal in item.get("goals", [])):
+        score += 8
+    if "竞品" in text and any(x in item["id"] for x in ["compare", "price"]):
+        score += 10
+    if "预算" in text and item["id"] in {"pre_price_guess", "compare_matrix"}:
+        score += 6
+    if context["budget"] == "低预算" and item["id"] in {"deep_topic", "industry_hotspot"}:
+        score -= 8
+    if context["budget"] == "高预算" and item["id"] in {"deep_topic", "post_dynamic_review"}:
+        score += 8
+    if "新能源" in text and item["id"] in {"pre_tech_trial", "social_hotspot", "launch_core_advantage"}:
+        score += 8
+    return score
+
+def topic_planning_engine(body):
+    project = body.get("project") or {}
+    signal = body.get("signal") or {}
+    stage = normalize_launch_stage(body.get("launch_stage") or body.get("launchStage") or project.get("launchStage") or project.get("stage") or body.get("stage"))
+    competitors = split_terms(body.get("competitors") if body.get("competitors") is not None else project.get("competitor"))
+    selling_points = split_terms(body.get("core_selling_points") or body.get("coreSellingPoints") or project.get("coreSellingPoints") or project.get("project"))
+    target = " / ".join(split_terms(body.get("target_audience") or body.get("targetAudience") or project.get("targetIdentity"))) or "目标购车人群"
+    objective = str(body.get("communication_goal") or body.get("communicationGoal") or body.get("question") or "形成分阶段车型传播选题规划")
+    budget = budget_tier(body.get("budget") or project.get("budget"))
+    model = project.get("model") or body.get("model") or "当前车型"
+    brand = project.get("brand") or ""
+    context_text = " ".join([model, brand, stage, budget, target, objective, " ".join(competitors), " ".join(selling_points), json.dumps(signal, ensure_ascii=False)[:1200]])
+    context = {"stage": stage, "budget": budget, "text": context_text}
+    ranked = sorted(
+        [{**item, "score": score_topic(item, context)} for item in TOPIC_PLANNING_TAXONOMY],
+        key=lambda x: x["score"],
+        reverse=True
+    )
+    selected = [x for x in ranked if x["score"] >= 78][:8] or ranked[:6]
+    phases = []
+    for phase in STAGE_ORDER:
+        phase_topics = [x for x in selected if phase in x["stages"] or (phase == "销售期" and "上市后期" in x["stages"])]
+        if not phase_topics:
+            continue
+        phases.append({
+            "phase": phase,
+            "strategy": f"{model}在{phase}优先用{phase_topics[0]['topic']}承接{objective}",
+            "topics": [topic_payload(x, model, competitors, selling_points, target) for x in phase_topics[:4]]
+        })
+    creator_matches = creator_matches_for(selected, budget, target)
+    schedule = content_schedule_for(selected, stage, model)
+    return {
+        "engine": "topic_planning_engine",
+        "taxonomyVersion": "2026-07-08.mmn.topic-planning.v1",
+        "inputSummary": {
+            "brand": brand,
+            "model": model,
+            "launchStage": stage,
+            "coreSellingPoints": selling_points,
+            "competitors": competitors,
+            "budgetTier": budget,
+            "targetAudience": target,
+            "communicationGoal": objective
+        },
+        "taxonomy": [topic_payload(x, model, competitors, selling_points, target) for x in TOPIC_PLANNING_TAXONOMY],
+        "selectedTopics": [topic_payload(x, model, competitors, selling_points, target) for x in selected],
+        "phases": phases,
+        "creatorMatches": creator_matches,
+        "schedule": schedule,
+        "strategyConclusion": topic_strategy_conclusion(model, stage, selected, creator_matches, schedule)
+    }
+
+def topic_payload(item, model, competitors, selling_points, target):
+    return {
+        "id": item["id"],
+        "topic": item["topic"],
+        "taxonomy": item["taxonomy"],
+        "communicationStages": item["stages"],
+        "applicableModels": item["models"],
+        "contentGoals": item["goals"],
+        "userDecisionStages": item["decisionStages"],
+        "creatorTypes": item["creatorTypes"],
+        "recommendedFormats": item["formats"],
+        "priority": min(100, int(item.get("score", item["priority"]))),
+        "conditions": item["conditions"],
+        "antiConditions": item["antiConditions"],
+        "fitReason": f"适合{model}围绕{('、'.join(selling_points[:2]) or '核心卖点')}与{('、'.join(competitors[:2]) or '核心竞品')}建立传播证据，目标人群：{target}。"
+    }
+
+def creator_matches_for(selected, budget, target):
+    pool = CREATOR_POOL[budget]
+    rows = []
+    for idx, item in enumerate(selected[:6]):
+        creator = item["creatorTypes"][0]
+        backup = pool[idx % len(pool)]
+        rows.append({
+            "topicId": item["id"],
+            "topic": item["topic"],
+            "primaryCreatorType": creator,
+            "backupCreatorType": backup,
+            "brief": f"面向{target}，用{item['formats'][0]}表达“{item['goals'][0]}”，达人需提供可验证体验或清晰观点。",
+            "selectionLogic": f"{budget}下优先组合{creator}与{backup}，兼顾证据、场景和扩散效率。"
+        })
+    return rows
+
+def content_schedule_for(selected, stage, model):
+    start = STAGE_ORDER.index(stage) if stage in STAGE_ORDER else 1
+    active = STAGE_ORDER[start:] or [stage]
+    rows = []
+    week = 1
+    for phase in active[:3]:
+        phase_topics = [x for x in selected if phase in x["stages"] or (phase == "销售期" and "上市后期" in x["stages"])] or selected[:2]
+        for item in phase_topics[:2]:
+            rows.append({
+                "week": f"W{week}",
+                "phase": phase,
+                "topic": item["topic"],
+                "format": item["formats"][0],
+                "owner": item["creatorTypes"][0],
+                "kpi": schedule_kpi(item, phase),
+                "note": f"{model}在{phase}用该选题沉淀可复用内容资产。"
+            })
+            week += 1
+    return rows[:8]
+
+def schedule_kpi(item, phase):
+    if "上市前期" == phase:
+        return "收藏/预约/搜索量、价格讨论质量、核心卖点提及率"
+    if "上市中" == phase:
+        return "发布信息触达、配置理解率、竞品对比搜索占比"
+    if item["id"] in {"post_dynamic_review", "owner_story", "compare_matrix"}:
+        return "试驾/询价线索、评论疑虑下降、正向口碑占比"
+    return "核心标签正向声量、内容完播收藏、达人素材复用率"
+
+def topic_strategy_conclusion(model, stage, selected, creators, schedule):
+    topics = "、".join([x["topic"] for x in selected[:3]])
+    creator = creators[0]["primaryCreatorType"] if creators else "垂媒与KOC组合"
+    first_week = schedule[0]["topic"] if schedule else "核心优势解读"
+    return f"{model}当前处于{stage}，选题主线应从“{topics}”展开，先用{creator}建立可信证据，再把{first_week}作为首周内容启动项，后续按上市节奏滚动到评测、车主口碑和竞品对比。"
+
 def router_cache_key(question, project, references, mode, task_type, edition):
     ref_keys = []
     for ref in (references or [])[:8]:
@@ -4547,6 +4922,7 @@ def run_mmn_marketing_agent(body):
     platforms = body.get("platforms") or []
     signal_summary = build_signal_summary(body.get("signal") or {})
     evidence = build_evidence_bundle(references, project=project, run_id=run_id)
+    topic_plan = topic_planning_engine(body)
     routed = run_mmn_task_router(
         question,
         project=project,
@@ -4569,6 +4945,7 @@ def run_mmn_marketing_agent(body):
         "references": references[:8],
         "errors": errors,
         "signal": signal_summary,
+        "topicPlan": topic_plan,
         "routerDecision": routed
     }
     status = "completed" if qa["verdict"] == "pass" else "needs_review" if qa["verdict"] == "needs_review" else "degraded"
@@ -4616,6 +4993,22 @@ def run_mmn_marketing_agent(body):
             "confidence": routed.get("conflict", {}).get("confidence", 0.55),
             "started_at": started,
             "completed_at": completed
+        },
+        {
+            "id": str(uuid.uuid4()),
+            "agent_name": "Topic Planning Engine",
+            "step_order": 5,
+            "status": "pass",
+            "input_summary": f"{topic_plan['inputSummary']['model']} / {topic_plan['inputSummary']['launchStage']} / {topic_plan['inputSummary']['budgetTier']}",
+            "output": {
+                "taxonomy_version": topic_plan["taxonomyVersion"],
+                "selected_topics": [x["topic"] for x in topic_plan["selectedTopics"][:6]],
+                "creator_matches": len(topic_plan["creatorMatches"]),
+                "schedule_items": len(topic_plan["schedule"])
+            },
+            "confidence": 0.82,
+            "started_at": started,
+            "completed_at": completed
         }
     ]
     qa_step = steps[-1]["id"]
@@ -4654,6 +5047,7 @@ def run_mmn_marketing_agent(body):
         "run_id": run_id,
         "status": status,
         **final_output,
+        "topicPlan": topic_plan,
         "agentRun": payload,
         "qa": qa,
         "evidence": evidence,
@@ -6979,6 +7373,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/ai/router-feedback",
                 "/api/ai/router-review",
                 "/api/agents/run",
+                "/api/topic-planning/run",
                 "/api/content-capability-kb/distill-account",
                 "/api/content-capability-kb/collect-public",
             }
@@ -7188,6 +7583,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 self.send_json(run_mmn_marketing_agent(body))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/topic-planning/run":
+            try:
+                body = self.read_json()
+                self.send_json({"ok": True, "topicPlan": topic_planning_engine(body)})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
