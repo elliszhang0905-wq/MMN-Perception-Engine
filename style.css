@@ -1622,6 +1622,22 @@ tr:nth-child(even):hover td{
 .topic-plan-head b{font-size:14px;color:var(--ink);margin-bottom:4px}
 .topic-plan-head span,.topic-plan-head em{font-size:11px;color:var(--muted);font-style:normal;line-height:1.45}
 .topic-plan-conclusion{font-size:13px;line-height:1.65;color:#2f3840;background:#fff;border:1px solid var(--hairline);border-radius:10px;padding:11px 12px}
+.topic-model-narrative{
+  border:1px solid var(--hairline);
+  border-radius:10px;
+  background:#fff;
+  overflow:hidden;
+}
+.topic-model-narrative summary{
+  padding:10px 12px;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:900;
+  color:#26313a;
+  background:#f8f9f8;
+}
+.topic-model-narrative div{padding:12px}
+.topic-model-narrative p{font-size:12px;line-height:1.65;color:#3e4851;margin:0 0 9px}
 .topic-phase-grid{
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));

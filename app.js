@@ -540,7 +540,7 @@ async function api(path,options={}){
  let data=null;
  try{data=raw?JSON.parse(raw):{}}catch{
   if(res.status===401||res.status===403)throw new Error("登录状态已失效，请刷新页面后重新登录。");
-  throw new Error("服务器返回了页面内容，不是接口数据。请刷新页面后重试；如果仍失败，说明当前入口没有命中MMN接口。");
+  throw new Error("当前页面没有命中MMN后端接口。请从 http://121.40.60.90/ 打开MMN，并重新登录后再试。");
  }
  if(!res.ok||!data.ok)throw new Error(data.error||`请求失败：HTTP ${res.status}`);
  return data;
@@ -943,15 +943,29 @@ async function runDashboardTopicPlanning(){
  renderDashboardTopicPlanner();
  try{
   const report=reportPayload();
-  const data=await api("/api/topic-planning/run",{method:"POST",body:JSON.stringify({edition:activeEdition(),question:goal,project:strategyProjectContext(),signal:report,launchStage:stage,coreSellingPoints:(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean),competitors:String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean),budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal})});
-  dashboardTopicPlanState={loading:false,result:data.topicPlan,error:""};
+  const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+  const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
+  const question=[
+   `${state.config.model} ${stage}车型传播选题规划`,
+   `传播目标：${goal}`,
+   `核心卖点：${coreSellingPoints.join("、")||state.config.project}`,
+   `核心竞品：${competitors.join("、")||"待补充"}`,
+   `目标人群：${state.config.targetIdentity}`,
+   "请使用MMN深度策略链路输出分阶段选题、达人匹配、内容形式和排期，并给出明确策略结论。"
+  ].join("\n");
+  const data=await api("/api/agents/run",{method:"POST",body:JSON.stringify({org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),question,project:strategyProjectContext(),references:ragSearch({query:[state.config.model,...competitors,stage,goal,"车型传播选题","达人匹配","内容排期"].join(" "),limit:8}),mode:"deep",task_type:"strategy_reasoning",signal:report,launchStage:stage,coreSellingPoints,competitors,budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal})});
+  const plan=data.topicPlan||data.agentRun?.final_output?.topicPlan;
+  if(!plan)throw new Error("MMN深度策略已返回，但缺少结构化选题规划。");
+  plan.modelNarrative=data.text||"";
+  plan.modelLabel=data.modelLabel||"MMN深度策略";
+  dashboardTopicPlanState={loading:false,result:plan,error:""};
   save();
   renderDashboardTopicPlanner();
-  toast("车型传播选题规划已生成");
+  toast("MMN深度策略已生成车型传播选题规划");
  }catch(err){
   dashboardTopicPlanState={loading:false,result:null,error:err.message};
   const box=document.querySelector("#dashboard-topic-plan");
-  if(box)box.innerHTML=`<p class="empty">选题规划生成失败：${escapeHtml(err.message)}</p>`;
+  if(box)box.innerHTML=`<p class="empty">MMN深度选题规划生成失败：${escapeHtml(err.message)}</p>`;
   toast(`选题规划生成失败：${err.message}`);
  }
 }
@@ -2284,7 +2298,8 @@ function renderTopicPlanPanel(plan){
  const phaseHtml=phases.map(x=>`<div><b>${escapeHtml(x.phase)}</b><span>${escapeHtml(x.strategy)}</span><small>${(x.topics||[]).slice(0,3).map(t=>escapeHtml(t.topic)).join(" / ")}</small></div>`).join("");
  const creatorHtml=creators.map(x=>`<tr><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.primaryCreatorType)}</td><td>${escapeHtml(x.backupCreatorType)}</td><td>${escapeHtml(x.brief)}</td></tr>`).join("");
  const scheduleHtml=schedule.map(x=>`<tr><td>${escapeHtml(x.week)}</td><td>${escapeHtml(x.phase)}</td><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.format)}</td><td>${escapeHtml(x.kpi)}</td></tr>`).join("");
- return`<section class="topic-plan-panel"><div class="topic-plan-head"><div><b>车型传播选题规划器</b><span>${escapeHtml(plan.taxonomyVersion)} · ${escapeHtml(summary.model||"当前车型")} · ${escapeHtml(summary.launchStage||"上市阶段")} · ${escapeHtml(summary.budgetTier||"预算层级")}</span></div><em>${escapeHtml(plan.engine||"topic_planning_engine")}</em></div><p class="topic-plan-conclusion">${escapeHtml(plan.strategyConclusion||"")}</p><div class="topic-phase-grid">${phaseHtml}</div><div class="topic-card-grid">${topicCards}</div><div class="topic-table-wrap"><table><thead><tr><th>选题</th><th>主达人</th><th>备选达人</th><th>Brief要点</th></tr></thead><tbody>${creatorHtml}</tbody></table></div><div class="topic-table-wrap"><table><thead><tr><th>周期</th><th>阶段</th><th>选题</th><th>形式</th><th>KPI</th></tr></thead><tbody>${scheduleHtml}</tbody></table></div></section>`;
+ const modelNarrative=plan.modelNarrative?`<details class="topic-model-narrative"><summary>${escapeHtml(plan.modelLabel||"MMN深度策略结论")}</summary><div>${markdownish(plan.modelNarrative)}</div></details>`:"";
+ return`<section class="topic-plan-panel"><div class="topic-plan-head"><div><b>车型传播选题规划器</b><span>${escapeHtml(plan.taxonomyVersion)} · ${escapeHtml(summary.model||"当前车型")} · ${escapeHtml(summary.launchStage||"上市阶段")} · ${escapeHtml(summary.budgetTier||"预算层级")}</span></div><em>${escapeHtml(plan.modelLabel||plan.engine||"topic_planning_engine")}</em></div><p class="topic-plan-conclusion">${escapeHtml(plan.strategyConclusion||"")}</p>${modelNarrative}<div class="topic-phase-grid">${phaseHtml}</div><div class="topic-card-grid">${topicCards}</div><div class="topic-table-wrap"><table><thead><tr><th>选题</th><th>主达人</th><th>备选达人</th><th>Brief要点</th></tr></thead><tbody>${creatorHtml}</tbody></table></div><div class="topic-table-wrap"><table><thead><tr><th>周期</th><th>阶段</th><th>选题</th><th>形式</th><th>KPI</th></tr></thead><tbody>${scheduleHtml}</tbody></table></div></section>`;
 }
 function immediateStrategyDraft(query,references,mode){
  const titles=references.slice(0,3).map(x=>x.title).filter(Boolean).join("、")||"当前知识库";
