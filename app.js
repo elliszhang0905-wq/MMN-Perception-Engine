@@ -724,11 +724,10 @@ function brandModelGroups(models){
  return Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0],"zh-CN",{numeric:true})).map(([brand,map])=>({brand,models:[...map.values()].sort((a,b)=>a.localeCompare(b,"zh-CN",{numeric:true}))}));
 }
 function cognitionModelOptions(){
- const models=new Set();
+ const models=new Set([state.config.model]);
  state.rows.forEach(r=>{if(r[0])models.add(r[0])});
  (verticalState.items||[]).forEach(x=>{if(x.ownModel)models.add(x.ownModel);if(x.competitor)models.add(x.competitor)});
  (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
- if(!models.size&&state.config.model)models.add(state.config.model);
  return [...models].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
 }
 function cognitionBrandModelGroups(models){
@@ -905,9 +904,20 @@ function renderModelSwitcher(){
  const activeGroup=groups.find(g=>g.brand===dashBrandOpen)||groups[0]||{brand:"",models:[]};
  const activeModels=activeGroup.models;
  wrap.innerHTML=`<div class="dash-model-selects"><select id="dash-brand-select" aria-label="选择品牌">${groups.map(g=>`<option value="${escapeAttr(g.brand)}" ${g.brand===dashBrandOpen?"selected":""}>${g.brand}</option>`).join("")}</select><select id="dash-model-select" aria-label="选择车型">${activeModels.map(m=>`<option value="${escapeAttr(m)}" ${m===state.config.model?"selected":""}>${m}</option>`).join("")}</select></div>`;
- const brandSelect=wrap.querySelector("#dash-brand-select"),modelSelect=wrap.querySelector("#dash-model-select");
-	 brandSelect.onchange=()=>{dashBrandOpen=brandSelect.value;renderModelSwitcher()};
- modelSelect.onchange=()=>{applyModelSelection(modelSelect.value);dashBrandOpen=brandForDisplay(modelSelect.value);dashboardTopicPlanState={loading:false,result:null,error:""};save();render();toast(`已切换为 ${modelSelect.value}`)};
+	 const brandSelect=wrap.querySelector("#dash-brand-select"),modelSelect=wrap.querySelector("#dash-model-select");
+ brandSelect.onchange=()=>{dashBrandOpen=brandSelect.value;renderModelSwitcher()};
+	 modelSelect.onchange=()=>{applyModelSelection(modelSelect.value);dashBrandOpen=brandForDisplay(modelSelect.value);dashboardTopicPlanState={loading:false,result:null,error:""};save();render();toast(`已切换为 ${modelSelect.value}`)};
+	}
+function syncDashboardModelFromControls(){
+ const modelSelect=document.querySelector("#dash-model-select");
+ const selected=modelSelect?.value;
+ if(selected&&selected!==state.config.model){
+  applyModelSelection(selected);
+  dashBrandOpen=brandForDisplay(selected);
+  dashboardTopicPlanState={loading:false,result:null,error:""};
+  save();
+ }
+ return state.config.model;
 }
 function renderDashboard(a){
  const top=[...a.labels].sort((x,y)=>Math.max(y.op,y.on)-Math.max(x.op,x.on)).slice(0,6),max=Math.max(...top.flatMap(x=>[x.op,x.on]),1);
@@ -922,10 +932,12 @@ function renderDashboard(a){
 function renderDashboardTopicPlanner(a=analysis()){
  const box=document.querySelector("#dashboard-topic-plan");
  if(!box)return;
+ const model=state.config.model;
+ const competitor=state.config.competitor||"核心竞品";
  const stage=document.querySelector("#dashboard-topic-stage");
  if(stage&&!state.config.stage)state.config.stage=stage.value||"上市中";
  if(dashboardTopicPlanState.loading){
-  box.innerHTML=`<div class="topic-plan-loading"><b>MMN正在生成车型传播选题规划</b><span>${state.config.model} · ${state.config.competitor||"核心竞品"} · ${state.config.targetIdentity||"目标人群"}</span></div>`;
+  box.innerHTML=`<div class="topic-plan-loading"><b>MMN正在生成车型传播选题规划</b><span>${model} · ${competitor} · ${state.config.targetIdentity||"目标人群"}</span></div>`;
   return;
  }
  if(dashboardTopicPlanState.result){
@@ -933,9 +945,10 @@ function renderDashboardTopicPlanner(a=analysis()){
   return;
  }
  const labels=(a.labels||[]).filter(x=>x.priority>0).slice(0,5).map(x=>x.label).join(" / ")||"核心卖点";
- box.innerHTML=`<div class="topic-plan-empty"><b>${state.config.model} 选题规划待生成</b><span>当前诊断重点：${escapeHtml(labels)}｜竞品：${escapeHtml(state.config.competitor||"待补充")}</span></div>`;
+ box.innerHTML=`<div class="topic-plan-empty"><b>${model} 选题规划待生成</b><span>当前诊断重点：${escapeHtml(labels)}｜竞品：${escapeHtml(competitor||"待补充")}</span></div>`;
 }
 async function runDashboardTopicPlanning(){
+ const model=syncDashboardModelFromControls();
  const stage=document.querySelector("#dashboard-topic-stage")?.value||state.config.stage||"上市中";
  const goal=document.querySelector("#dashboard-topic-goal")?.value?.trim()||"建立核心购买理由并抢占竞品对比搜索";
  state.config.stage=stage;
@@ -945,15 +958,15 @@ async function runDashboardTopicPlanning(){
   const report=reportPayload();
   const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
   const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
-  const question=[
-   `${state.config.model} ${stage}车型传播选题规划`,
+	  const question=[
+   `${model} ${stage}车型传播选题规划`,
    `传播目标：${goal}`,
    `核心卖点：${coreSellingPoints.join("、")||state.config.project}`,
    `核心竞品：${competitors.join("、")||"待补充"}`,
    `目标人群：${state.config.targetIdentity}`,
    "请使用MMN深度策略链路输出分阶段选题、达人匹配、内容形式和排期，并给出明确策略结论。"
   ].join("\n");
-  const data=await api("/api/agents/run",{method:"POST",body:JSON.stringify({org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),question,project:strategyProjectContext(),references:ragSearch({query:[state.config.model,...competitors,stage,goal,"车型传播选题","达人匹配","内容排期"].join(" "),limit:8}),mode:"deep",task_type:"strategy_reasoning",signal:report,launchStage:stage,coreSellingPoints,competitors,budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal})});
+  const data=await api("/api/agents/run",{method:"POST",body:JSON.stringify({org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),question,project:strategyProjectContext(),references:ragSearch({query:[model,...competitors,stage,goal,"车型传播选题","达人匹配","内容排期"].join(" "),limit:8}),mode:"deep",task_type:"strategy_reasoning",signal:report,launchStage:stage,coreSellingPoints,competitors,budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal})});
   const plan=data.topicPlan||data.agentRun?.final_output?.topicPlan;
   if(!plan)throw new Error("MMN深度策略已返回，但缺少结构化选题规划。");
   plan.modelNarrative=data.text||"";
@@ -1264,10 +1277,6 @@ function renderData(){
 }
 function renderCognition(a){
  const models=cognitionModelOptions();
- if(models.length&&!models.includes(state.config.model)){
-  applyModelSelection(models[0]);
-  a=analysis();
- }
  renderCognitionSelectors(a,models);
  renderCognitionMmnStrategy(a);
  const rows=a.labels||[];
@@ -1281,10 +1290,6 @@ function renderCognitionSelectors(a,models){
  cognitionBrandOpen=groups.some(g=>g.brand===cognitionBrandOpen)?cognitionBrandOpen:currentBrand;
  const activeGroup=groups.find(g=>g.brand===cognitionBrandOpen)||groups[0]||{brand:"暂无品牌",models:[]};
  const activeModels=activeGroup.models||[];
- if(activeModels.length&&!activeModels.includes(state.config.model)){
-  applyModelSelection(activeModels[0]);
-  a=analysis();
- }
  brandSel.innerHTML=groups.length?groups.map(g=>`<option value="${escapeAttr(g.brand)}" ${g.brand===activeGroup.brand?"selected":""}>${g.brand}（${g.models.length}款）</option>`).join(""):`<option>暂无可选品牌</option>`;
  modelSel.innerHTML=activeModels.length?activeModels.map(m=>`<option value="${escapeAttr(m)}" ${m===state.config.model?"selected":""}>${canonicalModelLabel(m)}</option>`).join(""):`<option>暂无可选车型</option>`;
  brandSel.onchange=()=>{
