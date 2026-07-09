@@ -239,6 +239,14 @@ node --check app.js
 
 如果普通 `node` 不可用，应使用本机已配置的运行时或项目依赖中的 Node。
 
+完整发布门禁统一执行：
+
+```bash
+bash scripts/release_gate.sh
+```
+
+门禁按 `NODE_BINARY`、系统 `PATH`、本机内置运行时的顺序解析 Node.js。显式 `NODE_BINARY` 可以是绝对路径或 PATH 中的命令名；显式值无效时必须直接报错，不得静默切换版本。
+
 接口检查示例：
 
 ```bash

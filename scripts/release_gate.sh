@@ -4,13 +4,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-NODE_BIN="${NODE_BINARY:-$(command -v node)}"
+if [[ -n "${NODE_BINARY:-}" ]]; then
+  NODE_BIN="$NODE_BINARY"
+  if [[ "$NODE_BIN" != */* ]]; then
+    NODE_BIN="$(command -v -- "$NODE_BIN" 2>/dev/null || true)"
+  fi
+else
+  NODE_BIN="$(command -v node 2>/dev/null || true)"
+fi
+if [[ -z "$NODE_BIN" && -z "${NODE_BINARY:-}" ]]; then
+  bundled_node="${HOME:-}/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+  if [[ -x "$bundled_node" ]]; then
+    NODE_BIN="$bundled_node"
+  fi
+fi
 PORT="${MMN_PORT:-18765}"
 URL="${MMN_URL:-http://localhost:${PORT}/}"
 SERVER_PID=""
 
-if [[ -z "$NODE_BIN" ]]; then
-  echo "未找到 Node.js，请安装 Node.js 或设置 NODE_BINARY。" >&2
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "未找到可执行的 Node.js，请安装 Node.js 或设置 NODE_BINARY。" >&2
   exit 1
 fi
 
