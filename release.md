@@ -252,15 +252,22 @@ MMN研发团队
 
 ## GitHub 与云端发布结果
 
-- GitHub Commit：待提交后回填。
+- GitHub Commit：`fb3dfdf fix: make release gate resolve bundled Node`。
 - 服务器目录：`/opt/mmn-perception-engine`。
-- 同步方式：待部署后回填。
-- 发布前数据备份：待部署后回填。
-- 发布前代码归档：待部署后回填。
-- 容器状态：待部署后回填。
-- 健康检查：待部署后回填。
-- 公网基础检查：待部署后回填。
+- 同步方式：GitHub `main` 推送后，使用 `fb3dfdf` 已提交文件归档同步到无 `.git` 的服务器目录，再执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`。
+- 部署时间：2026-07-10 04:48（Asia/Shanghai）。
+- 发布前数据备份：`backups/mmn_backup_20260710_044802.tar.gz`。
+- 发布前代码归档：`backups/code_before_fb3dfdf_20260710_044756.tar.gz`。
+- 容器状态：`mmn-app` healthy、`mmn-db` healthy、`mmn-scheduler` healthy、`mmn-web` running。
+- 健康检查：`http://121.40.60.90/api/health` 返回 `ok: true`、`version: beta 1.01`。
+- 公网基础检查：`bash scripts/test_mmn_cloud.sh http://121.40.60.90` 通过首页与健康接口检查。
+- 文件一致性：服务器 `scripts/release_gate.sh` SHA-256 为 `cdc827a8b5e07d5f64d9ae5a0af61c36b6755c44e3003b73cabfb4cc730ac47e`，与本地提交一致。
+- 发布后日志：应用、Web 与定时任务近 5 分钟未发现 `traceback`、`exception`、`critical` 或 `error`。
 
 ## 回滚方案
 
 如发布后出现异常，恢复本次发布前的服务器代码归档，保留 `.env` 与运行数据，再执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`；如涉及数据问题，使用本次发布前生成的数据备份恢复。
+
+## 发布结论
+
+发布门禁 Node.js 运行时解析修复、研发档案、交接手册与发布记录已同步到 GitHub 和阿里云服务器；公网服务与容器状态健康。
