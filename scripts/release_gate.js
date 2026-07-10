@@ -283,19 +283,41 @@ async function main() {
     quadrants: document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length
   }));
   add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote), JSON.stringify(summaryImport));
-  add("summary workbook first renders source-backed all-network heat comparison", summaryImport.surfaceTitle === "全网声量及互动量对比" && summaryImport.selectableModels.length === summaryModels.length && summaryImport.selectedModels.length === summaryModels.length && summaryImport.heatRows.length === summaryModels.length && summaryImport.heatRows.some(row => /奥迪E7X.*23\.6万.*217\.0万/.test(row)) && summaryImport.addOptions.length === 1, JSON.stringify(summaryImport));
+  add("summary workbook first renders source-backed all-network heat comparison", summaryImport.surfaceTitle === "全网声量及互动量对比" && summaryImport.selectableModels.length === summaryModels.length && summaryImport.selectedModels.length === summaryModels.length && summaryImport.heatRows.length === summaryModels.length && /^奥迪E7X.*23\.6万.*217\.0万/.test(summaryImport.heatRows[0] || "") && summaryImport.addOptions.length === 1, JSON.stringify(summaryImport));
   add("summary cockpit keeps product fixed and removes system counters", summaryImport.ownModel === "奥迪E7X" && summaryImport.ownLocked && summaryImport.competitorModels.length === summaryModels.length - 1 && !summaryImport.competitorModels.includes("奥迪E7X") && summaryImport.summaryCardsHidden, JSON.stringify(summaryImport));
   add("summary cockpit uses decision language and explains independent scales", summaryImport.productPointName === "当前可用产品点" && summaryImport.scaleNote === "声量与互动量按各自独立尺度展示，不可直接比较绝对柱长。", JSON.stringify(summaryImport));
   add("summary workbook keeps the global brand library separate from imported comparison models", summaryImport.topBrands.length > 10 && summaryImport.topBrands.includes("奥迪") && summaryImport.topBrands.includes("智己") && summaryImport.selectableModels.length === summaryModels.length, JSON.stringify(summaryImport));
   add("summary workbook renders real attribute NSR without emotion quadrants", summaryImport.attributeRows === 3 && summaryImport.attributeValues.length === 9 && summaryImport.attributeValues.every(value => /^-?\d+(?:\.\d)?%$/.test(value)) && summaryImport.quadrants === 0, JSON.stringify(summaryImport));
 
-  await page.locator('[data-summary-heat-model="奥迪E7X"]').click();
-  const platformBubble = await page.evaluate(() => ({
-    title: document.querySelector(".summary-platform-popover header")?.textContent.replace(/×/g, "").replace(/\s+/g, " ").trim() || "",
-    rows: [...document.querySelectorAll(".summary-platform-bars>div")].map(node => node.textContent.replace(/\s+/g, " ").trim()),
-    closeLabel: document.querySelector(".summary-platform-popover button")?.getAttribute("aria-label") || ""
-  }));
-  add("heat bar opens a source-backed platform volume bubble", /奥迪E7X.*分平台声量表现/.test(platformBubble.title) && platformBubble.rows.length === 9 && platformBubble.rows.some(row => /抖音.*10\.4万/.test(row)) && platformBubble.closeLabel === "关闭分平台声量气泡", JSON.stringify(platformBubble));
+  await page.locator('[data-summary-heat-model="小米YU7"]').click();
+  const platformBubble = await page.evaluate(() => {
+    const close = document.querySelector(".summary-platform-popover button");
+    const before = close ? getComputedStyle(close, "::before") : null;
+    const after = close ? getComputedStyle(close, "::after") : null;
+    return {
+      title: document.querySelector(".summary-platform-popover header")?.textContent.replace(/\s+/g, " ").trim() || "",
+      groups: [...document.querySelectorAll(".summary-platform-group")].map(node => ({
+        platform: node.querySelector(".summary-platform-name")?.textContent.trim() || "",
+        series: [...node.querySelectorAll(".summary-platform-series>div")].map(series => series.textContent.replace(/\s+/g, " ").trim())
+      })),
+      closeLabel: close?.getAttribute("aria-label") || "",
+      closeText: close?.textContent.trim() || "",
+      closeGeometry: close && before && after ? {
+        width: close.getBoundingClientRect().width,
+        height: close.getBoundingClientRect().height,
+        clientWidth: close.clientWidth,
+        clientHeight: close.clientHeight,
+        beforeLeft: parseFloat(before.left),
+        beforeTop: parseFloat(before.top),
+        afterLeft: parseFloat(after.left),
+        afterTop: parseFloat(after.top)
+      } : null
+    };
+  });
+  const douyinGroup = platformBubble.groups.find(group => group.platform === "抖音");
+  const closeCentered = platformBubble.closeGeometry && platformBubble.closeGeometry.width === platformBubble.closeGeometry.height && Math.abs(platformBubble.closeGeometry.beforeLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.beforeTop - platformBubble.closeGeometry.clientHeight / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterTop - platformBubble.closeGeometry.clientHeight / 2) < .6;
+  add("competitor heat bubble pairs each platform with the product model", /小米YU7.*奥迪E7X.*分平台声量对比/.test(platformBubble.title) && platformBubble.groups.length === 9 && platformBubble.groups.every(group => group.series.length === 2) && douyinGroup?.series.some(row => /小米YU7.*90\.2万/.test(row)) && douyinGroup?.series.some(row => /本品.*奥迪E7X.*10\.4万/.test(row)), JSON.stringify(platformBubble));
+  add("platform bubble close icon is geometrically centered", platformBubble.closeLabel === "关闭分平台声量气泡" && platformBubble.closeText === "" && closeCentered, JSON.stringify(platformBubble.closeGeometry));
   await page.locator(".summary-platform-popover button").click();
   await page.locator('.summary-heat-model-list input[value="小米YU7"]').uncheck();
   const lockedAfterFilter = await page.evaluate(() => ({

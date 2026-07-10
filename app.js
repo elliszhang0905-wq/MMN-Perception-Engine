@@ -1136,14 +1136,15 @@ function closeSummaryPlatformPopover(restoreFocus=false){
 }
 function openSummaryPlatformPopover(model,trigger){
  closeSummaryPlatformPopover();
- const chart=trigger.closest(".summary-heat-chart"),values=state.summaryHeat?.[model]?.platformVolume||{};
+ const chart=trigger.closest(".summary-heat-chart"),ownModel=state.config.model,values=state.summaryHeat?.[model]?.platformVolume||{},ownValues=state.summaryHeat?.[ownModel]?.platformVolume||{},isCompetitor=model!==ownModel;
  if(!chart)return;
- const entries=Object.entries(values).map(([platform,value])=>({platform,value:summaryHeatNumber(value)}));
- const maxValue=Math.max(...entries.map(item=>item.value),1),popover=document.createElement("section");
+ const entries=Object.entries(values).map(([platform,value])=>({platform,value:summaryHeatNumber(value),ownValue:summaryHeatNumber(ownValues[platform])}));
+ const maxValue=Math.max(...entries.flatMap(item=>isCompetitor?[item.value,item.ownValue]:[item.value]),1),popover=document.createElement("section");
  popover.className="summary-platform-popover";
  popover.setAttribute("role","dialog");
- popover.setAttribute("aria-label",`${model}分平台声量表现`);
- popover.innerHTML=`<header><div><span>${escapeHtml(model)}</span><b>分平台声量表现</b></div><button type="button" aria-label="关闭分平台声量气泡">×</button></header>${entries.length?`<div class="summary-platform-bars">${entries.map(item=>`<div><span>${escapeHtml(item.platform)}</span><i><em style="width:${item.value/maxValue*100}%"></em></i><strong title="${item.value.toLocaleString()}">${summaryHeatDisplay(item.value)}</strong></div>`).join("")}</div>`:`<div class="summary-platform-empty">当前导入版本未保留分平台声量，请重新导入原表。</div>`}`;
+ popover.setAttribute("aria-label",isCompetitor?`${model}与${ownModel}分平台声量对比`:`${model}分平台声量表现`);
+ const title=isCompetitor?`${escapeHtml(model)} vs ${escapeHtml(ownModel)} · 分平台声量对比`:`${escapeHtml(model)} · 分平台声量表现`;
+ popover.innerHTML=`<header><div><span>${isCompetitor?"竞品车型 vs 本品车型":"本品车型"}</span><b>${title}</b></div><button type="button" aria-label="关闭分平台声量气泡"></button></header>${entries.length?`<div class="summary-platform-bars">${entries.map(item=>`<section class="summary-platform-group"><span class="summary-platform-name">${escapeHtml(item.platform)}</span><div class="summary-platform-series"><div class="competitor"><small>${escapeHtml(model)}</small><i><em style="width:${item.value/maxValue*100}%"></em></i><strong title="${item.value.toLocaleString()}">${summaryHeatDisplay(item.value)}</strong></div>${isCompetitor?`<div class="own"><small>本品 · ${escapeHtml(ownModel)}</small><i><em style="width:${item.ownValue/maxValue*100}%"></em></i><strong title="${item.ownValue.toLocaleString()}">${summaryHeatDisplay(item.ownValue)}</strong></div>`:""}</div></section>`).join("")}</div>`:`<div class="summary-platform-empty">当前导入版本未保留分平台声量，请重新导入原表。</div>`}`;
  chart.appendChild(popover);
  const desiredTop=trigger.offsetTop+trigger.offsetHeight-4,chartHeight=chart.clientHeight,popoverHeight=popover.offsetHeight;
  popover.style.top=`${Math.max(46,Math.min(desiredTop,chartHeight-popoverHeight-12))}px`;
@@ -1161,7 +1162,7 @@ function summaryHeatSelection(){
  summaryDashboardModels=summaryDashboardModels.filter(model=>available.includes(model));
  const own=state.config.model;
  if(!summaryDashboardModels.length&&available.length)summaryDashboardModels=[...available];
- if(own&&available.includes(own)&&!summaryDashboardModels.includes(own))summaryDashboardModels=[own,...summaryDashboardModels];
+ if(own&&available.includes(own))summaryDashboardModels=[own,...summaryDashboardModels.filter(model=>model!==own)];
  return summaryDashboardModels;
 }
 function renderSummaryHeatDashboard(a){
