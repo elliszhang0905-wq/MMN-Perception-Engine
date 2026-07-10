@@ -31,6 +31,18 @@ class BFExtractionTest(unittest.TestCase):
         self.assertEqual(result["primaryCode"], "HIGH_END_PHOTOGRAPHY")
         self.assertIn("SHOT_LIST", result["contentIntents"])
 
+    def test_actual_shoot_profiles_are_recognized_with_execution_intents(self):
+        cases = (
+            ("静态实拍BF，完成外观、内饰和产品细节镜头", "STATIC_SHOOT", "STATIC_EXPERIENCE"),
+            ("动态实拍BF，完成合规道路跟车、路跑和动态素材", "DYNAMIC_SHOOT", "DYNAMIC_MATERIAL_CAPTURE"),
+            ("底盘实拍BF，完成举升机、底盘结构和悬架细节拍摄", "CHASSIS_SHOOT", "CHASSIS_DETAIL_CAPTURE"),
+        )
+        for text, expected_profile, expected_intent in cases:
+            with self.subTest(expected_profile):
+                result = classify_bf_profile([segment(text)])
+                self.assertEqual(result["primaryCode"], expected_profile)
+                self.assertIn(expected_intent, result["contentIntents"])
+
     def test_mixed_new_need_becomes_custom_profile_with_composable_intents(self):
         result = classify_bf_profile(
             [

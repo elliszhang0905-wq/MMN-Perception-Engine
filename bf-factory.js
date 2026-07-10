@@ -56,7 +56,7 @@
   bfState.profile=profile;
   document.querySelectorAll("[data-bf-profile]").forEach(button=>button.classList.toggle("active",button.dataset.bfProfile===profile));
   const textarea=document.querySelector("#bf-content-directions");
-  const presets={STORE_VISIT:"探店静态体验、用户第一视角、必须露出信息、到店CTA和拍摄注意事项",CLOUD_REVIEW:"围绕核心论点、数据事实、话题矩阵、达人分工和口播逻辑展开",HIGH_END_PHOTOGRAPHY:"围绕视觉调性、产品点分发、场景、镜头语言、车务流程和素材回传展开"};
+  const presets={STORE_VISIT:"探店静态体验、用户第一视角、必须露出信息、到店CTA和拍摄注意事项",CLOUD_REVIEW:"围绕核心论点、数据事实、话题矩阵、达人分工和口播逻辑展开",HIGH_END_PHOTOGRAPHY:"围绕视觉调性、产品点分发、场景、镜头语言、车务流程和素材回传展开",STATIC_SHOOT:"完成外观、内饰、空间、座椅、车机和产品细节的静态实拍，明确场景、机位、必拍镜头和素材规格",DYNAMIC_SHOOT:"完成合规道路上的路跑、跟车、车身姿态和动态性能实拍，明确驾驶安全、机位、车速和素材回传要求",CHASSIS_SHOOT:"完成举升机环境下的底盘全貌、悬架、护板、制动和关键结构实拍，明确车务安全、讲解口径和特写镜头"};
   if(profile!=="AUTO"&&!textarea.value.trim())textarea.value=presets[profile]||"";
  }
 
@@ -98,7 +98,7 @@
   document.querySelector("#bf-internal-strategy").className="bf-strategy-grid";
   document.querySelector("#bf-internal-strategy").innerHTML=Object.entries(labels).map(([key,label])=>`<div><b>${esc(label)}</b><span>${esc(Array.isArray(result.internalStrategy?.[key])?result.internalStrategy[key].join("、"):result.internalStrategy?.[key]||"待确认")}</span></div>`).join("");
   const evidence=[...(result.retrieval?.positive||[]).map(item=>({...item,kind:"优质/普通样本"})),...(result.retrieval?.risk||[]).map(item=>({...item,kind:"反例风险"}))];
-  document.querySelector("#bf-evidence-list").innerHTML=evidence.length?evidence.map(item=>`<article class="bf-evidence-card"><b>${esc(item.title)}</b><span>${esc(item.kind)} · ${esc(item.sample_grade)} · ${esc(item.bf_type)}</span></article>`).join(""):`<p class="empty">当前项目暂无历史BF，已使用MMN结构化规则与策略判断生成；最终版会回流形成新资产。</p>`;
+  document.querySelector("#bf-evidence-list").innerHTML=evidence.length?evidence.map(item=>`<article class="bf-evidence-card"><b>${esc(item.title)}</b><span>${esc(item.kind)} · ${esc(item.sample_grade)} · ${esc(item.bf_type)}</span></article>`).join(""):`<p class="empty">当前项目暂无可引用的历史BF。</p>`;
  }
 
  function renderCorrectionFields(payload){
@@ -119,7 +119,7 @@
   const record=(path,value)=>{payload.provenance=payload.provenance||{};payload.provenance[path]=[...(payload.provenance[path]||[]),{originType:"MANUAL",sourceDocumentId:"",sourceSegmentId:"",sourceLocator:"在线编辑器",sourceFieldPath:path,excerpt:String(Array.isArray(value)?value.join("、"):value||"").slice(0,240),confidence:1,isManual:true,modifiedAt:now,modifiedBy:userId}]};
   const typeLabel=document.querySelector("#bf-correct-type").value.trim(),summary=document.querySelector("#bf-correct-summary").value.trim(),strategy=document.querySelector("#bf-correct-strategy").value.trim();
   const content=splitLines(document.querySelector("#bf-correct-content").value),risk=splitLines(document.querySelector("#bf-correct-risk").value),tags=splitLines(document.querySelector("#bf-correct-tags").value);
-  const knownTypes={"探店BF":"STORE_VISIT","探店":"STORE_VISIT","云评/口播BF":"CLOUD_REVIEW","云评BF":"CLOUD_REVIEW","口播BF":"CLOUD_REVIEW","高质感摄影BF":"HIGH_END_PHOTOGRAPHY","摄影BF":"HIGH_END_PHOTOGRAPHY","产品解读BF":"PRODUCT_EXPLAINER","竞品攻防BF":"COMPETITIVE_DEFENSE","执行规范BF":"EXECUTION_STANDARD"};
+  const knownTypes={"探店BF":"STORE_VISIT","探店":"STORE_VISIT","云评/口播BF":"CLOUD_REVIEW","云评BF":"CLOUD_REVIEW","口播BF":"CLOUD_REVIEW","高质感摄影BF":"HIGH_END_PHOTOGRAPHY","摄影BF":"HIGH_END_PHOTOGRAPHY","静态实拍":"STATIC_SHOOT","静态实拍BF":"STATIC_SHOOT","动态实拍":"DYNAMIC_SHOOT","动态实拍BF":"DYNAMIC_SHOOT","底盘实拍":"CHASSIS_SHOOT","底盘实拍BF":"CHASSIS_SHOOT","产品解读BF":"PRODUCT_INTERPRETATION","竞品攻防BF":"COMPETITOR_ATTACK_DEFENSE","执行规范BF":"EXECUTION_GUIDE"};
   if(typeLabel){payload.classification.bfType=knownTypes[typeLabel]||"CUSTOM";payload.classification.bfTypeLabel=typeLabel}payload.strategy.bfType=payload.classification.bfType;record("/classification/bfTypeLabel",payload.classification.bfTypeLabel);
   payload.summary=summary;record("/summary",summary);payload.strategy.coreStrategyJudgment=strategy;record("/strategy/coreStrategyJudgment",strategy);
   payload.content.contentDirections=content;record("/content/contentDirections",content);payload.risk.riskChecklist=risk;record("/risk/riskChecklist",risk);
@@ -141,7 +141,7 @@
    syncCorrectionsToPayload();
    const s=scope(),sampleGrade=document.querySelector("#bf-sample-grade").value;
    const result=await bfFetch(`/api/bf/briefs/${encodeURIComponent(bfState.current.brief.id)}/finalizations`,{method:"POST",body:JSON.stringify({projectId:bfState.projectId,orgId:s.orgId,userId:s.userId,baseVersionNo:bfState.current.versionNo,payload:bfState.current.payload,markdown:document.querySelector("#bf-editor").value,sampleGrade,outcome:{isCustomerAdopted:false,isCommercialUsed:false,needsReshoot:false,passedReview:true},learnedProfileName:bfState.current.payload.classification.bfTypeLabel})});
-   bfState.current.versionNo=result.version.version_no;document.querySelector("#bf-editor-version").textContent=`V${result.version.version_no} · 最终版 · ${sampleGrade}`;await loadLibrary();toast(result.learnedProfile?"最终版已回流，并沉淀为新的可复用BF范式":"最终版已回流BF资产库");
+   bfState.current.versionNo=result.version.version_no;document.querySelector("#bf-editor-version").textContent=`V${result.version.version_no} · 最终版 · ${sampleGrade}`;await loadLibrary();toast(result.learnedProfile?"最终版已回流，并保存为可复用BF样本":"最终版已回流BF资产库");
   }catch(error){toast(`最终版回流失败：${error.message}`)}
  }
 
@@ -157,7 +157,7 @@
 
  async function uploadDocument(file){
   if(!file)return;if(!bfState.projectId)await loadProjects();
-  const s=scope(),project=bfState.projects.find(item=>item.id===bfState.projectId);document.querySelector("#bf-upload-status").textContent="正在解析文件、识别BF范式并抽取字段…";
+  const s=scope(),project=bfState.projects.find(item=>item.id===bfState.projectId);document.querySelector("#bf-upload-status").textContent="正在解析文件、识别BF类型并抽取字段…";
   try{
    const query=new URLSearchParams({projectId:bfState.projectId,orgId:s.orgId,clientKey:project?.client_key||s.clientKey,userId:s.userId,filename:file.name});
    const response=await fetch(`/api/bf/documents?${query}`,{method:"POST",headers:authHeaders({"Content-Type":file.type||"application/octet-stream"}),body:await file.arrayBuffer()});
@@ -187,7 +187,7 @@
   const search=(document.querySelector("#bf-library-search")?.value||"").trim().toLowerCase();
   const rows=(items||[]).filter(item=>!search||JSON.stringify(item).toLowerCase().includes(search));document.querySelector("#bf-library-count").textContent=`${rows.length}项`;
   document.querySelector("#bf-library-list").innerHTML=rows.length?rows.map(item=>{
-   if(kind==="document")return`<article class="bf-library-item"><div><small>${esc((item.uploaded_at||"").slice(0,19).replace("T"," "))}</small><h3>${esc(item.filename)}</h3><p>${esc(item.extension)} · ${esc(item.page_count||"页数待识别")} · 项目隔离存储</p></div><span class="bf-grade">${esc(item.parse_status)}</span></article>`;
+   if(kind==="document")return`<article class="bf-library-item"><div><small>${esc((item.uploaded_at||"").slice(0,19).replace("T"," "))}</small><h3>${esc(item.filename)}</h3><p>${esc(item.extension)} · ${esc(item.page_count||"页数待识别")} · 已归入当前项目</p></div><span class="bf-grade">${esc(item.parse_status)}</span></article>`;
    if(kind==="chunk")return`<article class="bf-library-item"><div><small>${esc(item.asset_type)} · ${esc(item.scope)}</small><h3>${esc((item.redacted_text||"结构化资产").slice(0,70))}</h3><p>来源BF：${esc(item.brief_id||"—")} · 仅在允许范围内召回</p></div><span class="bf-grade ${esc(item.sample_grade)}">${esc(item.sample_grade)}</span></article>`;
    return`<button type="button" class="bf-library-item" data-bf-brief-id="${esc(item.id)}"><div><small>${esc((item.updated_at||"").slice(0,19).replace("T"," "))}</small><h3>${esc(item.title)}</h3><p>${esc(item.bf_type)} · ${esc(item.summary||"等待补充摘要")}</p></div><span class="bf-grade ${esc(item.sample_grade)}">${esc(item.sample_grade)}</span></button>`;
   }).join(""):`<p class="empty">当前筛选下暂无BF资产。</p>`;

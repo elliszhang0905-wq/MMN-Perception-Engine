@@ -1,7 +1,5 @@
 """BF内部策略判断和可组合章节生成。"""
 
-from .extraction import PROFILE_RULES
-
 
 SEED_SECTION_INTENTS = {
     "STORE_VISIT": [
@@ -17,6 +15,19 @@ SEED_SECTION_INTENTS = {
         "PROJECT_BACKGROUND", "VISUAL_TONE", "PRODUCT_POINT_DISTRIBUTION",
         "CREATOR_ASSIGNMENT", "SCENE_PLAN", "SHOT_LIST", "VEHICLE_LOGISTICS",
         "MATERIAL_RETURN", "RISK_CONTROL", "DELIVERY",
+    ],
+    "STATIC_SHOOT": [
+        "PROJECT_BACKGROUND", "PRODUCT_POINT_DISTRIBUTION", "SCENE_PLAN",
+        "STATIC_EXPERIENCE", "SHOT_LIST", "VEHICLE_LOGISTICS",
+        "MATERIAL_RETURN", "RISK_CONTROL", "DELIVERY",
+    ],
+    "DYNAMIC_SHOOT": [
+        "PROJECT_BACKGROUND", "CORE_VALUE", "SCENE_PLAN", "DYNAMIC_MATERIAL_CAPTURE",
+        "SHOT_LIST", "VEHICLE_LOGISTICS", "MATERIAL_RETURN", "RISK_CONTROL", "DELIVERY",
+    ],
+    "CHASSIS_SHOOT": [
+        "PROJECT_BACKGROUND", "CORE_VALUE", "CHASSIS_DETAIL_CAPTURE", "SHOT_LIST",
+        "VEHICLE_LOGISTICS", "MATERIAL_RETURN", "RISK_CONTROL", "DELIVERY",
     ],
     "PRODUCT_INTERPRETATION": [
         "PROJECT_BACKGROUND", "PRODUCT_POINT_DISTRIBUTION", "TARGET_AUDIENCE",
@@ -55,6 +66,7 @@ SECTION_TITLES = {
     "FEMALE_EXPERIENCE": "女性用户体验任务",
     "COMPETITOR_COMPARISON": "竞品同场景对比",
     "DYNAMIC_MATERIAL_CAPTURE": "动态素材采集",
+    "CHASSIS_DETAIL_CAPTURE": "底盘实拍任务",
     "COMMENT_GUIDANCE": "评论区讨论方向",
     "RISK_CONTROL": "禁止表达与审核风险",
     "DELIVERY": "交付要求",
@@ -78,6 +90,7 @@ def compose_section_plan(payload, learned_profile=None):
         "FEMALE_EXPERIENCE": "FEMALE_EXPERIENCE",
         "COMPETITOR_COMPARISON": "COMPETITOR_COMPARISON",
         "DYNAMIC_MATERIAL_CAPTURE": "DYNAMIC_MATERIAL_CAPTURE",
+        "CHASSIS_DETAIL_CAPTURE": "CHASSIS_DETAIL_CAPTURE",
         "STATIC_EXPERIENCE": "STATIC_EXPERIENCE",
         "CTA": "CTA",
         "RISK_CONTROL": "RISK_CONTROL",
@@ -119,6 +132,9 @@ def generate_internal_strategy(payload, retrieval_context):
         "STORE_VISIT": "把产品卖点转成可观察、可体验、可到店验证的内容证据",
         "CLOUD_REVIEW": "用事实和清晰观点完成议题解释，避免复述品牌通稿",
         "HIGH_END_PHOTOGRAPHY": "用场景、镜头和产品细节建立品牌质感与车型记忆",
+        "STATIC_SHOOT": "把外观、内饰和产品细节转成完整、可复用的静态素材",
+        "DYNAMIC_SHOOT": "用合规动态镜头呈现车辆姿态、性能感受和道路场景",
+        "CHASSIS_SHOOT": "用清晰结构镜头和准确讲解建立底盘技术认知",
     }.get(profile, "围绕目标用户完成事实解释、场景体验和内容转化任务")
     evidence_refs = []
     for item in retrieval_context or []:
@@ -141,7 +157,7 @@ def generate_internal_strategy(payload, retrieval_context):
 
 def render_adaptive_brief(payload, internal_strategy, section_plan):
     title = (payload.get("strategy") or {}).get("bfName") or "MMN商业化内容BF"
-    markdown = [f"# {title}", "", f"> BF范式：{_profile_label(payload)}｜结构由MMN按任务意图动态编排"]
+    markdown = [f"# {title}"]
     sections = []
     for index, item in enumerate(section_plan, 1):
         intent = item["intent"]
@@ -223,6 +239,8 @@ def _render_section(intent, payload, internal):
         return _bullets([f"对比对象：{_inline(strategy.get('competitors'))}", "只在同预算、同场景、同用户问题下对比", "对比结论必须绑定官方资料或可复核体验，不做情绪化攻击"])
     if intent == "DYNAMIC_MATERIAL_CAPTURE":
         return _bullets(execution.get("dynamicMaterialRequirements") or ["明确合规道路、驾驶人员、车速、机位和交通安全边界", "动态素材必须记录车型配置与拍摄条件"])
+    if intent == "CHASSIS_DETAIL_CAPTURE":
+        return _bullets(["在合规举升设备和专业人员配合下完成底盘全貌拍摄", "覆盖前后悬架、护板、制动、关键连接点和有传播价值的结构细节", "讲解必须对应实际车型配置与官方技术资料，不依据画面自行推断用料或性能", "记录车辆版本、拍摄位置、机位和安全确认信息"])
     if intent == "COMMENT_GUIDANCE":
         return _bullets(content.get("commentGuidance") or ["引导用户讨论真实使用场景和选车问题", "禁止虚构车主身份、成交价格或未经证实的故障结论"])
     if intent == "RISK_CONTROL":
@@ -243,12 +261,6 @@ def _source_locators(payload):
             if locator and locator not in values:
                 values.append(locator)
     return values[:20]
-
-
-def _profile_label(payload):
-    classification = payload.get("classification") or {}
-    code = classification.get("bfType") or "CUSTOM"
-    return classification.get("bfTypeLabel") or PROFILE_RULES.get(code, {}).get("label") or "自定义BF"
 
 
 def _bullets(values):

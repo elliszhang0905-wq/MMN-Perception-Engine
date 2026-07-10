@@ -19,6 +19,18 @@ PROFILE_RULES = {
         "label": "高质感摄影BF",
         "keywords": ("高质感摄影", "视觉大片", "Lifestyle拍摄", "镜头语言", "必拍镜头", "车务流程", "素材回传"),
     },
+    "STATIC_SHOOT": {
+        "label": "静态实拍",
+        "keywords": ("静态实拍", "外观实拍", "内饰实拍", "产品细节", "静态素材", "固定机位", "车辆静态"),
+    },
+    "DYNAMIC_SHOOT": {
+        "label": "动态实拍",
+        "keywords": ("动态实拍", "路跑", "跟车", "追车", "车身姿态", "动态性能", "合规道路"),
+    },
+    "CHASSIS_SHOOT": {
+        "label": "底盘实拍",
+        "keywords": ("底盘实拍", "底盘结构", "举升机", "悬架细节", "底盘全貌", "护板", "制动结构"),
+    },
     "PRODUCT_INTERPRETATION": {
         "label": "产品解读BF",
         "keywords": ("产品解读", "核心卖点", "智舱", "智驾", "底盘", "安全", "补能", "用户利益转译"),
@@ -42,8 +54,9 @@ INTENT_RULES = {
     "SHOT_LIST": ("镜头语言", "必拍镜头", "镜头"),
     "FEMALE_EXPERIENCE": ("女性", "女用户", "女性体感"),
     "COMPETITOR_COMPARISON": ("竞品对比", "核心竞品", "同场景对比"),
-    "DYNAMIC_MATERIAL_CAPTURE": ("动态路跑", "动态素材", "路跑素材", "动态试驾"),
-    "STATIC_EXPERIENCE": ("静态体验", "静态素材"),
+    "DYNAMIC_MATERIAL_CAPTURE": ("动态实拍", "动态路跑", "动态素材", "路跑素材", "动态试驾", "跟车"),
+    "STATIC_EXPERIENCE": ("静态实拍", "静态体验", "静态素材", "外观实拍", "内饰实拍"),
+    "CHASSIS_DETAIL_CAPTURE": ("底盘实拍", "底盘结构", "举升机", "悬架细节", "底盘全貌"),
     "CTA": ("CTA", "到店转化", "到店引导"),
     "RISK_CONTROL": ("禁止表达", "红线", "风险", "不得"),
     "MATERIAL_RETURN": ("素材回传", "交付格式", "素材上传"),
@@ -76,7 +89,7 @@ def classify_bf_profile(segments):
     second_score = ranked[1][1]
     mixed_signal = sum(
         intent in intents
-        for intent in ("FEMALE_EXPERIENCE", "COMPETITOR_COMPARISON", "DYNAMIC_MATERIAL_CAPTURE", "STORE_VISIT_SCRIPT", "VOICEOVER_LOGIC", "VISUAL_TONE")
+        for intent in ("FEMALE_EXPERIENCE", "COMPETITOR_COMPARISON", "DYNAMIC_MATERIAL_CAPTURE", "CHASSIS_DETAIL_CAPTURE", "STORE_VISIT_SCRIPT", "VOICEOVER_LOGIC", "VISUAL_TONE")
     ) >= 3
     if explicit:
         primary = explicit
@@ -105,7 +118,7 @@ def classify_bf_profile(segments):
         "confidence": round(confidence, 2),
         "contentIntents": intents,
         "scores": scores,
-        "reasons": reasons or ["未命中已有种子范式，保留为可学习的新BF结构"],
+        "reasons": reasons or ["已识别为自定义BF需求"],
     }
 
 

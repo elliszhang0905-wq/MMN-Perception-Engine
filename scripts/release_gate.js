@@ -177,11 +177,14 @@ async function main() {
   const bfSurface = await page.evaluate(() => ({
     active: document.querySelector("#bffactory")?.classList.contains("active") || false,
     seedCount: document.querySelectorAll("#bffactory [data-bf-profile]").length,
-    hasOpenNotice: /种子|举一反三|新型|混合型/.test(document.querySelector("#bffactory")?.textContent || ""),
+    hasInternalRuleLeak: /种子范式|不是封闭模板|动态编排|动态整理章节|学习最终版本|优质优先\s*[·・]\s*反例只做风险/.test(document.querySelector("#bffactory")?.textContent || ""),
+    hasGeneratorSubnav: Boolean(document.querySelector("#bffactory > .bf-subnav")),
     hasCustomDirection: Boolean(document.querySelector("#bf-content-directions")),
     hasEditor: Boolean(document.querySelector("#bf-editor")),
+    profileLabels: [...document.querySelectorAll("#bffactory [data-bf-profile] b")].map(node => node.textContent.trim()),
   }));
-  add("BF factory is open-ended rather than a fixed three-template picker", bfSurface.active && bfSurface.seedCount >= 3 && bfSurface.hasOpenNotice && bfSurface.hasCustomDirection && bfSurface.hasEditor, JSON.stringify(bfSurface));
+  const requiredBfProfiles = ["静态实拍", "动态实拍", "底盘实拍"];
+  add("BF factory keeps a focused workbench with requested actual-shoot types", bfSurface.active && bfSurface.seedCount >= 7 && requiredBfProfiles.every(label => bfSurface.profileLabels.includes(label)) && !bfSurface.hasInternalRuleLeak && !bfSurface.hasGeneratorSubnav && bfSurface.hasCustomDirection && bfSurface.hasEditor, JSON.stringify(bfSurface));
 
   const bfCorrection = await page.evaluate(() => ({
     active: Boolean(document.querySelector("#bffactory")),

@@ -65,6 +65,17 @@ class BFGenerationTest(unittest.TestCase):
         self.assertIn("SHOT_LIST", [item["intent"] for item in photo])
         self.assertNotEqual([item["intent"] for item in store], [item["intent"] for item in cloud])
 
+    def test_actual_shoot_profiles_generate_execution_specific_sections(self):
+        cases = (
+            ("STATIC_SHOOT", "STATIC_EXPERIENCE"),
+            ("DYNAMIC_SHOOT", "DYNAMIC_MATERIAL_CAPTURE"),
+            ("CHASSIS_SHOOT", "CHASSIS_DETAIL_CAPTURE"),
+        )
+        for profile, expected_intent in cases:
+            with self.subTest(profile):
+                plan = compose_section_plan(base_payload(profile))
+                self.assertIn(expected_intent, [item["intent"] for item in plan])
+
     def test_custom_mixed_need_composes_new_sections_instead_of_forcing_seed_template(self):
         payload = base_payload(
             "CUSTOM",
@@ -114,6 +125,14 @@ class BFGenerationTest(unittest.TestCase):
         self.assertIn("策略推断", result["markdown"])
         self.assertIn("第3页", result["markdown"])
         self.assertGreater(len(result["sections"]), 5)
+
+    def test_rendered_brief_does_not_expose_internal_composition_rules(self):
+        payload = base_payload("CUSTOM", ["FEMALE_EXPERIENCE", "COMMENT_GUIDANCE"])
+        strategy = generate_internal_strategy(payload, [])
+        markdown = render_adaptive_brief(payload, strategy, compose_section_plan(payload))["markdown"]
+
+        for internal_phrase in ("BF范式", "种子范式", "动态编排", "不是封闭模板", "学习最终版本"):
+            self.assertNotIn(internal_phrase, markdown)
 
 
 if __name__ == "__main__":
