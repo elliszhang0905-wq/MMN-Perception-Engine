@@ -365,3 +365,20 @@ beta 1.01｜BF产品规则外显清理
 - 服务器发布前创建代码归档和运行数据备份。
 - 同步到 `/opt/mmn-perception-engine` 后执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`。
 - 发布后检查公网首页不包含本次清理短语，并验证健康接口、容器和近期错误日志。
+
+## 云端发布结果
+
+- GitHub功能提交：`0172cca fix: keep BF product rules internal`。
+- GitHub缓存刷新提交：`5c9c561 fix: refresh BF factory frontend assets`。
+- ECS最终部署时间：2026-07-10 19:43（Asia/Shanghai）。
+- 最终部署前代码归档：`backups/code_before_5c9c561_20260710_194257.tar.gz`。
+- 最终部署前运行数据备份：`backups/mmn_backup_20260710_194259.tar.gz`。
+- 本地完整测试31/31通过；浏览器发布门禁通过，`failed: []`、`runtimeErrors: []`。
+- 公网BF工厂已确认不含内部规则横幅，不含生成器横向子菜单，并加载 `beta-1.01-bf-ui-2` 前端资源。
+- 公网页面已显示静态实拍、动态实拍、底盘实拍；生产类型库确认三种类型均已初始化。
+- 生产容器内完整测试31/31通过；`mmn-app`、`mmn-db`、`mmn-scheduler` healthy，`mmn-web` running。
+- `/api/health` 返回 `ok: true`；近10分钟日志 `RECENT_ERROR_LINES=0`。
+
+## 发布结论
+
+BF内部规则外显清理、重复子菜单隐藏、三种实拍BF类型、前端缓存刷新和全部交接记录已同步到 GitHub 与阿里云 ECS，线上验证通过。
