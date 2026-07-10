@@ -250,6 +250,36 @@ async function main() {
   }));
   add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote) && summaryImport.time === "2026.6.1 - 2026.6.30" && /3 个有效标签/.test(summaryImport.labels) && summaryImport.platforms.includes("全网") && summaryImport.platforms.includes("垂媒车主口碑") && summaryImport.platforms.includes("抖音") && !summaryImport.platforms.some(value => ["正面", "负面", "NSR", "平均NSR"].includes(value)), JSON.stringify(summaryImport));
 
+  await page.route("**/api/import-xlsx?filename=AUDI%20E7X.xlsx", route => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, dataset: {
+      datasetVersion: "summary_xlsx_AUDI_E7X",
+      sourceNote: "测试产品评价汇总表",
+      config: { project: "奥迪E7X认知诊断｜产品评价导入", brand: "奥迪", model: "奥迪E7X", competitor: "小米YU7 / Model Y" },
+      platforms: { "全网": 1, "垂媒车主口碑": 1.15, "抖音": 1.35 },
+      models: summaryModels,
+      rows: summaryRows,
+      summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
+      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false } }
+    } })
+  }));
+  await page.evaluate(async () => {
+    const brandByModel = { "小米YU7": "小米汽车", "Model Y": "特斯拉", "问界M7": "问界", "奥迪E7X": "奥迪", "奥迪Q6L e-tron": "奥迪" };
+    Object.entries(brandByModel).forEach(([model, brand]) => {
+      modelIdentities.items[model] = { raw_name: model, normalized_name: model, brand_name: brand, model_family: model, energy_type: "UNKNOWN", confidence: "release-gate" };
+    });
+    dashBrandOpen = "智己";
+    dashboardPlatformFilter = "抖音";
+    await importDataFile(new File([new Uint8Array([1])], "AUDI E7X.xlsx"));
+  });
+  const replacementContext = await page.evaluate(() => ({
+    brand: document.querySelector("#dash-brand-select")?.value || "",
+    model: document.querySelector("#dash-model-select")?.value || "",
+    models: [...document.querySelectorAll("#dash-model-select option")].map(option => option.textContent.trim()),
+    platforms: [...document.querySelectorAll("#dashboard-platform-filter option")].map(option => option.textContent.trim())
+  }));
+  add("replacement import resets the dashboard to the imported brand and model", replacementContext.brand === "奥迪" && replacementContext.model === "奥迪E7X" && replacementContext.models.includes("奥迪E7X") && replacementContext.models.includes("奥迪Q6L e-tron") && !replacementContext.models.includes("奥迪A3") && replacementContext.platforms[0] === "全部平台", JSON.stringify(replacementContext));
+
   await page.evaluate(() => {
     localStorage.setItem("mmnEngineState:china", JSON.stringify({
       datasetVersion: "summary_xlsx_legacy_bad_import",

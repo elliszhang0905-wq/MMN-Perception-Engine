@@ -637,6 +637,11 @@ function modelOptions(){
  (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
  return [...models].filter(x=>x&&!isRedundantModelOption(x)).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
 }
+function dashboardModelOptions(){
+ const models=new Set([state.config.model]);
+ state.rows.forEach(r=>{if(r[0])models.add(r[0])});
+ return [...models].filter(x=>x&&!isRedundantModelOption(x)).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+}
 function learningModelOptions(){
  const models=new Set(modelOptions());
  Object.keys(modelIdentities.items||{}).forEach(x=>x&&models.add(x));
@@ -952,7 +957,7 @@ function applyRoleRestrictions(){
  });
 }
 function renderModelSwitcher(){
- const models=modelOptions(),wrap=document.querySelector("#dash-model");
+ const models=dashboardModelOptions(),wrap=document.querySelector("#dash-model");
  const groups=brandModelGroups(models);
  if(!dashBrandOpen||!groups.some(g=>g.brand===dashBrandOpen))dashBrandOpen=brandForDisplay(state.config.model);
  const activeGroup=groups.find(g=>g.brand===dashBrandOpen)||groups[0]||{brand:"",models:[]};
@@ -3111,7 +3116,11 @@ async function importDataFile(file,{merge=false}={}){
   toast(`已导入 ${dataset.sourceRowCount||incomingRows.length} 条原始记录，聚合为 ${incomingRows.length} 组，结果已刷新`);
   return;
  }
- state=dataset;ensureModelIdentities(state.models||[]);save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
+ state=dataset;
+ // 替换导入必须同步重置工作台上下文，避免旧项目的品牌下拉框覆盖新导入车型。
+ dashBrandOpen=brandForDisplay(state.config?.model);
+ dashboardPlatformFilter="all";
+ ensureModelIdentities(state.models||[]);save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
 }
 document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await importDataFile(file,{merge:/\.csv$/i.test(file.name)})}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#vertical-xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入垂媒排名 Excel…");try{const res=await fetch(`/api/import-vertical-xlsx?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");const sourceId=json.dataset.source;verticalState.sources=[...(verticalState.sources||[]).filter(x=>x.source!==sourceId),{source:sourceId,platform:json.dataset.platform,count:json.dataset.count,importedAt:new Date().toISOString(),remembered:json.dataset.remembered}];verticalState.items=[...(verticalState.items||[]).filter(x=>x.source!==sourceId),...json.dataset.items];verticalState.assetSummary=json.dataset.assetSummary||verticalState.assetSummary;if(json.dataset.knowledgeItems?.length)mergeStrategyKnowledge(json.dataset.knowledgeItems);if(!verticalState.selectedModel)verticalState.selectedModel=json.dataset.models?.[0]||"";saveVerticalState();renderVertical();renderStrategyKb();showPage("vertical");const asset=json.dataset.assetSummary;const kCount=json.dataset.knowledgeItems?.length||0;toast(asset?`已导入 ${json.dataset.platform} ${json.dataset.count} 条，生成 ${kCount} 条训练知识，资产库累计 ${asset.modelCount} 个车型`:`已导入 ${json.dataset.platform} ${json.dataset.count} 条正反向排名`)}catch(err){toast(`垂媒数据导入失败：${err.message}`)}finally{e.target.value=""}};
