@@ -450,3 +450,11 @@ bash scripts/release_gate.sh
 ```
 
 BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP闭环4项通过、发布门禁 `failed: []` 且 `runtimeErrors: []`。P1继续处理批量上传、深度表格解析、效果回流、多版本对比和PDF导出。
+
+### 2026-07-10 云端发布状态
+
+- GitHub主功能提交：`e5b21f0`；ECS镜像源稳定化提交：`7e769d5`。
+- ECS目录仍为 `/opt/mmn-perception-engine` 无 `.git` 发布树，使用提交归档同步并以 `MMN_SKIP_GIT_PULL=true bash deploy.sh` 构建。
+- 回滚代码归档：`backups/code_before_e5b21f0_20260710_191059.tar.gz`；部署前数据备份：`backups/mmn_backup_20260710_191652.tar.gz`。
+- 生产镜像已验证 LibreOffice 25.2、Tesseract中文OCR、Noto CJK字体和BF测试28/28。
+- 公网首页、健康接口、BF前端资源和管理员认证后的 `/api/bf/schema` 均验证通过；发布后错误日志为0。

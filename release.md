@@ -318,4 +318,21 @@ beta 1.01｜BF工厂 P0
 
 ## 云端发布结果
 
-待本次 GitHub 提交与 ECS 部署完成后补录。
+- GitHub功能提交：`e5b21f0 feat: ship adaptive BF factory P0`。
+- GitHub构建修复：`7e769d5 fix: stabilize BF image build on ECS`。
+- 服务器目录：`/opt/mmn-perception-engine`，使用 `7e769d5` 提交归档同步到无 `.git` 发布目录。
+- 部署时间：2026-07-10 19:19（Asia/Shanghai）。
+- 发布前代码归档：`backups/code_before_e5b21f0_20260710_191059.tar.gz`。
+- 最终部署前运行数据备份：`backups/mmn_backup_20260710_191652.tar.gz`。
+- 首次构建访问Debian官方源长时间无进展，旧服务已先恢复；切换阿里云镜像源后，10.1MB索引约2秒完成、218MB依赖下载和安装成功。
+- 容器状态：`mmn-app`、`mmn-db`、`mmn-scheduler` healthy，`mmn-web` running。
+- 公网检查：`bash scripts/test_mmn_cloud.sh http://121.40.60.90` 通过首页和健康接口；`/api/health` 返回 `ok: true`、`version: beta 1.01`。
+- BF前端资源：公网首页包含 `BF FACTORY` 和 `bf-factory.js?v=beta-1.01-bf-p0-1`。
+- 生产镜像测试：设置仅作用于测试进程的免登录开关后，BF完整测试28/28通过。
+- 生产依赖：LibreOffice `25.2.3.2`、Tesseract `chi_sim/eng/osd`、`Noto Sans CJK SC` 均已验证可用。
+- 云端认证验证：管理员登录后 `GET /api/bf/schema` 返回 `schemaVersion: 1.0.0`，A–F六层字段完整。
+- 发布后日志：近10分钟未发现 `traceback`、`exception`、`critical` 或 `error`，`RECENT_ERROR_LINES=0`。
+
+## 发布结论
+
+BF工厂 P0、开放式范式学习、资产回流、Word导出、客户项目隔离、默认脱敏、驾驶舱策略表达优化及全部交接记录已同步至 GitHub 和阿里云 ECS。公网服务、生产依赖、容器、BF认证接口和回滚备份均验证通过。
