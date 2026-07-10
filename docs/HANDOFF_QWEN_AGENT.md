@@ -483,6 +483,7 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 本地和生产容器均验证完整测试33/33通过；浏览器发布门禁的真实NSR与旧版隔离场景均通过。
 - 公网首页已加载 `app.js?v=beta-1.01-summary-import-2`，健康接口正常，发布后错误日志为0。
 - 后续替换导入必须同时重置 `dashBrandOpen` 和 `dashboardPlatformFilter`；驾驶舱车型选择器只能基于 `dashboardModelOptions()` 读取当前导入数据，不能使用全局资产车型集合。
+- 2026-07-10 补充发布：GitHub `4674cf8`，ECS代码归档 `backups/code_before_4674cf8_20260710_221845.tar.gz`，运行数据备份 `backups/mmn_backup_20260710_221848.tar.gz`；公网资源版本为 `beta-1.01-summary-import-3`，生产完整测试33/33通过。
 
 ### 2026-07-10 BF界面修复发布状态
 

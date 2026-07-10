@@ -429,3 +429,10 @@ beta 1.01｜产品评价汇总表导入质量修复
 - 替换导入现在同步刷新驾驶舱品牌、车型与平台筛选，不会保留上一项目的车型选择状态。
 - 驾驶舱车型选择器只列出当前导入数据的车型；前端资源版本更新为 `beta-1.01-summary-import-3`。
 - 已用 `AUDI E7X等5车产品评价_0710_v2.xlsx` 走通真实浏览器上传：本品奥迪E7X、全网NSR 75.1%、15个有效标签、数据周期2026.6.1–6.30，且页面无脚本错误。
+
+### 云端补充发布结果
+
+- GitHub提交：`4674cf8 fix: reset dashboard context on summary import`。
+- ECS部署时间：2026-07-10 22:19（Asia/Shanghai）；发布前代码归档：`backups/code_before_4674cf8_20260710_221845.tar.gz`；部署脚本运行数据备份：`backups/mmn_backup_20260710_221848.tar.gz`。
+- 公网首页已加载 `app.js?v=beta-1.01-summary-import-3`；健康接口正常。
+- 本地及生产容器完整测试33/33通过；浏览器发布门禁通过，`failed: []`、`runtimeErrors: []`；近期生产日志无错误记录。
