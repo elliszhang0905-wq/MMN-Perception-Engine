@@ -3380,104 +3380,171 @@ def extract_workbook_label(text):
     m = re.search(r"【([^】]+)】", cell_text(text))
     return m.group(1).strip() if m else ""
 
-def build_dataset_from_summary_workbook(cells, filename):
+def summary_workbook_metadata(sheets):
+    readme = sheet_rows((sheets or {}).get("Read Me") or {})
+    metadata = {"timeRange": "", "modelRange": ""}
+    for row in readme:
+        key = cell_text(row[0] if row else "")
+        value = cell_text(row[1] if len(row) > 1 else "")
+        if "数据时间段" in key:
+            metadata["timeRange"] = value
+        elif "车型范围" in key:
+            metadata["modelRange"] = value
+    return metadata
+
+
+def summary_attribute_blocks(rows, models):
+    allowed_sources = {"全网", "垂媒车主口碑", "抖音"}
+    blocks = []
+    for header_row, row in enumerate(rows):
+        for source_col, value in enumerate(row):
+            source = cell_text(value)
+            if source not in allowed_sources:
+                continue
+            model_cols = {}
+            for col in range(source_col + 1, len(row)):
+                raw = cell_text(row[col])
+                normalized = infer_model(raw) or raw
+                if normalized not in models:
+                    break
+                model_cols[normalized] = col
+            if len(model_cols) < 2:
+                continue
+            values = []
+            for row_idx in range(header_row + 1, len(rows)):
+                label = cell_text(rows[row_idx][source_col] if source_col < len(rows[row_idx]) else "")
+                if not label:
+                    break
+                scores = {
+                    model: share_num(rows[row_idx][col] if col < len(rows[row_idx]) else 0)
+                    for model, col in model_cols.items()
+                }
+                numeric_scores = {model: score for model, score in scores.items() if isinstance(score, (int, float)) and -1 <= score <= 1}
+                if numeric_scores:
+                    values.append((label, numeric_scores))
+            if values:
+                blocks.append({"source": source, "values": values})
+    return blocks
+
+
+def build_dataset_from_summary_workbook(cells, filename, sheets=None):
     rows = sheet_rows(cells)
     volume_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "声量"), None)
-    interaction_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "互动量"), None)
     if volume_header is None:
         raise ValueError("未识别到汇总表中的声量区块。")
 
     platform_cols = []
-    for c, value in enumerate(rows[volume_header][1:], start=1):
-        name = cell_text(value)
-        if name and name not in ("全网",):
-            platform_cols.append((c, "B站" if name.lower() == "bilibili" else name))
+    for col in range(1, len(rows[volume_header])):
+        name = cell_text(rows[volume_header][col])
+        if not name:
+            break
+        if name != "全网":
+            platform_cols.append((col, "B站" if name.lower() == "bilibili" else name))
+    if len(platform_cols) < 3:
+        raise ValueError("汇总表平台区块不完整，已拒绝导入。")
 
     model_rows = []
-    for r in range(volume_header + 1, min(volume_header + 8, len(rows))):
-        model = cell_text(rows[r][0] if rows[r] else "")
-        if infer_model(model) or re.search(r"[A-Za-z]*\d|启境|理想|极氪|智己|小米|蔚来|问界", model):
-            model_rows.append((r, infer_model(model) or model))
-    if not model_rows:
-        raise ValueError("未识别到汇总表中的车型行。")
+    for row_idx in range(volume_header + 1, len(rows)):
+        raw_model = cell_text(rows[row_idx][0] if rows[row_idx] else "")
+        if not raw_model:
+            if model_rows:
+                break
+            continue
+        model = infer_model(raw_model) or raw_model
+        if raw_model in {"互动量", "平均NSR"}:
+            break
+        model_rows.append((row_idx, model))
+    if len(model_rows) < 2:
+        raise ValueError("未识别到至少两款车型，已拒绝导入。")
+    models = [model for _, model in model_rows]
 
-    sentiment_by_model = {}
-    for row_idx, model in model_rows:
-        sentiment_by_model[model] = {
-            "positive": share_num(rows[row_idx][13] if len(rows[row_idx]) > 13 else 0),
-            "negative": share_num(rows[row_idx][15] if len(rows[row_idx]) > 15 else 0),
-            "nsr": share_num(rows[row_idx][16] if len(rows[row_idx]) > 16 else 0),
-        }
-
-    opinion_cols = {}
-    for row in rows[:15]:
-        for c, value in enumerate(row):
-            text = cell_text(value)
-            if " | " in text and "主要观点" in text:
-                model = infer_model(text.split("|", 1)[0]) or text.split("|", 1)[0].strip()
-                opinion_cols[model] = c
-
-    labels_by_model = {model: [] for _, model in model_rows}
-    section = "positive"
-    for r, row in enumerate(rows):
-        section_text = " ".join(cell_text(v) for v in row if v)
-        if "主要正面观点" in section_text:
-            section = "positive"
-        if "主要负面观点" in section_text:
-            section = "negative"
-        for model, col in opinion_cols.items():
-            if col >= len(row):
+    overall_nsr = {}
+    for header_row, row in enumerate(rows):
+        for nsr_col in range(3, len(row)):
+            if [cell_text(row[idx]) for idx in range(nsr_col - 3, nsr_col + 1)] != ["正面", "中性", "负面", "NSR"]:
                 continue
-            label = extract_workbook_label(row[col])
-            if not label:
-                continue
-            share = share_num(row[col + 1] if col + 1 < len(row) else 0)
-            if share:
-                labels_by_model.setdefault(model, []).append((label, section, share))
+            model_col = nsr_col - 4
+            for row_idx in range(header_row + 1, min(header_row + 12, len(rows))):
+                raw_model = cell_text(rows[row_idx][model_col] if model_col < len(rows[row_idx]) else "")
+                model = infer_model(raw_model) or raw_model
+                if model in models:
+                    overall_nsr[model] = share_num(rows[row_idx][nsr_col] if nsr_col < len(rows[row_idx]) else 0)
+            if len(overall_nsr) >= len(models):
+                break
+        if len(overall_nsr) >= len(models):
+            break
+    if len(overall_nsr) < len(models):
+        raise ValueError("未识别到完整的全网NSR区块，已拒绝导入。")
 
-    own_model = next((m for _, m in model_rows if "启境" in m), next((m for _, m in model_rows if "智己" in m), model_rows[0][1]))
-    growth = {"抖音":1.35,"小红书":1.20,"微博":1.20,"微信视频号":1.15,"B站":1.10,"汽车垂媒":1.15,"今日头条":1.05,"快手":1.05,"其他":1.0}
+    attribute_blocks = summary_attribute_blocks(rows, models)
+    if not attribute_blocks:
+        raise ValueError("未识别到属性NSR区块，已拒绝导入。")
+
+    file_model = infer_model(Path(filename or "").stem)
+    own_model = file_model if file_model in models else next((model for model in models if "启境" in model or "智己" in model), models[0])
+    growth = {"全网": 1.0, "垂媒车主口碑": 1.15, "抖音": 1.35}
     out_rows = []
-    for row_idx, model in model_rows:
-        labels = labels_by_model.get(model) or [("总体口碑", "positive", 1)]
-        for col, platform in platform_cols:
-            vol = num(rows[row_idx][col] if col < len(rows[row_idx]) else 0)
-            if not vol:
-                continue
-            for label, section, share in labels:
-                count = round(vol * share)
-                if not count:
+    for block in attribute_blocks:
+        for label, scores in block["values"]:
+            category, identity, impact = workbook_label_meta(label)
+            competition = 5 if label in ("价格", "动力与操控", "辅助/自动驾驶", "智能座舱") else 4
+            for model, nsr in scores.items():
+                if model not in models:
                     continue
-                nsr = sentiment_by_model.get(model, {}).get("nsr", 0)
-                category, identity, impact = workbook_label_meta(label)
-                emotion = emotion_pos(nsr) if section == "positive" else emotion_neg(-abs(nsr or 0.3), label)
-                intent = "高意向" if platform in ("抖音", "微博", "汽车垂媒") or label in ("价格", "安全", "质量", "辅助/自动驾驶") else "中意向"
-                competition = 5 if label in ("价格", "动力与操控", "辅助/自动驾驶", "智能座舱") else 4
-                out_rows.append([model, "本品" if model == own_model else "竞品", platform, category, label, emotion, identity, intent, count, impact, growth.get(platform, 1.0), competition])
+                emotion = emotion_pos(nsr) if nsr >= 0 else emotion_neg(nsr, label)
+                out_rows.append([
+                    model,
+                    "本品" if model == own_model else "竞品",
+                    block["source"],
+                    category,
+                    label,
+                    emotion,
+                    identity,
+                    "无",
+                    100,
+                    impact,
+                    growth.get(block["source"], 1.0),
+                    competition,
+                    "汇总NSR评分",
+                    f"数据整理｜{block['source']}｜{label}",
+                    nsr,
+                ])
+    labels = {row[4] for row in out_rows}
+    if len(labels) < 3:
+        raise ValueError("属性NSR标签少于3项，已拒绝导入。")
 
-    if not out_rows:
-        raise ValueError("汇总表已识别，但没有生成可导入的声量标签。")
-    platforms = {"抖音":1.25,"小红书":1.15,"微博":1.1,"懂车帝":1.2,"汽车之家":1.15,"微信":1.05,"B站":1.1,"线下活动":1.3,"垂媒车主口碑":1.25,"汽车垂媒":1.25,"微信视频号":1.08,"今日头条":1.05,"快手":1.05,"其他":0.95}
-    models = [m for _, m in model_rows]
+    metadata = summary_workbook_metadata(sheets)
+    time_range = metadata.get("timeRange") or "源表未提供时间范围"
+    platforms = {"全网": 1.0, "垂媒车主口碑": 1.15, "抖音": 1.35}
     return {
         "datasetVersion": "summary_xlsx_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:32],
-        "sourceNote": f"已从《{filename}》导入产品评价汇总表，识别车型：{'、'.join(models)}；已按声量、情感与主要观点生成 {len(out_rows)} 组诊断数据。",
-        "config": {"project": f"{own_model}认知诊断｜产品评价导入", "brand": own_model, "model": own_model, "competitor": " / ".join([m for m in models if m != own_model]), "targetIdentity": "目标核心人群", "budget": 800, "priorityThreshold": 60, "riskThreshold": 500},
+        "sourceNote": f"已从《{filename}》导入产品评价汇总表；数据周期：{time_range}；识别车型：{'、'.join(models)}；属性NSR覆盖来源：{'、'.join(block['source'] for block in attribute_blocks)}。",
+        "config": {"project": f"{own_model}认知诊断｜产品评价导入", "brand": infer_brand_from_model(own_model), "model": own_model, "competitor": " / ".join([model for model in models if model != own_model]), "targetIdentity": "", "budget": 800, "priorityThreshold": 60, "riskThreshold": 500},
         "platforms": platforms,
         "rows": out_rows,
         "models": models,
+        "summaryMetrics": {model: {"overallNsr": overall_nsr[model]} for model in models},
+        "importQuality": {
+            "kind": "PRODUCT_EVALUATION_SUMMARY",
+            "timeRange": time_range,
+            "metricCoverage": {"nsr": True, "ips": False, "intent": False, "risk": False},
+            "attributeVolumeAvailable": False,
+            "message": "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。",
+        },
         "sourceRowCount": len(model_rows),
         "aggregatedRowCount": len(out_rows),
-        "replace": True
+        "replace": True,
     }
 
 def build_dataset_from_workbook(data, filename):
     sheets = read_xlsx_cells(data)
     cells = sheets.get("数据整理") or next(iter(sheets.values()))
-    try:
-        return build_dataset_from_summary_workbook(cells, filename)
-    except ValueError:
-        pass
+    is_summary = "数据整理" in sheets and any(
+        cell_text(row[0] if row else "") == "声量"
+        for row in sheet_rows(cells)
+    )
+    if is_summary:
+        return build_dataset_from_summary_workbook(cells, filename, sheets)
     models = [gv(cells, r, 1) for r in range(10, 16) if isinstance(gv(cells, r, 1), str)]
     if not models:
         raise ValueError("未识别到车型列表。请确认 Excel 中包含“数据整理”页和车型行。")
@@ -3622,6 +3689,11 @@ def infer_model(text):
         "智己L6": "智己L6",
         "小米SU7": "小米SU7",
         "小米YU7": "小米YU7",
+        "问界M7": "问界M7",
+        "奥迪E7X": "奥迪E7X",
+        "AUDI E7X": "奥迪E7X",
+        "奥迪Q6L e-tron": "奥迪Q6L e-tron",
+        "AUDI Q6L e-tron": "奥迪Q6L e-tron",
         "理想L8": "理想L8",
         "理想新L8": "理想L8",
         "全新理想L8": "理想L8",
@@ -3806,7 +3878,11 @@ def build_dataset_from_any_file(data, filename):
     if lower.endswith(".xlsx"):
         try:
             return build_dataset_from_workbook(data, filename)
-        except Exception:
+        except ValueError:
+            sheets = read_xlsx_cells(data)
+            summary_cells = sheets.get("数据整理") or {}
+            if any(cell_text(row[0] if row else "") == "声量" for row in sheet_rows(summary_cells)):
+                raise
             return build_dataset_from_consulting_rows(generic_rows_from_file(data, filename), filename, replace=True)
     if lower.endswith(".csv"):
         return build_dataset_from_consulting_rows(generic_rows_from_file(data, filename), filename, replace=False)

@@ -215,6 +215,59 @@ async function main() {
   await chooser;
   add("dashboard import opens file chooser", chooserOpened);
 
+  const summaryModels = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"];
+  const summaryRows = [];
+  for (const model of summaryModels) {
+    for (const source of ["全网", "垂媒车主口碑", "抖音"]) {
+      for (const [label, nsr] of [["外观", .82], ["价格", .62], ["安全", .41]]) {
+        summaryRows.push([model, model === "奥迪E7X" ? "本品" : "竞品", source, label === "价格" ? "价格权益" : "安全质量", label, nsr >= 0 ? "认可" : "失望", "未知", "无", 100, 4, 1, 4, "汇总NSR评分", "release-gate", nsr]);
+      }
+    }
+  }
+  await page.evaluate(({ summaryModels, summaryRows }) => {
+    localStorage.setItem("mmnEngineState:china", JSON.stringify({
+      datasetVersion: "summary_xlsx_audi",
+      sourceNote: "已从产品评价汇总表导入。",
+      config: { project: "奥迪E7X认知诊断｜产品评价导入", brand: "奥迪", model: "奥迪E7X", competitor: "小米YU7 / Model Y / 问界M7 / 奥迪Q6L e-tron", targetIdentity: "", budget: 800, priorityThreshold: 60, riskThreshold: 500 },
+      platforms: { "全网": 1, "垂媒车主口碑": 1.15, "抖音": 1.35 },
+      models: summaryModels,
+      rows: summaryRows,
+      summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
+      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false }, attributeVolumeAvailable: false, message: "源表未提供目标人群、购买意向、标签声量和风险量级。" }
+    }));
+  }, { summaryModels, summaryRows });
+  await page.reload({ waitUntil: "networkidle" });
+  const summaryImport = await page.evaluate(() => ({
+    model: document.querySelector("#dash-model-select")?.value || "",
+    nsr: document.querySelector("#kpi-nsr")?.textContent.trim() || "",
+    ips: document.querySelector("#kpi-ips")?.textContent.trim() || "",
+    ipsNote: document.querySelector("#kpi-ips-note")?.textContent.trim() || "",
+    intent: document.querySelector("#kpi-intent")?.textContent.trim() || "",
+    intentNote: document.querySelector("#kpi-intent-note")?.textContent.trim() || "",
+    time: document.querySelector("#dashboard-data-context .time-dimension b")?.textContent.trim() || "",
+    labels: document.querySelector("#dashboard-data-note")?.textContent.trim() || "",
+    platforms: [...document.querySelectorAll("#dashboard-platform-filter option")].map(option => option.textContent.trim())
+  }));
+  add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote) && summaryImport.time === "2026.6.1 - 2026.6.30" && /3 个有效标签/.test(summaryImport.labels) && summaryImport.platforms.includes("全网") && summaryImport.platforms.includes("垂媒车主口碑") && summaryImport.platforms.includes("抖音") && !summaryImport.platforms.some(value => ["正面", "负面", "NSR", "平均NSR"].includes(value)), JSON.stringify(summaryImport));
+
+  await page.evaluate(() => {
+    localStorage.setItem("mmnEngineState:china", JSON.stringify({
+      datasetVersion: "summary_xlsx_legacy_bad_import",
+      sourceNote: "已从旧版产品评价汇总表导入。",
+      config: { project: "奥迪E7X认知诊断", brand: "奥迪", model: "奥迪E7X", competitor: "小米YU7", targetIdentity: "目标核心人群", budget: 800, priorityThreshold: 60, riskThreshold: 500 },
+      platforms: { 抖音: 1.25 },
+      rows: [["奥迪E7X", "本品", "正面", "整体口碑", "总体口碑", "兴奋", "目标核心人群", "高意向", 100, 4, 1, 4]]
+    }));
+  });
+  await page.reload({ waitUntil: "networkidle" });
+  const blockedLegacy = await page.evaluate(() => ({
+    nsr: document.querySelector("#kpi-nsr")?.textContent.trim() || "",
+    samples: document.querySelector("#dash-samples")?.textContent.trim() || "",
+    note: document.querySelector("#dashboard-data-note")?.textContent.trim() || "",
+    platforms: [...document.querySelectorAll("#dashboard-platform-filter option")].map(option => option.textContent.trim())
+  }));
+  add("legacy summary imports are quarantined instead of rendering false metrics", blockedLegacy.nsr === "请重新导入" && blockedLegacy.samples === "旧版结果已隔离" && /已阻止旧版产品评价汇总表结果/.test(blockedLegacy.note) && !blockedLegacy.platforms.includes("正面"), JSON.stringify(blockedLegacy));
+
   await browser.close();
 
   const failed = checks.filter(item => !item.pass);

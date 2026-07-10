@@ -182,9 +182,12 @@ function importedModelsFromSourceNote(note){
 }
 function normalizeLoadedEngineState(saved){
  if(!saved||!Array.isArray(saved.rows))return saved;
+ if(/^summary_xlsx_/i.test(String(saved.datasetVersion||""))&&!saved.importQuality){
+  return {...saved,rows:[],models:[],summaryMetrics:{},importQuality:{kind:"INVALID_LEGACY_SUMMARY_IMPORT",message:"已阻止旧版产品评价汇总表结果：该版本可能错误识别平台和标签。请使用“导入数据”重新替换导入原始文件。"}};
+ }
  const imported=importedModelsFromSourceNote(saved.sourceNote);
  const primary=imported.find(m=>saved.rows.some(r=>r[0]===m));
- if(primary&&saved.config?.model!==primary){
+ if(primary&&(!saved.config?.model||!saved.rows.some(r=>r[0]===saved.config.model))){
   const allModels=[...new Set(saved.rows.map(r=>r[0]).filter(Boolean))];
   saved.config={...(saved.config||{}),model:primary,brand:brandForModel(primary),project:`${primary}认知诊断｜原始声量导入`,competitor:allModels.filter(m=>m!==primary).join(" / ")};
  }
@@ -771,6 +774,7 @@ function dcdTopPositiveCompetitors(model){
  return [...picked.values()].sort((a,b)=>(a.positiveRank||999)-(b.positiveRank||999)).slice(0,3).map(x=>x.competitor);
 }
 function syncDashboardCompetitors(){
+ if(isBlockedImport())return String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
  const comps=dcdTopPositiveCompetitors(state.config.model),next=comps.join(" / ");
  if(state.config.competitor!==next)state.config.competitor=next;
  return comps;
@@ -791,7 +795,32 @@ function applyModelSelection(model){
   saveVideoState();
  }
 }
-function score(r){const [sat,risk]=emotions[r[5]]||[0,0],iw=identityWeights[r[6]]||.85,pw=state.platforms[r[2]]||1,intw=intentWeights[r[7]]||.5,n=+r[8]||0,impact=+r[9]||3;return{positive:sat>0?n*sat*iw*pw*intw:0,negative:risk>0?n*risk*impact*pw*intw:0}}
+function isSummaryImport(){return state.importQuality?.kind==="PRODUCT_EVALUATION_SUMMARY"}
+function isBlockedImport(){return state.importQuality?.kind==="INVALID_LEGACY_SUMMARY_IMPORT"}
+function summaryMetric(model=state.config.model){return state.summaryMetrics?.[model]||{}}
+function metricDisplay(a){
+ const coverage=state.importQuality?.metricCoverage||{};
+ if(isBlockedImport())return{nsr:"请重新导入",nsrNote:state.importQuality.message,ips:"请重新导入",ipsNote:"旧版结果已隔离",intent:"请重新导入",intentNote:"旧版结果已隔离",risk:"请重新导入"};
+ if(isSummaryImport())return{
+  nsr:typeof summaryMetric().overallNsr==="number"?`${(summaryMetric().overallNsr*100).toFixed(1)}%`:"—",
+  nsrNote:"源表全网NSR",
+  ips:coverage.ips?`${(a.ips*100).toFixed(1)}%`:"不适用",
+  ipsNote:coverage.ips?"目标身份有效评论占比":"源表未提供目标人群字段",
+  intent:coverage.intent?a.intent.toFixed(2):"不适用",
+  intentNote:coverage.intent?"越高代表声量越接近购买":"源表未提供购买意向字段",
+  risk:coverage.risk?Math.round(a.neg).toLocaleString():"不适用"
+ };
+ return{nsr:`${(a.nsr*100).toFixed(1)}%`,nsrNote:a.nsr>=.7?"口碑健康":"需要优先处理购买阻力",ips:`${(a.ips*100).toFixed(1)}%`,ipsNote:"目标身份有效评论占比",intent:a.intent.toFixed(2),intentNote:"越高代表声量越接近购买",risk:Math.round(a.neg).toLocaleString()};
+}
+function metricValues(a){
+ if(isSummaryImport())return{nsr:summaryMetric().overallNsr??null,ips:null,intent:null,risk:null,coverage:state.importQuality?.metricCoverage||{}};
+ return{nsr:+(a.nsr||0).toFixed(3),ips:+(a.ips||0).toFixed(3),intent:+(a.intent||0).toFixed(3),risk:Math.round(a.neg||0),coverage:{nsr:true,ips:true,intent:true,risk:true}};
+}
+function score(r){
+ const [sat,risk]=emotions[r[5]]||[0,0],iw=identityWeights[r[6]]||.85,pw=state.platforms[r[2]]||1,intw=intentWeights[r[7]]||.5,n=+r[8]||0,impact=+r[9]||3,summaryNsr=Number(r[14]);
+ if(isSummaryImport()&&Number.isFinite(summaryNsr))return{positive:summaryNsr>0?n*summaryNsr*iw*pw:0,negative:summaryNsr<0?n*Math.abs(summaryNsr)*impact*pw:0};
+ return{positive:sat>0?n*sat*iw*pw*intw:0,negative:risk>0?n*risk*impact*pw*intw:0}
+}
 function analysis(){
  const modelRows=state.rows.filter(r=>r[0]===state.config.model);
  const own=modelRows;
@@ -860,10 +889,11 @@ function money(n){return `${n.toFixed(1)} 万`}
 function render(){
  const dashCompetitors=syncDashboardCompetitors();
  const a=analysis();
+ const metrics=metricDisplay(a);
  renderEditionChrome();
  renderAccount();
- document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=dashCompetitors.join(" / ");document.querySelector("#dash-samples").textContent=`${a.ownComments.toLocaleString()} 条`;
- document.querySelector("#kpi-nsr").textContent=(a.nsr*100).toFixed(1)+"%";document.querySelector("#kpi-nsr-note").textContent=a.nsr>=.7?"口碑健康":"需要优先处理购买阻力";document.querySelector("#kpi-ips").textContent=(a.ips*100).toFixed(1)+"%";document.querySelector("#kpi-intent").textContent=a.intent.toFixed(2);document.querySelector("#kpi-risk").textContent=Math.round(a.neg).toLocaleString();document.querySelector("#kpi-risk-note").textContent=`阈值 ${state.config.riskThreshold.toLocaleString()}`;
+ document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=dashCompetitors.join(" / ");document.querySelector("#dash-samples").textContent=isBlockedImport()?"旧版结果已隔离":(isSummaryImport()?"属性NSR评分（无标签声量）":`${a.ownComments.toLocaleString()} 条`);
+ document.querySelector("#kpi-nsr").textContent=metrics.nsr;document.querySelector("#kpi-nsr-note").textContent=metrics.nsrNote;document.querySelector("#kpi-ips").textContent=metrics.ips;document.querySelector("#kpi-ips-note").textContent=metrics.ipsNote;document.querySelector("#kpi-intent").textContent=metrics.intent;document.querySelector("#kpi-intent-note").textContent=metrics.intentNote;document.querySelector("#kpi-risk").textContent=metrics.risk;document.querySelector("#kpi-risk-note").textContent=isSummaryImport()?"源表未提供风险量级":`阈值 ${state.config.riskThreshold.toLocaleString()}`;
  renderDashboard(a);renderData();renderCognition(a);renderVertical();renderVideos();renderActions(a);renderKnowhow(a);renderFounderDistill();renderBloggerSkill();renderStrategyKb();renderLearning(a);renderArchitecture();renderWorkspace();renderConfig();
 }
 function renderEditionChrome(){
@@ -1081,6 +1111,8 @@ function emotionQuadrantData(rows){
  return result;
 }
 function dashboardTimeDimension(){
+ const importedRange=String(state.importQuality?.timeRange||"").trim();
+ if(importedRange)return importedRange;
  const text=String(state.sourceNote||""),range=text.match(/(20\d{2}[.\/-]\d{1,2}[.\/-]\d{1,2})\s*(?:-|—|–|至|到)\s*(20\d{2}[.\/-]\d{1,2}[.\/-]\d{1,2})/);
  if(range)return`${range[1]} — ${range[2]}`;
  const periods=[...new Set((verticalState.items||[]).map(x=>x.period).filter(Boolean))].sort();
@@ -1091,17 +1123,17 @@ function renderDashboardData(a){
  if(dashboardPlatformFilter!=="all"&&!platforms.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
  const filteredRows=dashboardPlatformFilter==="all"?a.own:a.own.filter(r=>r[2]===dashboardPlatformFilter);
  const categories=[...new Set(a.own.map(r=>r[3]).filter(Boolean))],labels=[...new Set(a.own.map(r=>r[4]).filter(Boolean))],filteredLabels=[...new Set(filteredRows.map(r=>r[4]).filter(Boolean))],referenceModels=[...new Set(state.rows.map(r=>r[0]).filter(x=>x&&x!==state.config.model))];
- document.querySelector("#dashboard-data-note").textContent=a.own.length?`${filteredLabels.length} 个有效标签`:`${state.config.model} 暂无数据`;
+ document.querySelector("#dashboard-data-note").textContent=isBlockedImport()?state.importQuality.message:(a.own.length?`${filteredLabels.length} 个有效标签`:`${state.config.model} 暂无数据`);
  document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>平台</span><select id="dashboard-platform-filter" aria-label="按平台筛选四象限"><option value="all">全部平台</option>${platforms.map(platform=>`<option value="${escapeAttr(platform)}" ${platform===dashboardPlatformFilter?"selected":""}>${escapeHtml(platform)}</option>`).join("")}</select></label>`;
  document.querySelector("#dashboard-data-context").innerHTML=[
   ["本品车型",state.config.model,"own-model"],
   ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
   ["时间维度",dashboardTimeDimension(),"time-dimension"],
-  ["数据维度","平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
+  ["数据维度",isSummaryImport()?"属性NSR评分 × 数据来源 × 认知标签":"平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
   ["当前标签",filteredLabels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
  ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
  document.querySelector("#dashboard-data-summary").innerHTML=[
-  ["车型数",a.own.length?1:0],
+  ["本品车型数",a.own.length?1:0],
   ["平台数",platforms.length],
   ["主要赛道",categories[0]||"—"],
   ["主要标签",labels[0]||"—"]
@@ -1453,7 +1485,7 @@ function cognitionStrategyContext(a=analysis()){
   drillKey:model,
   question:"请基于认知赛道诊断，调用决策驾驶舱、声量数据中心和垂媒竞争格局，为当前品牌车型输出可执行营销策略。外显结果必须是MMN多模态策略输出。",
   project:{edition:activeEdition(),brand:brandForDisplay(model),model,competitors,project:state.config.project,stage:state.config.stage||"上市/增长期"},
-  summary:{nsr:+(a.nsr||0).toFixed(3),intent:+(a.intent||0).toFixed(3),ips:+(a.ips||0).toFixed(3),positiveScore:Math.round(a.pos||0),negativeScore:Math.round(a.neg||0),ownSamples:a.ownComments||0,assetCount:(a.labels||[]).filter(x=>x.diagnosis==="持续放大").length,riskCount:(a.labels||[]).filter(x=>x.diagnosis==="优先修复").length,spaceCount:(a.labels||[]).filter(x=>x.diagnosis==="抢占空位").length},
+  summary:{...metricValues(a),positiveScore:Math.round(a.pos||0),negativeScore:Math.round(a.neg||0),ownSamples:isSummaryImport()?null:a.ownComments||0,assetCount:(a.labels||[]).filter(x=>x.diagnosis==="持续放大").length,riskCount:(a.labels||[]).filter(x=>x.diagnosis==="优先修复").length,spaceCount:(a.labels||[]).filter(x=>x.diagnosis==="抢占空位").length},
   breakdown:{labels:(a.labels||[]).slice(0,12).map(x=>({label:x.label,category:x.category,diagnosis:x.diagnosis,priority:+(x.priority||0).toFixed(2),gap:+(x.gap||0).toFixed(3),white:+(x.white||0).toFixed(2),ownPositive:Math.round(x.op||0),ownNegative:Math.round(x.on||0),competitorPositive:Math.round(x.cp||0)})),platforms:topBreakdown(scopedRows,2,8),categories:topBreakdown(scopedRows,3,8),emotions:topBreakdown(scopedRows,5,8)},
   verticalCompetition:{latestPeriod,relations:latestVertical.slice(0,16).map(x=>({platform:x.platform,period:x.period,ownModel:x.ownModel,competitor:x.competitor,positiveRank:x.positiveRank,negativeRank:x.negativeRank,share:x.share,status:rankStatus(x)}))},
   references:ragSearch({query:[model,...competitors,"认知资产","认知负债","空位","营销策略"].join(" "),rows:scopedRows,limit:6}),
@@ -2131,7 +2163,7 @@ function strategyPptPayload(){
  const result=strategyPptResult(),ctx=result.context||strategyPptContext(),a=analysis(),text=publicMmnText(result.text||"");
  const sections=text.split(/\n###\s+/).map(x=>x.trim()).filter(Boolean);
  const manual=(ctx.knowledge?.manual||[]).map(x=>({label:x.label||"人工判断",conclusion:x.conclusion||x.body||"",recommendation:x.recommendation||"",evidence:x.evidence||"",platform:x.platform||"",kpi:x.kpi||""}));
- return{deckType:"mmn_strategy_consulting",title:ctx.presentation?.title||`${ctx.project?.model||state.config.model} MMN策略方案`,model:ctx.project?.model||state.config.model,brand:state.config.brand,competitor:(ctx.project?.competitors||[]).join(" / ")||state.config.competitor,competitors:ctx.project?.competitors||[],account:"MMN多模态策略输出",strategyText:text,sections,context:ctx,visualReview:{status:"pending_verified_image",rule:"封面车型图必须由MMN视觉识别与策略主控双重复核；未取得已复核车型图时不展示伪车型图。",model:ctx.project?.model||state.config.model,checks:["车型外观与车型名一致","图片来源可信","无竞品误配","无渲染/概念图误导"]},metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString(),positive:Math.round(a.pos||0).toLocaleString(),negative:Math.round(a.neg||0).toLocaleString()},diagnostics:(a.labels||[]).slice(0,8).map(x=>({label:x.label,category:x.category,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1),impact:x.impact?.toFixed?x.impact.toFixed(1):x.impact,white:x.white?.toFixed?x.white.toFixed(1):x.white})),manual:manual.length?manual:sections.slice(1,6).map((x,i)=>({label:`策略页 ${i+1}`,conclusion:x.slice(0,160),recommendation:x.slice(160,330)})),knowhow:sections.slice(0,6).map((x,i)=>({label:`P${i+1}`,message:x.slice(0,180),evidence:"MMN融合决策驾驶舱、声量数据中心、垂媒竞争格局与内容资产",kpi:"按核心标签、疑虑占比、竞品对比搜索、试驾/询价线索复盘"})),calendar:[{week:"第1周",theme:"内容资产校准",task:"完成抖音/小红书抓取、分类、达人脚本方向筛选"},{week:"第2周",theme:"证据内容上线",task:"围绕核心疑虑发布实测、车主证词和竞品同场景对比"},{week:"第3-4周",theme:"策略复盘",task:"按标签声量、评论质量、询价/试驾线索调整投放与达人组合"}]};
+ return{deckType:"mmn_strategy_consulting",title:ctx.presentation?.title||`${ctx.project?.model||state.config.model} MMN策略方案`,model:ctx.project?.model||state.config.model,brand:state.config.brand,competitor:(ctx.project?.competitors||[]).join(" / ")||state.config.competitor,competitors:ctx.project?.competitors||[],account:"MMN多模态策略输出",strategyText:text,sections,context:ctx,visualReview:{status:"pending_verified_image",rule:"封面车型图必须由MMN视觉识别与策略主控双重复核；未取得已复核车型图时不展示伪车型图。",model:ctx.project?.model||state.config.model,checks:["车型外观与车型名一致","图片来源可信","无竞品误配","无渲染/概念图误导"]},metrics:{...metricDisplay(a),positive:isSummaryImport()?"不适用":Math.round(a.pos||0).toLocaleString(),negative:isSummaryImport()?"不适用":Math.round(a.neg||0).toLocaleString()},diagnostics:(a.labels||[]).slice(0,8).map(x=>({label:x.label,category:x.category,diagnosis:x.diagnosis,negative:isSummaryImport()?"未提供量级":Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1),impact:x.impact?.toFixed?x.impact.toFixed(1):x.impact,white:x.white?.toFixed?x.white.toFixed(1):x.white})),manual:manual.length?manual:sections.slice(1,6).map((x,i)=>({label:`策略页 ${i+1}`,conclusion:x.slice(0,160),recommendation:x.slice(160,330)})),knowhow:sections.slice(0,6).map((x,i)=>({label:`P${i+1}`,message:x.slice(0,180),evidence:"MMN融合决策驾驶舱、声量数据中心、垂媒竞争格局与内容资产",kpi:"按核心标签、疑虑占比、竞品对比搜索、试驾/询价线索复盘"})),calendar:[{week:"第1周",theme:"内容资产校准",task:"完成抖音/小红书抓取、分类、达人脚本方向筛选"},{week:"第2周",theme:"证据内容上线",task:"围绕核心疑虑发布实测、车主证词和竞品同场景对比"},{week:"第3-4周",theme:"策略复盘",task:"按标签声量、评论质量、询价/试驾线索调整投放与达人组合"}]};
 }
 function renderContentPptPlanner(){
  const box=document.querySelector("#content-ppt-planner"),status=document.querySelector("#content-ppt-status");
@@ -3103,7 +3135,7 @@ function reportPayload(){
   {week:"第3周",theme:"场景转化",task:"组织车主/KOC用真实通勤、家庭、长途场景复现产品价值，承接试驾。"},
   {week:"第4周",theme:"资产放大",task:`把“${assets[0]?.label||list[2]?.label||"正向资产"}”包装成可复述卖点，形成话题、内容Brief和品牌传播口径。`}
  ];
- return{title:state.config.project,model:state.config.model,competitor:state.config.competitor,account:session?`${session.org} / ${session.email}`:"本机临时模式",metrics:{nsr:(a.nsr*100).toFixed(1)+"%",ips:(a.ips*100).toFixed(1)+"%",intent:a.intent.toFixed(2),risk:Math.round(a.neg).toLocaleString()},manual,diagnostics:list.map(x=>({label:x.label,diagnosis:x.diagnosis,negative:Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),knowhow:list.slice(0,6).map(x=>{const k=knowhowFor(x),learned=latestLearning(x.label);return{label:x.label,message:learned?.recommendation||k.message,evidence:learned?.evidence||k.proof,kpi:learned?.kpi||k.kpi}}),strategyKnowledge:strategyKb.slice(-8),calendar};
+ return{title:state.config.project,model:state.config.model,competitor:state.config.competitor,account:session?`${session.org} / ${session.email}`:"本机临时模式",metrics:metricDisplay(a),manual,diagnostics:list.map(x=>({label:x.label,diagnosis:x.diagnosis,negative:isSummaryImport()?"未提供量级":Math.round(x.on).toLocaleString(),gap:(x.gap*100).toFixed(1)+"%",priority:x.priority.toFixed(1)})),knowhow:list.slice(0,6).map(x=>{const k=knowhowFor(x),learned=latestLearning(x.label);return{label:x.label,message:learned?.recommendation||k.message,evidence:learned?.evidence||k.proof,kpi:learned?.kpi||k.kpi}}),strategyKnowledge:strategyKb.slice(-8),calendar};
 }
 const exportPptxButton=document.querySelector("#export-pptx");if(exportPptxButton)exportPptxButton.onclick=async()=>{try{toast("正在生成 PPT…");const res=await fetch("/api/export-pptx",{method:"POST",headers:authHeaders({"Content-Type":"application/json"}),body:JSON.stringify(reportPayload())});if(!res.ok){const err=await res.json().catch(()=>({error:"PPT 生成失败"}));throw new Error(err.error)}const blob=await res.blob();const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${state.config.project}_策略报告.pptx`;a.click();URL.revokeObjectURL(a.href);toast("PPT 已导出")}catch(err){toast(`PPT 导出失败：${err.message}`)}};
 const exportGammaButton=document.querySelector("#export-gamma");if(exportGammaButton)exportGammaButton.onclick=()=>{const p=reportPayload();const text=[`# Gamma 提案生成大纲｜${p.title}`,``,`请基于以下内容生成一份中文汽车营销策略汇报 PPT。`,`风格：专业、简洁、有咨询感，适合给汽车品牌营销负责人/管理层汇报。`,`页数建议：8页，16:9。`,``,`## 1. 封面`,`标题：${p.title}`,`副标题：分析对象 ${p.model}｜竞品 ${p.competitor}`,``,`## 2. 核心数据结果`,`- NSR：${p.metrics.nsr}` ,`- IPS：${p.metrics.ips}`,`- 购买意向指数：${p.metrics.intent}`,`- 购买阻力风险：${p.metrics.risk}`,``,`## 3. 认知诊断排序`,...p.diagnostics.slice(0,8).map((x,i)=>`${i+1}. ${x.label}｜${x.diagnosis}｜负向 ${x.negative}｜Gap ${x.gap}｜优先级 ${x.priority}`),``,`## 4. 人工结论与建议`,...(p.manual.length?p.manual.map((x,i)=>`${i+1}. ${x.label}\n- 结论：${x.conclusion||"未填写"}\n- 建议：${x.recommendation||"未填写"}\n- 证据：${x.evidence||"未填写"}\n- 平台：${x.platform||"未填写"}\n- KPI：${x.kpi||"未填写"}`):["尚未填写人工结论，请在页面中补充后再生成正式提案。"]),``,`## 5. 参考 Know-how`,...p.knowhow.map((x,i)=>`${i+1}. ${x.label}：${x.message}；证据链：${x.evidence}；KPI：${x.kpi}`),``,`## 6. 策略知识库补充`,...(p.strategyKnowledge?.length?p.strategyKnowledge.map((x,i)=>`${i+1}. ${x.type}：${x.body}`):["暂无导入的策略知识。"]),``,`## 7. 30天行动节奏`,...p.calendar.map(x=>`- ${x.week}｜${x.theme}：${x.task}`),``,`## 8. 风险与下一步`,`强调：数据结果由系统计算，最终结论和建议以人工填写为准；企业知识库会持续学习人工判断。`,``,`## 9. 结尾页`,`输出：下一步需要确认的策略动作、内容证据、责任分工和复盘指标。`].join("\\n");download(`${p.title}_Gamma大纲.md`,text,"text/markdown");toast("Gamma 大纲已导出")};
@@ -3117,7 +3149,7 @@ const exportReportButton=document.querySelector("#export-report");if(exportRepor
   ["第4周","资产放大",`把“${assets[0]?.label||list[2]?.label||"正向资产"}”包装成可复述卖点，形成话题、内容Brief和品牌传播口径。`]
  ];
  const manual=learnings().filter(x=>x.model===state.config.model);
- const report=[`# ${state.config.project}｜营销策略报告`,``,`版本：${currentEdition().label}`,`分析对象：${state.config.model}  ｜ 核心竞品：${state.config.competitor}`,session?`客户空间：${session.org} ｜ 账号：${session.email}`:"客户空间：未登录，本机临时模式",``,`## 数据结果`,`- 口碑健康 NSR：${(a.nsr*100).toFixed(1)}%`,`- 目标人群穿透 IPS：${(a.ips*100).toFixed(1)}%`,`- 购买意向指数：${a.intent.toFixed(2)}`,`- 购买阻力风险分：${Math.round(a.neg).toLocaleString()}`,``,`## 人工结论与建议`,...(manual.length?manual.map((x,i)=>`${i+1}. **${x.label}**\n   - 结论：${x.conclusion||"未填写"}\n   - 建议：${x.recommendation||"未填写"}\n   - 证据：${x.evidence||"未填写"}\n   - 平台：${x.platform||"未填写"}\n   - KPI：${x.kpi||"未填写"}`):["尚未填写人工结论。"]),``,`## 系统诊断参考`,...list.map((x,i)=>{const ac=actionFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}｜${x.diagnosis}**：本品负向 ${Math.round(x.on).toLocaleString()}，认知 Gap ${(x.gap*100).toFixed(1)}%；参考证据：${learned?.evidence||ac.evidence}；参考平台：${learned?.platform||ac.platform}；建议预算参考：${money(state.config.budget*x.priority/sum)}。`}),``,`## 参考 Know-how`,...list.slice(0,6).map((x,i)=>{const k=knowhowFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}**：${learned?.conclusion||k.why}\n   - 参考打法：${learned?.recommendation||k.message}\n   - 证据链：${learned?.evidence||k.proof}\n   - KPI：${learned?.kpi||k.kpi}`}),``,`## 30天排期参考`,...calendar.map(x=>`- **${x[0]}｜${x[1]}**：${x[2]}`),``,session?`> 数据结果由系统计算；结论和建议以人工填写内容为准；学习案例来自 ${session.org} 企业知识库。`:`> 数据结果由系统计算；结论和建议以人工填写内容为准；当前为本机临时学习模式。`].join("\n");
+ const metrics=metricDisplay(a),report=[`# ${state.config.project}｜营销策略报告`,``,`版本：${currentEdition().label}`,`分析对象：${state.config.model}  ｜ 核心竞品：${state.config.competitor}`,session?`客户空间：${session.org} ｜ 账号：${session.email}`:"客户空间：未登录，本机临时模式",``,`## 数据结果`,`- 口碑健康 NSR：${metrics.nsr}`,`- 目标人群穿透 IPS：${metrics.ips}`,`- 购买意向指数：${metrics.intent}`,`- 购买阻力风险分：${metrics.risk}`,isSummaryImport()?`- 数据边界：${state.importQuality.message}`:"",``,`## 人工结论与建议`,...(manual.length?manual.map((x,i)=>`${i+1}. **${x.label}**\n   - 结论：${x.conclusion||"未填写"}\n   - 建议：${x.recommendation||"未填写"}\n   - 证据：${x.evidence||"未填写"}\n   - 平台：${x.platform||"未填写"}\n   - KPI：${x.kpi||"未填写"}`):["尚未填写人工结论。"]),``,`## 系统诊断参考`,...list.map((x,i)=>{const ac=actionFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}｜${x.diagnosis}**：本品负向 ${isSummaryImport()?"源表未提供量级":Math.round(x.on).toLocaleString()}，认知 Gap ${(x.gap*100).toFixed(1)}%；参考证据：${learned?.evidence||ac.evidence}；参考平台：${learned?.platform||ac.platform}；建议预算参考：${money(state.config.budget*x.priority/sum)}。`}),``,`## 参考 Know-how`,...list.slice(0,6).map((x,i)=>{const k=knowhowFor(x),learned=latestLearning(x.label);return`${i+1}. **${x.label}**：${learned?.conclusion||k.why}\n   - 参考打法：${learned?.recommendation||k.message}\n   - 证据链：${learned?.evidence||k.proof}\n   - KPI：${learned?.kpi||k.kpi}`}),``,`## 30天排期参考`,...calendar.map(x=>`- **${x[0]}｜${x[1]}**：${x[2]}`),``,session?`> 数据结果由系统计算；结论和建议以人工填写内容为准；学习案例来自 ${session.org} 企业知识库。`:`> 数据结果由系统计算；结论和建议以人工填写内容为准；当前为本机临时学习模式。`].filter(Boolean).join("\n");
  download(`${state.config.project}_策略报告.md`,report,"text/markdown");toast("策略报告已导出");
 };
 function startAppDataLoads(){
