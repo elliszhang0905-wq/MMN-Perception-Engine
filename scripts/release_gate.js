@@ -231,11 +231,11 @@ async function main() {
 
   const summaryModels = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"];
   const summaryHeat = {
-    "小米YU7": { volume: 1300345, interaction: 9260761 },
-    "Model Y": { volume: 730202, interaction: 3519781 },
-    "问界M7": { volume: 252720, interaction: 1145264 },
-    "奥迪E7X": { volume: 235579, interaction: 2169813 },
-    "奥迪Q6L e-tron": { volume: 20741, interaction: 55736 }
+    "小米YU7": { volume: 1300345, interaction: 9260761, platformVolume: { "抖音": 901729, "小红书": 140498, "微博": 74294, "B站": 59092, "视频号": 44588, "快手": 25393, "今日头条": 22519, "汽车垂媒": 12552, "其他": 19680 } },
+    "Model Y": { volume: 730202, interaction: 3519781, platformVolume: { "抖音": 427206, "小红书": 137260, "微博": 20150, "B站": 15451, "视频号": 43161, "快手": 19739, "今日头条": 34073, "汽车垂媒": 11898, "其他": 21264 } },
+    "问界M7": { volume: 252720, interaction: 1145264, platformVolume: { "抖音": 159650, "小红书": 36410, "微博": 11830, "B站": 3393, "视频号": 5420, "快手": 2493, "今日头条": 20197, "汽车垂媒": 5583, "其他": 7744 } },
+    "奥迪E7X": { volume: 235579, interaction: 2169813, platformVolume: { "抖音": 103589, "小红书": 35439, "微博": 69977, "B站": 2562, "视频号": 6083, "快手": 1658, "今日头条": 7045, "汽车垂媒": 6052, "其他": 3174 } },
+    "奥迪Q6L e-tron": { volume: 20741, interaction: 55736, platformVolume: { "抖音": 7732, "小红书": 7868, "微博": 1016, "B站": 25, "视频号": 843, "快手": 351, "今日头条": 1554, "汽车垂媒": 561, "其他": 791 } }
   };
   const summaryRows = [];
   for (const model of summaryModels) {
@@ -267,10 +267,16 @@ async function main() {
     intent: document.querySelector("#kpi-intent")?.textContent.trim() || "",
     intentNote: document.querySelector("#kpi-intent-note")?.textContent.trim() || "",
     surfaceTitle: document.querySelector(".dashboard-data-title-copy h2")?.textContent.trim() || "",
-    selectableModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(node => node.textContent.trim()),
-    selectedModels: [...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node => node.value),
+    selectableModels: [document.querySelector(".summary-heat-own b")?.textContent.trim(), ...[...document.querySelectorAll(".summary-heat-model-list label span")].map(node => node.textContent.trim())].filter(Boolean),
+    selectedModels: [document.querySelector(".summary-heat-own b")?.textContent.trim(), ...[...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node => node.value)].filter(Boolean),
     heatRows: [...document.querySelectorAll(".summary-heat-row")].map(node => node.textContent.replace(/\s+/g, " ").trim()),
     addOptions: [...document.querySelectorAll("#summary-heat-add-model option")].map(node => node.textContent.trim()),
+    ownModel: document.querySelector(".summary-heat-own b")?.textContent.trim() || "",
+    ownLocked: Boolean(document.querySelector(".summary-heat-own input:checked:disabled")),
+    competitorModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(node => node.textContent.trim()),
+    summaryCardsHidden: Boolean(document.querySelector("#dashboard-data-summary")?.hidden),
+    productPointName: document.querySelector("#dashboard-data-context .label-dimension span")?.textContent.trim() || "",
+    scaleNote: document.querySelector(".summary-heat-chart-head>small")?.textContent.trim() || "",
     topBrands: [...document.querySelectorAll("#dash-brand-select option")].map(node => node.textContent.trim()),
     attributeRows: document.querySelectorAll(".summary-attribute-row").length,
     attributeValues: [...document.querySelectorAll(".summary-attribute-value")].map(node => node.textContent.trim()),
@@ -278,8 +284,26 @@ async function main() {
   }));
   add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote), JSON.stringify(summaryImport));
   add("summary workbook first renders source-backed all-network heat comparison", summaryImport.surfaceTitle === "全网声量及互动量对比" && summaryImport.selectableModels.length === summaryModels.length && summaryImport.selectedModels.length === summaryModels.length && summaryImport.heatRows.length === summaryModels.length && summaryImport.heatRows.some(row => /奥迪E7X.*23\.6万.*217\.0万/.test(row)) && summaryImport.addOptions.length === 1, JSON.stringify(summaryImport));
+  add("summary cockpit keeps product fixed and removes system counters", summaryImport.ownModel === "奥迪E7X" && summaryImport.ownLocked && summaryImport.competitorModels.length === summaryModels.length - 1 && !summaryImport.competitorModels.includes("奥迪E7X") && summaryImport.summaryCardsHidden, JSON.stringify(summaryImport));
+  add("summary cockpit uses decision language and explains independent scales", summaryImport.productPointName === "当前可用产品点" && summaryImport.scaleNote === "声量与互动量按各自独立尺度展示，不可直接比较绝对柱长。", JSON.stringify(summaryImport));
   add("summary workbook keeps the global brand library separate from imported comparison models", summaryImport.topBrands.length > 10 && summaryImport.topBrands.includes("奥迪") && summaryImport.topBrands.includes("智己") && summaryImport.selectableModels.length === summaryModels.length, JSON.stringify(summaryImport));
   add("summary workbook renders real attribute NSR without emotion quadrants", summaryImport.attributeRows === 3 && summaryImport.attributeValues.length === 9 && summaryImport.attributeValues.every(value => /^-?\d+(?:\.\d)?%$/.test(value)) && summaryImport.quadrants === 0, JSON.stringify(summaryImport));
+
+  await page.locator('[data-summary-heat-model="奥迪E7X"]').click();
+  const platformBubble = await page.evaluate(() => ({
+    title: document.querySelector(".summary-platform-popover header")?.textContent.replace(/×/g, "").replace(/\s+/g, " ").trim() || "",
+    rows: [...document.querySelectorAll(".summary-platform-bars>div")].map(node => node.textContent.replace(/\s+/g, " ").trim()),
+    closeLabel: document.querySelector(".summary-platform-popover button")?.getAttribute("aria-label") || ""
+  }));
+  add("heat bar opens a source-backed platform volume bubble", /奥迪E7X.*分平台声量表现/.test(platformBubble.title) && platformBubble.rows.length === 9 && platformBubble.rows.some(row => /抖音.*10\.4万/.test(row)) && platformBubble.closeLabel === "关闭分平台声量气泡", JSON.stringify(platformBubble));
+  await page.locator(".summary-platform-popover button").click();
+  await page.locator('.summary-heat-model-list input[value="小米YU7"]').uncheck();
+  const lockedAfterFilter = await page.evaluate(() => ({
+    ownLocked: Boolean(document.querySelector(".summary-heat-own input:checked:disabled")),
+    rows: [...document.querySelectorAll(".summary-heat-row>b")].map(node => node.textContent.trim())
+  }));
+  add("competitor filtering cannot remove the product model", lockedAfterFilter.ownLocked && lockedAfterFilter.rows.includes("奥迪E7X") && !lockedAfterFilter.rows.includes("小米YU7"), JSON.stringify(lockedAfterFilter));
+  await page.locator('.summary-heat-model-list input[value="小米YU7"]').check();
 
   await page.route("**/api/import-xlsx?filename=AUDI%20E7X.xlsx", route => route.fulfill({
     contentType: "application/json",
@@ -309,7 +333,7 @@ async function main() {
     model: document.querySelector("#dash-model-select")?.value || "",
     models: [...document.querySelectorAll("#dash-model-select option")].map(option => option.textContent.trim()),
     heatRows: document.querySelectorAll(".summary-heat-row").length,
-    selectableModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(option => option.textContent.trim())
+    selectableModels: [document.querySelector(".summary-heat-own b")?.textContent.trim(), ...[...document.querySelectorAll(".summary-heat-model-list label span")].map(option => option.textContent.trim())].filter(Boolean)
   }));
   add("replacement import resets the dashboard while preserving the global model library", replacementContext.brand === "奥迪" && replacementContext.model === "奥迪E7X" && replacementContext.models.includes("奥迪E7X") && replacementContext.models.includes("奥迪Q6L e-tron") && replacementContext.models.includes("奥迪A3") && replacementContext.heatRows === summaryModels.length && replacementContext.selectableModels.length === summaryModels.length && !replacementContext.selectableModels.includes("奥迪A3"), JSON.stringify(replacementContext));
 

@@ -3467,7 +3467,14 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             return 0
 
     summary_heat = {
-        model: {"volume": summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0), "interaction": 0}
+        model: {
+            "volume": summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0),
+            "interaction": 0,
+            "platformVolume": {
+                platform: summary_count(rows[row_idx][col] if len(rows[row_idx]) > col else 0)
+                for col, platform in platform_cols
+            },
+        }
         for row_idx, model in model_rows
     }
     interaction_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "互动量"), None)
@@ -3553,6 +3560,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             "timeRange": time_range,
             "metricCoverage": {"nsr": True, "ips": False, "intent": False, "risk": False},
             "attributeVolumeAvailable": False,
+            "platformVolumeAvailable": True,
             "message": "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。",
         },
         "sourceRowCount": len(model_rows),

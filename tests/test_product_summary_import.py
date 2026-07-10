@@ -74,7 +74,25 @@ class ProductSummaryImportTest(unittest.TestCase):
         self.assertEqual({row[4] for row in dataset["rows"]}, {"外观", "价格", "安全"})
         self.assertNotIn("正面", {row[2] for row in dataset["rows"]})
         self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
-        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"], {"volume": 402, "interaction": 4000})
+        self.assertEqual(
+            dataset["summaryHeat"]["奥迪E7X"],
+            {
+                "volume": 402,
+                "interaction": 4000,
+                "platformVolume": {
+                    "抖音": 403,
+                    "小红书": 404,
+                    "微博": 405,
+                    "B站": 406,
+                    "视频号": 407,
+                    "快手": 408,
+                    "今日头条": 409,
+                    "汽车垂媒": 410,
+                    "其他": 411,
+                },
+            },
+        )
+        self.assertTrue(dataset["importQuality"]["platformVolumeAvailable"])
 
     def test_summary_import_rejects_when_attribute_blocks_are_missing(self):
         with self.assertRaisesRegex(ValueError, "属性NSR区块"):

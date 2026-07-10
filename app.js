@@ -47,6 +47,8 @@ let dataBrandFilter="all";
 let dashBrandOpen="";
 let dashboardPlatformFilter="all";
 let summaryDashboardModels=[];
+let summaryPlatformPopoverCleanup=null;
+let summaryPlatformPopoverTrigger=null;
 let dashModelMenuOpen=false;
 let learningBrandOpen="";
 let cognitionBrandOpen="";
@@ -1125,13 +1127,45 @@ function renderSummaryAttributeMatrix(rows){
 }
 function summaryHeatNumber(value){return Math.max(0,Number(value)||0)}
 function summaryHeatDisplay(value){const number=summaryHeatNumber(value);return number>=10000?`${(number/10000).toFixed(1)}万`:number.toLocaleString()}
+function closeSummaryPlatformPopover(restoreFocus=false){
+ const popover=document.querySelector(".summary-platform-popover");
+ if(popover)popover.remove();
+ if(summaryPlatformPopoverCleanup){summaryPlatformPopoverCleanup();summaryPlatformPopoverCleanup=null}
+ if(restoreFocus&&summaryPlatformPopoverTrigger?.isConnected)summaryPlatformPopoverTrigger.focus();
+ summaryPlatformPopoverTrigger=null;
+}
+function openSummaryPlatformPopover(model,trigger){
+ closeSummaryPlatformPopover();
+ const chart=trigger.closest(".summary-heat-chart"),values=state.summaryHeat?.[model]?.platformVolume||{};
+ if(!chart)return;
+ const entries=Object.entries(values).map(([platform,value])=>({platform,value:summaryHeatNumber(value)}));
+ const maxValue=Math.max(...entries.map(item=>item.value),1),popover=document.createElement("section");
+ popover.className="summary-platform-popover";
+ popover.setAttribute("role","dialog");
+ popover.setAttribute("aria-label",`${model}分平台声量表现`);
+ popover.innerHTML=`<header><div><span>${escapeHtml(model)}</span><b>分平台声量表现</b></div><button type="button" aria-label="关闭分平台声量气泡">×</button></header>${entries.length?`<div class="summary-platform-bars">${entries.map(item=>`<div><span>${escapeHtml(item.platform)}</span><i><em style="width:${item.value/maxValue*100}%"></em></i><strong title="${item.value.toLocaleString()}">${summaryHeatDisplay(item.value)}</strong></div>`).join("")}</div>`:`<div class="summary-platform-empty">当前导入版本未保留分平台声量，请重新导入原表。</div>`}`;
+ chart.appendChild(popover);
+ const desiredTop=trigger.offsetTop+trigger.offsetHeight-4,chartHeight=chart.clientHeight,popoverHeight=popover.offsetHeight;
+ popover.style.top=`${Math.max(46,Math.min(desiredTop,chartHeight-popoverHeight-12))}px`;
+ summaryPlatformPopoverTrigger=trigger;
+ popover.querySelector("button").onclick=event=>{event.stopPropagation();closeSummaryPlatformPopover(true)};
+ const onOutsideClick=event=>{if(!popover.contains(event.target)&&event.target!==trigger&&!trigger.contains(event.target))closeSummaryPlatformPopover()};
+ const onKeydown=event=>{if(event.key==="Escape")closeSummaryPlatformPopover(true)};
+ setTimeout(()=>document.addEventListener("click",onOutsideClick),0);
+ document.addEventListener("keydown",onKeydown);
+ summaryPlatformPopoverCleanup=()=>{document.removeEventListener("click",onOutsideClick);document.removeEventListener("keydown",onKeydown)};
+ popover.querySelector("button").focus();
+}
 function summaryHeatSelection(){
  const available=(state.models||[]).filter(Boolean);
  summaryDashboardModels=summaryDashboardModels.filter(model=>available.includes(model));
+ const own=state.config.model;
  if(!summaryDashboardModels.length&&available.length)summaryDashboardModels=[...available];
+ if(own&&available.includes(own)&&!summaryDashboardModels.includes(own))summaryDashboardModels=[own,...summaryDashboardModels];
  return summaryDashboardModels;
 }
 function renderSummaryHeatDashboard(a){
+ closeSummaryPlatformPopover();
  const available=(state.models||[]).filter(Boolean),selected=summaryHeatSelection(),heat=state.summaryHeat||{},ownRows=a?.own||state.rows.filter(r=>r[0]===state.config.model);
  const sources=[...new Set(ownRows.map(r=>r[2]).filter(Boolean))],labels=[...new Set(ownRows.map(r=>r[4]).filter(Boolean))],referenceModels=available.filter(model=>model!==state.config.model);
  if(dashboardPlatformFilter!=="all"&&!sources.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
@@ -1140,26 +1174,28 @@ function renderSummaryHeatDashboard(a){
  const maxVolume=Math.max(...rows.map(row=>row.volume),1),maxInteraction=Math.max(...rows.map(row=>row.interaction),1);
  document.querySelector(".dashboard-data-title-copy span").textContent="产品评价汇总";
  document.querySelector(".dashboard-data-title-copy h2").textContent="全网声量及互动量对比";
- document.querySelector("#dashboard-data-note").textContent=`${labels.length} 个有效标签 · ${available.length} 台可选车型`;
+ document.querySelector("#dashboard-data-note").textContent=`${labels.length} 个可用产品点 · ${referenceModels.length} 台可选竞品`;
  document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>数据来源</span><select id="dashboard-platform-filter" aria-label="按数据来源筛选属性NSR"><option value="all">全部来源</option>${sources.map(source=>`<option value="${escapeAttr(source)}" ${source===dashboardPlatformFilter?"selected":""}>${escapeHtml(source)}</option>`).join("")}</select></label>`;
  document.querySelector("#dashboard-data-context").innerHTML=[
   ["本品车型",state.config.model,"own-model"],
   ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
   ["时间维度",dashboardTimeDimension(),"time-dimension"],
   ["数据维度","全网声量 × 互动量 × 属性NSR评分","data-dimension"],
-  ["当前标签",labels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
+  ["当前可用产品点",labels.slice(0,6).join(" / ")||"暂无可用产品点","label-dimension"]
  ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
- document.querySelector("#dashboard-data-summary").innerHTML=[
-  ["导入车型数",available.length],
-  ["当前对比车型",selected.length],
-  ["数据来源数",sources.length],
-  ["属性标签数",labels.length]
- ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
+ const summary=document.querySelector("#dashboard-data-summary");
+ summary.innerHTML="";
+ summary.hidden=true;
  const surface=document.querySelector("#dashboard-emotion-quadrant");
  surface.className="summary-dashboard-workbench";
- surface.innerHTML=`<div class="summary-heat-workbench"><aside class="summary-heat-selector"><div><span>对比车型</span><b>仅限本次导入车型</b></div><div class="summary-heat-model-list">${available.map(model=>`<label><input type="checkbox" value="${escapeAttr(model)}" ${selected.includes(model)?"checked":""}><span>${escapeHtml(model)}</span></label>`).join("")}</div><label class="summary-heat-add"><span>添加车型</span><select id="summary-heat-add-model"><option value="">选择车型</option>${available.filter(model=>!selected.includes(model)).map(model=>`<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join("")}</select></label></aside><section class="summary-heat-chart"><div class="summary-heat-legend"><span><i class="volume"></i>全网声量</span><span><i class="interaction"></i>全网互动量</span></div>${rows.length?rows.map(row=>`<div class="summary-heat-row"><b>${escapeHtml(row.model)}</b><div class="summary-heat-bars"><div><span>声量</span><i class="volume" style="width:${row.volume/maxVolume*100}%"></i><strong>${summaryHeatDisplay(row.volume)}</strong></div><div><span>互动量</span><i class="interaction" style="width:${row.interaction/maxInteraction*100}%"></i><strong>${summaryHeatDisplay(row.interaction)}</strong></div></div></div>`).join(""):`<div class="empty-state">请从左侧添加至少一台车型。</div>`}</section></div><section class="summary-attribute-section"><header><div><span>属性诊断</span><b>真实属性 NSR 对比</b></div><small>${dashboardPlatformFilter==="all"?"全部来源":escapeHtml(dashboardPlatformFilter)}</small></header><div class="summary-attribute-matrix">${renderSummaryAttributeMatrix(filteredRows)}</div></section>`;
- document.querySelectorAll(".summary-heat-model-list input").forEach(input=>input.onchange=()=>{summaryDashboardModels=[...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node=>node.value);renderSummaryHeatDashboard()});
+ const ownModel=state.config.model,competitorModels=available.filter(model=>model!==ownModel);
+ const selectorHtml=`<aside class="summary-heat-selector"><section class="summary-heat-own"><span>本品车型</span><label><input type="checkbox" checked disabled aria-label="本品车型固定展示"><b>${escapeHtml(ownModel)}</b></label></section><section class="summary-heat-competitors"><span>对比竞品</span><div class="summary-heat-model-list">${competitorModels.map(model=>`<label><input type="checkbox" value="${escapeAttr(model)}" ${selected.includes(model)?"checked":""}><span>${escapeHtml(model)}</span></label>`).join("")}</div><label class="summary-heat-add"><span>添加竞品</span><select id="summary-heat-add-model"><option value="">选择竞品</option>${competitorModels.filter(model=>!selected.includes(model)).map(model=>`<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join("")}</select></label></section></aside>`;
+ const chartRows=rows.map(row=>`<button type="button" class="summary-heat-row" data-summary-heat-model="${escapeAttr(row.model)}" aria-label="查看${escapeAttr(row.model)}分平台声量表现"><b>${escapeHtml(row.model)}</b><span class="summary-heat-bars"><span><small>声量</small><i class="volume" style="width:${row.volume/maxVolume*100}%"></i><strong>${summaryHeatDisplay(row.volume)}</strong></span><span><small>互动量</small><i class="interaction" style="width:${row.interaction/maxInteraction*100}%"></i><strong>${summaryHeatDisplay(row.interaction)}</strong></span></span></button>`).join("");
+ const chartHtml=`<section class="summary-heat-chart"><div class="summary-heat-chart-head"><small>声量与互动量按各自独立尺度展示，不可直接比较绝对柱长。</small><div class="summary-heat-legend"><span><i class="volume"></i>全网声量</span><span><i class="interaction"></i>全网互动量</span></div></div>${chartRows||`<div class="empty-state">暂无可展示车型。</div>`}</section>`;
+ surface.innerHTML=`<div class="summary-heat-workbench">${selectorHtml}${chartHtml}</div><section class="summary-attribute-section"><header><div><span>属性诊断</span><b>真实属性 NSR 对比</b></div><small>${dashboardPlatformFilter==="all"?"全部来源":escapeHtml(dashboardPlatformFilter)}</small></header><div class="summary-attribute-matrix">${renderSummaryAttributeMatrix(filteredRows)}</div></section>`;
+ document.querySelectorAll(".summary-heat-model-list input").forEach(input=>input.onchange=()=>{summaryDashboardModels=[ownModel,...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node=>node.value);renderSummaryHeatDashboard()});
  const add=document.querySelector("#summary-heat-add-model");if(add)add.onchange=()=>{if(add.value&&!summaryDashboardModels.includes(add.value)){summaryDashboardModels=[...summaryDashboardModels,add.value];renderSummaryHeatDashboard()}};
+ document.querySelectorAll("[data-summary-heat-model]").forEach(row=>row.onclick=event=>{event.stopPropagation();openSummaryPlatformPopover(row.dataset.summaryHeatModel,row)});
  document.querySelector("#dashboard-platform-filter").onchange=event=>{dashboardPlatformFilter=event.target.value;renderSummaryHeatDashboard(a)};
 }
 function dashboardTimeDimension(){
@@ -1190,7 +1226,9 @@ function renderDashboardData(a){
   ["数据维度","平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
   ["当前标签",filteredLabels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
  ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
- document.querySelector("#dashboard-data-summary").innerHTML=[
+ const summary=document.querySelector("#dashboard-data-summary");
+ summary.hidden=false;
+ summary.innerHTML=[
   ["本品车型数",a.own.length?1:0],
   ["平台数",platforms.length],
   ["主要赛道",categories[0]||"—"],
