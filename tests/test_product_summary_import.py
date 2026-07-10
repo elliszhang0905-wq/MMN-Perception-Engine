@@ -55,6 +55,15 @@ def product_summary_cells(include_attributes=True):
                 cells[(row, 22)] = label
                 for offset in range(len(MODELS)):
                     cells[(row, 23 + offset)] = 0.8 - label_offset * 0.35 + offset * 0.01
+
+    platform_nsr_headers = ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "bilibili", "视频号"]
+    for offset, platform in enumerate(platform_nsr_headers):
+        cells[(70, 13 + offset)] = platform
+    for model_offset, model in enumerate(MODELS):
+        row = 71 + model_offset
+        cells[(row, 12)] = model
+        for platform_offset in range(len(platform_nsr_headers)):
+            cells[(row, 13 + platform_offset)] = 0.3 + model_offset * 0.1 + platform_offset * 0.01
     return cells
 
 
@@ -74,6 +83,19 @@ class ProductSummaryImportTest(unittest.TestCase):
         self.assertEqual({row[4] for row in dataset["rows"]}, {"外观", "价格", "安全"})
         self.assertNotIn("正面", {row[2] for row in dataset["rows"]})
         self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
+        self.assertEqual(
+            dataset["summaryPlatformNsr"]["奥迪E7X"],
+            {
+                "全网": 0.6,
+                "垂媒车主口碑": 0.61,
+                "抖音": 0.62,
+                "小红书": 0.63,
+                "微博": 0.64,
+                "B站": 0.65,
+                "视频号": 0.66,
+            },
+        )
+        self.assertEqual(dataset["importQuality"]["platformNsrSources"], ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "B站", "视频号"])
         self.assertEqual(
             dataset["summaryHeat"]["奥迪E7X"],
             {

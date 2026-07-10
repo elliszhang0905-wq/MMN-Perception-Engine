@@ -3427,6 +3427,59 @@ def summary_attribute_blocks(rows, models):
     return blocks
 
 
+def summary_platform_nsr(rows, models):
+    """Extract the model-level platform NSR table without mixing in attribute NSR blocks."""
+    aliases = {
+        "全网": "全网",
+        "垂媒": "垂媒车主口碑",
+        "垂媒车主口碑": "垂媒车主口碑",
+        "抖音": "抖音",
+        "微博": "微博",
+        "视频号": "视频号",
+        "bilibili": "B站",
+        "B站": "B站",
+        "小红书": "小红书",
+    }
+    candidates = []
+    for header_row, row in enumerate(rows):
+        platform_cols = {}
+        for col, value in enumerate(row):
+            raw = cell_text(value)
+            platform = aliases.get(raw) or aliases.get(raw.lower())
+            if platform:
+                platform_cols[platform] = col
+        # The overall platform table has a dedicated vertical-media column and
+        # at least five platform columns. This excludes the volume table and
+        # the three attribute-level NSR blocks.
+        if "垂媒车主口碑" not in platform_cols or len(platform_cols) < 5:
+            continue
+        first_col = min(platform_cols.values())
+        if first_col < 1:
+            continue
+        model_col = first_col - 1
+        values = {}
+        for row_idx in range(header_row + 1, min(header_row + len(models) + 3, len(rows))):
+            raw_model = cell_text(rows[row_idx][model_col] if model_col < len(rows[row_idx]) else "")
+            model = infer_model(raw_model) or raw_model
+            if model not in models:
+                continue
+            scores = {}
+            for platform, col in platform_cols.items():
+                raw_score = rows[row_idx][col] if col < len(rows[row_idx]) else ""
+                if cell_text(raw_score) in {"", "-", "—", "/"}:
+                    continue
+                score = share_num(raw_score)
+                if isinstance(score, (int, float)) and -1 <= score <= 1:
+                    scores[platform] = round(score, 8)
+            if scores:
+                values[model] = scores
+        if len(values) >= 2:
+            candidates.append((len(platform_cols), header_row, values))
+    if not candidates:
+        return {}
+    return max(candidates, key=lambda item: (item[0], len(item[2]), item[1]))[2]
+
+
 def build_dataset_from_summary_workbook(cells, filename, sheets=None):
     rows = sheet_rows(cells)
     volume_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "声量"), None)
@@ -3509,6 +3562,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
     attribute_blocks = summary_attribute_blocks(rows, models)
     if not attribute_blocks:
         raise ValueError("未识别到属性NSR区块，已拒绝导入。")
+    platform_nsr = summary_platform_nsr(rows, models)
 
     file_model = infer_model(Path(filename or "").stem)
     own_model = file_model if file_model in models else next((model for model in models if "启境" in model or "智己" in model), models[0])
@@ -3546,6 +3600,11 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
     metadata = summary_workbook_metadata(sheets)
     time_range = metadata.get("timeRange") or "源表未提供时间范围"
     platforms = {"全网": 1.0, "垂媒车主口碑": 1.15, "抖音": 1.35}
+    platform_nsr_sources = []
+    for scores in platform_nsr.values():
+        for source in scores:
+            if source not in platform_nsr_sources:
+                platform_nsr_sources.append(source)
     return {
         "datasetVersion": "summary_xlsx_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:32],
         "sourceNote": f"已从《{filename}》导入产品评价汇总表；数据周期：{time_range}；识别车型：{'、'.join(models)}；属性NSR覆盖来源：{'、'.join(block['source'] for block in attribute_blocks)}。",
@@ -3554,6 +3613,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
         "rows": out_rows,
         "models": models,
         "summaryHeat": summary_heat,
+        "summaryPlatformNsr": platform_nsr,
         "summaryMetrics": {model: {"overallNsr": overall_nsr[model]} for model in models},
         "importQuality": {
             "kind": "PRODUCT_EVALUATION_SUMMARY",
@@ -3561,6 +3621,8 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             "metricCoverage": {"nsr": True, "ips": False, "intent": False, "risk": False},
             "attributeVolumeAvailable": False,
             "platformVolumeAvailable": True,
+            "platformNsrAvailable": bool(platform_nsr),
+            "platformNsrSources": platform_nsr_sources,
             "message": "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。",
         },
         "sourceRowCount": len(model_rows),

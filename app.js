@@ -47,6 +47,7 @@ let dataBrandFilter="all";
 let dashBrandOpen="";
 let dashboardPlatformFilter="all";
 let summaryDashboardModels=[];
+let summaryNsrPlatform="全网";
 let summaryPlatformPopoverCleanup=null;
 let summaryPlatformPopoverTrigger=null;
 let dashModelMenuOpen=false;
@@ -1129,12 +1130,38 @@ function summaryHeatNumber(value){return Math.max(0,Number(value)||0)}
 function summaryHeatDisplay(value){const number=summaryHeatNumber(value);return number>=10000?`${(number/10000).toFixed(1)}万`:number.toLocaleString()}
 function summaryHeatPercentage(value,total){return total?Math.min(summaryHeatNumber(value)/summaryHeatNumber(total)*100,100):0}
 function summaryHeatPercentageDisplay(value){return`${value.toFixed(1)}%`}
+function summaryNsrDisplay(value){return Number.isFinite(Number(value))?`${(Number(value)*100).toFixed(1)}%`:"—"}
+function summaryNsrTrackStyle(value){
+ const score=Math.max(-1,Math.min(1,Number(value)||0)),size=Math.abs(score)*50,left=score<0?50-size:50;
+ return`--nsr-left:${left.toFixed(4)}%;--nsr-size:${size.toFixed(4)}%`;
+}
 function closeSummaryPlatformPopover(restoreFocus=false){
  const popover=document.querySelector(".summary-platform-popover");
  if(popover)popover.remove();
  if(summaryPlatformPopoverCleanup){summaryPlatformPopoverCleanup();summaryPlatformPopoverCleanup=null}
  if(restoreFocus&&summaryPlatformPopoverTrigger?.isConnected)summaryPlatformPopoverTrigger.focus();
  summaryPlatformPopoverTrigger=null;
+}
+function openSummaryNsrPopover(model,trigger){
+ closeSummaryPlatformPopover();
+ const chart=trigger.closest(".summary-nsr-chart"),ownModel=state.config.model,all=state.summaryPlatformNsr||{},values=all[model]||{},ownValues=all[ownModel]||{},isCompetitor=model!==ownModel;
+ if(!chart)return;
+ const sources=state.importQuality?.platformNsrSources||[...new Set([...Object.keys(values),...Object.keys(ownValues)])],popover=document.createElement("section");
+ popover.className="summary-platform-popover summary-nsr-popover";
+ popover.setAttribute("role","dialog");
+ popover.setAttribute("aria-label",isCompetitor?`${model}与${ownModel}整体平台口碑NSR对比`:`${model}整体平台口碑NSR表现`);
+ popover.innerHTML=`<header><div><span>${isCompetitor?"各平台本品 vs 竞品":"车型整体平台口碑"}</span><b>${escapeHtml(model)}${isCompetitor?` vs ${escapeHtml(ownModel)}`:""} · 全平台 NSR</b></div><button type="button" aria-label="关闭整体平台NSR气泡"></button></header>${sources.length?`<div class="summary-platform-bars summary-nsr-platform-bars">${sources.map(source=>{const score=Number(values[source]),ownScore=Number(ownValues[source]),hasScore=Number.isFinite(score),hasOwn=Number.isFinite(ownScore),modelRole=isCompetitor?"competitor":"own";return`<section class="summary-platform-group"><span class="summary-platform-name">${escapeHtml(source)}</span><div class="summary-platform-series"><div class="${modelRole} ${score<0?"negative":""}"><small>${isCompetitor?escapeHtml(model):`本品 · ${escapeHtml(model)}`}</small><i title="${hasScore?`NSR ${summaryNsrDisplay(score)}`:"源表无数据"}"><em style="${summaryNsrTrackStyle(score)}" ${hasScore?"":"hidden"}></em></i></div>${isCompetitor?`<div class="own ${ownScore<0?"negative":""}"><small>本品 · ${escapeHtml(ownModel)}</small><i title="${hasOwn?`NSR ${summaryNsrDisplay(ownScore)}`:"源表无数据"}"><em style="${summaryNsrTrackStyle(ownScore)}" ${hasOwn?"":"hidden"}></em></i></div>`:""}</div></section>`}).join("")}</div>`:`<div class="summary-platform-empty">当前导入版本未保留整体平台NSR，请重新导入原表。</div>`}`;
+ chart.appendChild(popover);
+ const desiredTop=trigger.offsetTop+trigger.offsetHeight-4,chartHeight=chart.clientHeight,popoverHeight=popover.offsetHeight;
+ popover.style.top=`${Math.max(46,Math.min(desiredTop,chartHeight-popoverHeight-12))}px`;
+ summaryPlatformPopoverTrigger=trigger;
+ popover.querySelector("button").onclick=event=>{event.stopPropagation();closeSummaryPlatformPopover(true)};
+ const onOutsideClick=event=>{if(!popover.contains(event.target)&&event.target!==trigger&&!trigger.contains(event.target))closeSummaryPlatformPopover()};
+ const onKeydown=event=>{if(event.key==="Escape")closeSummaryPlatformPopover(true)};
+ setTimeout(()=>document.addEventListener("click",onOutsideClick),0);
+ document.addEventListener("keydown",onKeydown);
+ summaryPlatformPopoverCleanup=()=>{document.removeEventListener("click",onOutsideClick);document.removeEventListener("keydown",onKeydown)};
+ popover.querySelector("button").focus();
 }
 function openSummaryPlatformPopover(model,trigger){
  closeSummaryPlatformPopover();
@@ -1166,18 +1193,22 @@ function summaryHeatSelection(){
  if(own&&available.includes(own))summaryDashboardModels=[own,...summaryDashboardModels.filter(model=>model!==own)];
  return summaryDashboardModels;
 }
+function renderSummaryOverallNsr(selected){
+ const all=state.summaryPlatformNsr||{},sources=state.importQuality?.platformNsrSources||[...new Set(Object.values(all).flatMap(item=>Object.keys(item||{})))];
+ if(!sources.includes(summaryNsrPlatform))summaryNsrPlatform=sources.includes("全网")?"全网":sources[0]||"";
+ const rows=selected.map(model=>({model,score:Number(all[model]?.[summaryNsrPlatform])})),hasData=sources.length&&rows.some(row=>Number.isFinite(row.score));
+ return`<section class="summary-nsr-section"><header><div><span>整体平台口碑</span><b>车型整体平台 NSR 对比</b><small>按车型整体口碑计算，不与下方产品点属性NSR混用。</small></div>${sources.length?`<div class="summary-nsr-controls"><div class="summary-nsr-legend" aria-label="颜色说明"><span class="own">本品</span><span class="competitor">竞品</span></div><label class="summary-nsr-platform-select"><span>选择平台</span><select id="summary-nsr-platform" aria-label="选择整体口碑NSR平台">${sources.map(source=>`<option value="${escapeAttr(source)}" ${source===summaryNsrPlatform?"selected":""}>${escapeHtml(source)}</option>`).join("")}</select></label></div>`:""}</header><div class="summary-nsr-chart">${hasData?`<div class="summary-nsr-axis" aria-hidden="true"><span>-100%</span><span>0</span><span>100%</span></div>${rows.map(row=>{const hasScore=Number.isFinite(row.score),tone=!hasScore?"missing":row.score<0?"negative":"positive",role=row.model===state.config.model?"own":"competitor";return`<button type="button" class="summary-nsr-row ${tone} ${role}" data-summary-nsr-model="${escapeAttr(row.model)}" aria-label="查看${escapeAttr(row.model)}整体平台NSR，当前${escapeAttr(summaryNsrPlatform)}${hasScore?summaryNsrDisplay(row.score):"无数据"}"><b>${escapeHtml(row.model)}</b><i class="summary-nsr-track"><em style="${summaryNsrTrackStyle(row.score)}" ${hasScore?"":"hidden"}></em></i><strong>${hasScore?summaryNsrDisplay(row.score):"—"}</strong></button>`}).join("")}`:`<div class="empty-state">当前导入版本没有整体平台NSR，请重新导入原始产品评价表。</div>`}</div></section>`;
+}
 function renderSummaryHeatDashboard(a){
  closeSummaryPlatformPopover();
  const available=(state.models||[]).filter(Boolean),selected=summaryHeatSelection(),heat=state.summaryHeat||{},ownRows=a?.own||state.rows.filter(r=>r[0]===state.config.model);
  const sources=[...new Set(ownRows.map(r=>r[2]).filter(Boolean))],labels=[...new Set(ownRows.map(r=>r[4]).filter(Boolean))],referenceModels=available.filter(model=>model!==state.config.model);
- if(dashboardPlatformFilter!=="all"&&!sources.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
- const filteredRows=dashboardPlatformFilter==="all"?ownRows:ownRows.filter(r=>r[2]===dashboardPlatformFilter);
  const rows=selected.map(model=>({model,volume:summaryHeatNumber(heat[model]?.volume),interaction:summaryHeatNumber(heat[model]?.interaction)}));
  const maxVolume=Math.max(...rows.map(row=>row.volume),1),maxInteraction=Math.max(...rows.map(row=>row.interaction),1);
  document.querySelector(".dashboard-data-title-copy span").textContent="产品评价汇总";
  document.querySelector(".dashboard-data-title-copy h2").textContent="全网声量及互动量对比";
  document.querySelector("#dashboard-data-note").textContent=`${labels.length} 个可用产品点 · ${referenceModels.length} 台可选竞品`;
- document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>数据来源</span><select id="dashboard-platform-filter" aria-label="按数据来源筛选属性NSR"><option value="all">全部来源</option>${sources.map(source=>`<option value="${escapeAttr(source)}" ${source===dashboardPlatformFilter?"selected":""}>${escapeHtml(source)}</option>`).join("")}</select></label>`;
+ document.querySelector("#dashboard-platform-control").innerHTML="";
  document.querySelector("#dashboard-data-context").innerHTML=[
   ["本品车型",state.config.model,"own-model"],
   ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
@@ -1194,11 +1225,12 @@ function renderSummaryHeatDashboard(a){
  const selectorHtml=`<aside class="summary-heat-selector"><section class="summary-heat-own"><span>本品车型</span><label><input type="checkbox" checked disabled aria-label="本品车型固定展示"><b>${escapeHtml(ownModel)}</b></label></section><section class="summary-heat-competitors"><span>对比竞品</span><div class="summary-heat-model-list">${competitorModels.map(model=>`<label><input type="checkbox" value="${escapeAttr(model)}" ${selected.includes(model)?"checked":""}><span>${escapeHtml(model)}</span></label>`).join("")}</div><label class="summary-heat-add"><span>添加竞品</span><select id="summary-heat-add-model"><option value="">选择竞品</option>${competitorModels.filter(model=>!selected.includes(model)).map(model=>`<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join("")}</select></label></section></aside>`;
  const chartRows=rows.map(row=>`<button type="button" class="summary-heat-row" data-summary-heat-model="${escapeAttr(row.model)}" aria-label="查看${escapeAttr(row.model)}分平台声量表现"><b>${escapeHtml(row.model)}</b><span class="summary-heat-bars"><span><small>声量</small><i class="volume" style="width:${row.volume/maxVolume*100}%"></i><strong>${summaryHeatDisplay(row.volume)}</strong></span><span><small>互动量</small><i class="interaction" style="width:${row.interaction/maxInteraction*100}%"></i><strong>${summaryHeatDisplay(row.interaction)}</strong></span></span></button>`).join("");
  const chartHtml=`<section class="summary-heat-chart"><div class="summary-heat-chart-head"><small>声量与互动量按各自独立尺度展示，不可直接比较绝对柱长。</small><div class="summary-heat-legend"><span><i class="volume"></i>全网声量</span><span><i class="interaction"></i>全网互动量</span></div></div>${chartRows||`<div class="empty-state">暂无可展示车型。</div>`}</section>`;
- surface.innerHTML=`<div class="summary-heat-workbench">${selectorHtml}${chartHtml}</div><section class="summary-attribute-section"><header><div><span>属性诊断</span><b>真实属性 NSR 对比</b></div><small>${dashboardPlatformFilter==="all"?"全部来源":escapeHtml(dashboardPlatformFilter)}</small></header><div class="summary-attribute-matrix">${renderSummaryAttributeMatrix(filteredRows)}</div></section>`;
+ surface.innerHTML=`<div class="summary-heat-workbench">${selectorHtml}${chartHtml}</div>${renderSummaryOverallNsr(selected)}<section class="summary-attribute-section"><header><div><span>属性诊断</span><b>真实属性 NSR 对比</b></div><small>${sources.map(source=>escapeHtml(source)).join(" / ")}</small></header><div class="summary-attribute-matrix">${renderSummaryAttributeMatrix(ownRows)}</div></section>`;
  document.querySelectorAll(".summary-heat-model-list input").forEach(input=>input.onchange=()=>{summaryDashboardModels=[ownModel,...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node=>node.value);renderSummaryHeatDashboard()});
  const add=document.querySelector("#summary-heat-add-model");if(add)add.onchange=()=>{if(add.value&&!summaryDashboardModels.includes(add.value)){summaryDashboardModels=[...summaryDashboardModels,add.value];renderSummaryHeatDashboard()}};
  document.querySelectorAll("[data-summary-heat-model]").forEach(row=>row.onclick=event=>{event.stopPropagation();openSummaryPlatformPopover(row.dataset.summaryHeatModel,row)});
- document.querySelector("#dashboard-platform-filter").onchange=event=>{dashboardPlatformFilter=event.target.value;renderSummaryHeatDashboard(a)};
+ document.querySelectorAll("[data-summary-nsr-model]").forEach(row=>row.onclick=event=>{event.stopPropagation();openSummaryNsrPopover(row.dataset.summaryNsrModel,row)});
+ const nsrPlatform=document.querySelector("#summary-nsr-platform");if(nsrPlatform)nsrPlatform.onchange=event=>{summaryNsrPlatform=event.target.value;renderSummaryHeatDashboard(a)};
 }
 function dashboardTimeDimension(){
  const importedRange=String(state.importQuality?.timeRange||"").trim();
@@ -3215,6 +3247,7 @@ async function importDataFile(file,{merge=false}={}){
  // 替换导入必须同步重置工作台上下文，避免旧项目的品牌下拉框覆盖新导入车型。
  dashBrandOpen=brandForDisplay(state.config?.model);
  dashboardPlatformFilter="all";
+ summaryNsrPlatform="全网";
  summaryDashboardModels=[...(state.models||[])];
  ensureModelIdentities(state.models||[]);save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
 }

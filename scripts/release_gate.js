@@ -237,6 +237,13 @@ async function main() {
     "奥迪E7X": { volume: 235579, interaction: 2169813, platformVolume: { "抖音": 103589, "小红书": 35439, "微博": 69977, "B站": 2562, "视频号": 6083, "快手": 1658, "今日头条": 7045, "汽车垂媒": 6052, "其他": 3174 } },
     "奥迪Q6L e-tron": { volume: 20741, interaction: 55736, platformVolume: { "抖音": 7732, "小红书": 7868, "微博": 1016, "B站": 25, "视频号": 843, "快手": 351, "今日头条": 1554, "汽车垂媒": 561, "其他": 791 } }
   };
+  const summaryPlatformNsr = {
+    "小米YU7": { "全网": .308521, "垂媒车主口碑": .627981, "抖音": .087413, "小红书": .121951, "微博": .804196, "B站": -.195531, "视频号": -.150685 },
+    "Model Y": { "全网": .299366, "垂媒车主口碑": .617391, "抖音": .043025, "小红书": .242424, "微博": .647416, "B站": -.056075, "视频号": -.064039 },
+    "问界M7": { "全网": .703560, "垂媒车主口碑": .723772, "抖音": .709132, "小红书": .401198, "微博": .879032, "B站": .489177, "视频号": .698730 },
+    "奥迪E7X": { "全网": .751287, "垂媒车主口碑": .790541, "抖音": .713814, "小红书": .330128, "微博": .851852, "B站": .666507, "视频号": .840779 },
+    "奥迪Q6L e-tron": { "全网": .809392, "抖音": .721311, "小红书": .410256, "微博": .995316, "B站": .995316, "视频号": .525424 }
+  };
   const summaryRows = [];
   for (const model of summaryModels) {
     for (const source of ["全网", "垂媒车主口碑", "抖音"]) {
@@ -245,7 +252,7 @@ async function main() {
       }
     }
   }
-  await page.evaluate(({ summaryModels, summaryRows, summaryHeat }) => {
+  await page.evaluate(({ summaryModels, summaryRows, summaryHeat, summaryPlatformNsr }) => {
     localStorage.setItem("mmnEngineState:china", JSON.stringify({
       datasetVersion: "summary_xlsx_audi",
       sourceNote: "已从产品评价汇总表导入。",
@@ -254,10 +261,11 @@ async function main() {
       models: summaryModels,
       rows: summaryRows,
       summaryHeat,
+      summaryPlatformNsr,
       summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
-      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false }, attributeVolumeAvailable: false, message: "源表未提供目标人群、购买意向、标签声量和风险量级。" }
+      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false }, attributeVolumeAvailable: false, platformNsrAvailable: true, platformNsrSources: ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "B站", "视频号"], message: "源表未提供目标人群、购买意向、标签声量和风险量级。" }
     }));
-  }, { summaryModels, summaryRows, summaryHeat });
+  }, { summaryModels, summaryRows, summaryHeat, summaryPlatformNsr });
   await page.reload({ waitUntil: "networkidle" });
   const summaryImport = await page.evaluate(() => ({
     model: document.querySelector("#dash-model-select")?.value || "",
@@ -280,6 +288,9 @@ async function main() {
     topBrands: [...document.querySelectorAll("#dash-brand-select option")].map(node => node.textContent.trim()),
     attributeRows: document.querySelectorAll(".summary-attribute-row").length,
     attributeValues: [...document.querySelectorAll(".summary-attribute-value")].map(node => node.textContent.trim()),
+    nsrTitle: document.querySelector(".summary-nsr-section>header b")?.textContent.trim() || "",
+    nsrPlatformOptions: [...document.querySelectorAll("#summary-nsr-platform option")].map(node => node.textContent.trim()),
+    nsrRows: [...document.querySelectorAll(".summary-nsr-row")].map(node => ({ model: node.querySelector("b")?.textContent.trim(), value: node.querySelector("strong")?.textContent.trim(), role: node.classList.contains("own") ? "own" : "competitor" })),
     quadrants: document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length
   }));
   add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote), JSON.stringify(summaryImport));
@@ -288,6 +299,28 @@ async function main() {
   add("summary cockpit uses decision language and explains independent scales", summaryImport.productPointName === "当前可用产品点" && summaryImport.scaleNote === "声量与互动量按各自独立尺度展示，不可直接比较绝对柱长。", JSON.stringify(summaryImport));
   add("summary workbook keeps the global brand library separate from imported comparison models", summaryImport.topBrands.length > 10 && summaryImport.topBrands.includes("奥迪") && summaryImport.topBrands.includes("智己") && summaryImport.selectableModels.length === summaryModels.length, JSON.stringify(summaryImport));
   add("summary workbook renders real attribute NSR without emotion quadrants", summaryImport.attributeRows === 3 && summaryImport.attributeValues.length === 9 && summaryImport.attributeValues.every(value => /^-?\d+(?:\.\d)?%$/.test(value)) && summaryImport.quadrants === 0, JSON.stringify(summaryImport));
+  add("summary cockpit separates overall platform NSR from attribute NSR", summaryImport.nsrTitle === "车型整体平台 NSR 对比" && summaryImport.nsrPlatformOptions.join("|") === "全网|垂媒车主口碑|抖音|小红书|微博|B站|视频号" && summaryImport.nsrRows.length === summaryModels.length && summaryImport.nsrRows[0]?.model === "奥迪E7X" && summaryImport.nsrRows[0]?.value === "75.1%" && summaryImport.nsrRows[0]?.role === "own", JSON.stringify(summaryImport));
+
+  await page.locator("#summary-nsr-platform").selectOption("B站");
+  const bSiteNsr = await page.evaluate(() => ({
+    values: [...document.querySelectorAll(".summary-nsr-row")].map(node => ({ model: node.querySelector("b")?.textContent.trim(), value: node.querySelector("strong")?.textContent.trim(), left: node.querySelector("em")?.style.getPropertyValue("--nsr-left"), size: node.querySelector("em")?.style.getPropertyValue("--nsr-size"), color: node.querySelector("em") ? getComputedStyle(node.querySelector("em")).backgroundColor : "" })),
+    selected: document.querySelector("#summary-nsr-platform")?.value || ""
+  }));
+  const bSiteXiaomi = bSiteNsr.values.find(row => row.model === "小米YU7"), bSiteAudi = bSiteNsr.values.find(row => row.model === "奥迪E7X");
+  add("platform NSR uses a fixed minus-100 to 100 scale with role colors", bSiteNsr.selected === "B站" && bSiteXiaomi?.value === "-19.6%" && parseFloat(bSiteXiaomi.left) < 50 && bSiteXiaomi.color === "rgb(230, 160, 170)" && bSiteAudi?.value === "66.7%" && bSiteAudi.left === "50.0000%" && bSiteAudi.color === "rgb(156, 207, 227)", JSON.stringify(bSiteNsr));
+
+  await page.locator('[data-summary-nsr-model="小米YU7"]').click();
+  const nsrBubble = await page.evaluate(() => ({
+    title: document.querySelector(".summary-nsr-popover header b")?.textContent.replace(/\s+/g, " ").trim() || "",
+    groups: [...document.querySelectorAll(".summary-nsr-popover .summary-platform-group")].map(node => ({
+      platform: node.querySelector(".summary-platform-name")?.textContent.trim() || "",
+      series: [...node.querySelectorAll(".summary-platform-series>div")].map(series => ({ text: series.querySelector("small")?.textContent.trim() || "", left: series.querySelector("em")?.style.getPropertyValue("--nsr-left"), color: series.querySelector("em") ? getComputedStyle(series.querySelector("em")).backgroundColor : "" }))
+    }))
+  }));
+  const nsrBsite = nsrBubble.groups.find(group => group.platform === "B站");
+  add("overall NSR bubble compares every platform against the fixed product", /小米YU7 vs 奥迪E7X/.test(nsrBubble.title) && nsrBubble.groups.length === 7 && nsrBubble.groups.every(group => group.series.length === 2) && parseFloat(nsrBsite?.series[0]?.left) < 50 && nsrBsite?.series[0]?.color === "rgb(230, 160, 170)" && nsrBsite?.series[1]?.text === "本品 · 奥迪E7X" && nsrBsite?.series[1]?.color === "rgb(156, 207, 227)", JSON.stringify(nsrBubble));
+  await page.locator(".summary-nsr-popover button").click();
+  await page.locator("#summary-nsr-platform").selectOption("全网");
 
   await page.locator('[data-summary-heat-model="小米YU7"]').click();
   const platformBubble = await page.evaluate(() => {
@@ -323,13 +356,28 @@ async function main() {
   const closeCentered = platformBubble.closeGeometry && platformBubble.closeGeometry.width === platformBubble.closeGeometry.height && Math.abs(platformBubble.closeGeometry.beforeLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.beforeTop - platformBubble.closeGeometry.clientHeight / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterTop - platformBubble.closeGeometry.clientHeight / 2) < .6;
   add("competitor heat bubble normalizes each platform pair without trailing values", /小米YU7.*奥迪E7X.*分平台声量对比/.test(platformBubble.title) && platformBubble.groups.length === 9 && platformBubble.groups.every(group => group.series.length === 2 && group.series.every(row => !row.hasTrailingValue) && group.series.some(row => row.width === "100%")) && douyinGroup?.series.some(row => row.text === "小米YU7" && row.width === "100%" && row.color === "rgb(230, 160, 170)") && douyinGroup?.series.some(row => row.text === "本品 · 奥迪E7X" && row.width === "63.4103%" && row.color === "rgb(156, 207, 227)"), JSON.stringify(platformBubble));
   add("platform bubble close icon is geometrically centered", platformBubble.closeLabel === "关闭分平台声量气泡" && platformBubble.closeText === "" && closeCentered, JSON.stringify(platformBubble.closeGeometry));
+  const headerScope = await page.evaluate(() => ({
+    main: getComputedStyle(document.querySelector("main>header")).position,
+    popover: getComputedStyle(document.querySelector(".summary-platform-popover header")).position,
+    attribute: getComputedStyle(document.querySelector(".summary-attribute-section>header")).position
+  }));
+  add("only the page header is sticky", headerScope.main === "sticky" && headerScope.popover === "static" && headerScope.attribute === "static", JSON.stringify(headerScope));
   await page.locator(".summary-platform-popover button").click();
+  await page.evaluate(() => document.querySelector(".summary-attribute-section")?.scrollIntoView({ block: "start" }));
+  await page.waitForTimeout(80);
+  const attributeTopBefore = await page.locator(".summary-attribute-section>header").evaluate(node => node.getBoundingClientRect().top);
+  await page.evaluate(() => window.scrollBy(0, 120));
+  await page.waitForTimeout(80);
+  const attributeTopAfter = await page.locator(".summary-attribute-section>header").evaluate(node => node.getBoundingClientRect().top);
+  add("attribute header scrolls with content instead of covering the page header", attributeTopBefore - attributeTopAfter > 100, JSON.stringify({ attributeTopBefore, attributeTopAfter }));
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.locator('.summary-heat-model-list input[value="小米YU7"]').uncheck();
   const lockedAfterFilter = await page.evaluate(() => ({
     ownLocked: Boolean(document.querySelector(".summary-heat-own input:checked:disabled")),
-    rows: [...document.querySelectorAll(".summary-heat-row>b")].map(node => node.textContent.trim())
+    rows: [...document.querySelectorAll(".summary-heat-row>b")].map(node => node.textContent.trim()),
+    nsrRows: [...document.querySelectorAll(".summary-nsr-row>b")].map(node => node.textContent.trim())
   }));
-  add("competitor filtering cannot remove the product model", lockedAfterFilter.ownLocked && lockedAfterFilter.rows.includes("奥迪E7X") && !lockedAfterFilter.rows.includes("小米YU7"), JSON.stringify(lockedAfterFilter));
+  add("competitor filtering cannot remove the product model", lockedAfterFilter.ownLocked && lockedAfterFilter.rows.includes("奥迪E7X") && !lockedAfterFilter.rows.includes("小米YU7") && lockedAfterFilter.nsrRows.includes("奥迪E7X") && !lockedAfterFilter.nsrRows.includes("小米YU7"), JSON.stringify(lockedAfterFilter));
   await page.locator('.summary-heat-model-list input[value="小米YU7"]').check();
 
   await page.route("**/api/import-xlsx?filename=AUDI%20E7X.xlsx", route => route.fulfill({
@@ -342,8 +390,9 @@ async function main() {
       models: summaryModels,
       rows: summaryRows,
       summaryHeat,
+      summaryPlatformNsr,
       summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
-      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false } }
+      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false }, platformNsrAvailable: true, platformNsrSources: ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "B站", "视频号"] }
     } })
   }));
   await page.evaluate(async () => {
