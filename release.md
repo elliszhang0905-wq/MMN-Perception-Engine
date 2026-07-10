@@ -436,3 +436,33 @@ beta 1.01｜产品评价汇总表导入质量修复
 - ECS部署时间：2026-07-10 22:19（Asia/Shanghai）；发布前代码归档：`backups/code_before_4674cf8_20260710_221845.tar.gz`；部署脚本运行数据备份：`backups/mmn_backup_20260710_221848.tar.gz`。
 - 公网首页已加载 `app.js?v=beta-1.01-summary-import-3`；健康接口正常。
 - 本地及生产容器完整测试33/33通过；浏览器发布门禁通过，`failed: []`、`runtimeErrors: []`；近期生产日志无错误记录。
+
+---
+
+# MMN Perception Engine 发布记录补充
+
+## 发布日期
+
+2026-07-11
+
+## 发布版本
+
+beta 1.01｜整体平台NSR与属性NSR拆分
+
+## 发布内容
+
+- 从同一产品评价Excel中独立解析“车型 × 平台整体NSR”，保存为 `summaryPlatformNsr`，不再与产品点属性NSR混用。
+- 整体平台NSR支持全网、垂媒车主口碑、抖音、小红书、微博、B站、视频号切换；车型筛选与声量模块同步，本品固定第一且不可移除。
+- 点击车型后展示七平台气泡；竞品逐平台与本品对照，本品淡蓝、竞品粉红。
+- NSR主图和气泡统一使用-100%至100%零轴，负值向左、正值向右；缺失值不转换为0。
+- 全局吸顶样式限定到 `main>header`，修复滚屏后模块标题覆盖主导航的问题。
+
+## 云端发布结果
+
+- GitHub功能提交：`e7f19b1 feat: split overall platform NSR from attribute diagnostics`。
+- ECS部署时间：2026-07-11 00:16（Asia/Shanghai）。
+- 发布前代码归档：`backups/code_before_e7f19b1_20260711_001551.tar.gz`。
+- 发布前运行数据备份：`backups/mmn_backup_20260711_001612.tar.gz`；部署脚本运行数据备份：`backups/mmn_backup_20260711_001632.tar.gz`。
+- 公网资源版本：`style.css?v=beta-1.01-platform-nsr-split-1`、`app.js?v=beta-1.01-platform-nsr-split-1`。
+- 真实 `AUDI E7X等5车产品评价_0710_v2.xlsx` 已验证5台车型、7个平台、正负值与缺失值均按源表读取；浏览器无横向溢出和控制台错误。
+- 本地与生产容器完整测试33/33通过；发布门禁 `failed: []`、`runtimeErrors: []`；公网首页及健康接口通过，近期错误日志为0。
