@@ -3458,6 +3458,29 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
         raise ValueError("未识别到至少两款车型，已拒绝导入。")
     models = [model for _, model in model_rows]
 
+    def summary_count(value):
+        if isinstance(value, (int, float)):
+            return max(0, int(round(value)))
+        try:
+            return max(0, int(round(float(cell_text(value).replace(",", "")))) )
+        except (TypeError, ValueError):
+            return 0
+
+    summary_heat = {
+        model: {"volume": summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0), "interaction": 0}
+        for row_idx, model in model_rows
+    }
+    interaction_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "互动量"), None)
+    if interaction_header is not None:
+        for row_idx in range(interaction_header + 1, len(rows)):
+            raw_model = cell_text(rows[row_idx][0] if rows[row_idx] else "")
+            if not raw_model:
+                break
+            model = infer_model(raw_model) or raw_model
+            if model not in summary_heat:
+                continue
+            summary_heat[model]["interaction"] = summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0)
+
     overall_nsr = {}
     for header_row, row in enumerate(rows):
         for nsr_col in range(3, len(row)):
@@ -3523,6 +3546,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
         "platforms": platforms,
         "rows": out_rows,
         "models": models,
+        "summaryHeat": summary_heat,
         "summaryMetrics": {model: {"overallNsr": overall_nsr[model]} for model in models},
         "importQuality": {
             "kind": "PRODUCT_EVALUATION_SUMMARY",

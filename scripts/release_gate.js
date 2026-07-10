@@ -38,6 +38,12 @@ async function main() {
   add("dashboard import actions are simplified", dashboard.importButtons.length === 2 && dashboard.importButtons[0] === "导入数据" && dashboard.importButtons[1] === "查看数据表", dashboard.importButtons.join(" / "));
   add("dashboard uses cache-busted app bundle", /app\.js\?v=/.test(dashboard.appVersion), dashboard.appVersion);
 
+  const dashboardKpis = await page.evaluate(() => {
+    const node = document.querySelector(".dashboard-kpis");
+    return { hidden: node?.hidden === true, height: node?.getBoundingClientRect().height || 0 };
+  });
+  add("dashboard does not display generic KPI cards", dashboardKpis.hidden && dashboardKpis.height === 0, JSON.stringify(dashboardKpis));
+
   const dashboardText = await page.locator(".dashboard-import").innerText();
   add("dashboard does not expose file format wording", !/Excel|CSV|模板/.test(dashboardText), dashboardText);
 
@@ -68,15 +74,23 @@ async function main() {
 
   const platformFilter = page.locator("#dashboard-platform-filter");
   const platformOptions = await platformFilter.locator("option").allTextContents().catch(() => []);
-  let platformFilterResult = { selected: "", quadrants: 0, minTags: 0, maxTags: 0 };
+  let platformFilterResult = { selected: "", quadrants: 0, tagCount: 0, uniqueTagCount: 0, maxTags: 0 };
   if (platformOptions.length > 1) {
     await platformFilter.selectOption({ index: 1 });
     platformFilterResult = await page.evaluate(() => {
       const counts=[...document.querySelectorAll("#dashboard-emotion-quadrant .emotion-tag-list")].map(list => list.querySelectorAll(".emotion-tag").length);
-      return {selected:document.querySelector("#dashboard-platform-filter")?.value||"",quadrants:document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length,minTags:Math.min(...counts),maxTags:Math.max(...counts)};
+      const labels=[...document.querySelectorAll("#dashboard-emotion-quadrant .emotion-tag b")].map(node=>node.textContent.trim());
+      return {selected:document.querySelector("#dashboard-platform-filter")?.value||"",quadrants:document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length,tagCount:labels.length,uniqueTagCount:new Set(labels).size,maxTags:Math.max(...counts)};
     });
   }
-  add("dashboard platform keeps all four emotion quadrants populated", platformOptions.includes("全部平台") && platformFilterResult.selected && platformFilterResult.quadrants === 4 && platformFilterResult.minTags >= 1 && platformFilterResult.maxTags <= 3, JSON.stringify({ platformOptions, platformFilterResult }));
+  add("dashboard platform never duplicates labels to fill empty emotion quadrants", platformOptions.includes("全部平台") && platformFilterResult.selected && platformFilterResult.quadrants === 4 && platformFilterResult.tagCount > 0 && platformFilterResult.tagCount === platformFilterResult.uniqueTagCount && platformFilterResult.maxTags <= 3, JSON.stringify({ platformOptions, platformFilterResult }));
+
+  const singleLabelQuadrants = await page.evaluate(() => {
+    const result = emotionQuadrantData([["测试车型", "本品", "抖音", "整体口碑", "总体口碑", "认可", "目标核心人群", "无", 100, 4, 1, 4]]);
+    const labels = emotionQuadrantDefinitions.flatMap(quadrant => (result.get(quadrant.key) || []).map(item => item.label));
+    return { tagCount: labels.length, uniqueTagCount: new Set(labels).size };
+  });
+  add("a single emotion label appears in only one quadrant", singleLabelQuadrants.tagCount === 1 && singleLabelQuadrants.uniqueTagCount === 1, JSON.stringify(singleLabelQuadrants));
 
   const firstEmotionTag = page.locator("#dashboard-emotion-quadrant .emotion-tag").first();
   if (await firstEmotionTag.count()) await firstEmotionTag.click();
@@ -216,6 +230,13 @@ async function main() {
   add("dashboard import opens file chooser", chooserOpened);
 
   const summaryModels = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"];
+  const summaryHeat = {
+    "小米YU7": { volume: 1300345, interaction: 9260761 },
+    "Model Y": { volume: 730202, interaction: 3519781 },
+    "问界M7": { volume: 252720, interaction: 1145264 },
+    "奥迪E7X": { volume: 235579, interaction: 2169813 },
+    "奥迪Q6L e-tron": { volume: 20741, interaction: 55736 }
+  };
   const summaryRows = [];
   for (const model of summaryModels) {
     for (const source of ["全网", "垂媒车主口碑", "抖音"]) {
@@ -224,7 +245,7 @@ async function main() {
       }
     }
   }
-  await page.evaluate(({ summaryModels, summaryRows }) => {
+  await page.evaluate(({ summaryModels, summaryRows, summaryHeat }) => {
     localStorage.setItem("mmnEngineState:china", JSON.stringify({
       datasetVersion: "summary_xlsx_audi",
       sourceNote: "已从产品评价汇总表导入。",
@@ -232,10 +253,11 @@ async function main() {
       platforms: { "全网": 1, "垂媒车主口碑": 1.15, "抖音": 1.35 },
       models: summaryModels,
       rows: summaryRows,
+      summaryHeat,
       summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
       importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false }, attributeVolumeAvailable: false, message: "源表未提供目标人群、购买意向、标签声量和风险量级。" }
     }));
-  }, { summaryModels, summaryRows });
+  }, { summaryModels, summaryRows, summaryHeat });
   await page.reload({ waitUntil: "networkidle" });
   const summaryImport = await page.evaluate(() => ({
     model: document.querySelector("#dash-model-select")?.value || "",
@@ -244,11 +266,14 @@ async function main() {
     ipsNote: document.querySelector("#kpi-ips-note")?.textContent.trim() || "",
     intent: document.querySelector("#kpi-intent")?.textContent.trim() || "",
     intentNote: document.querySelector("#kpi-intent-note")?.textContent.trim() || "",
-    time: document.querySelector("#dashboard-data-context .time-dimension b")?.textContent.trim() || "",
-    labels: document.querySelector("#dashboard-data-note")?.textContent.trim() || "",
-    platforms: [...document.querySelectorAll("#dashboard-platform-filter option")].map(option => option.textContent.trim())
+    surfaceTitle: document.querySelector(".dashboard-data-title-copy h2")?.textContent.trim() || "",
+    selectableModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(node => node.textContent.trim()),
+    selectedModels: [...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node => node.value),
+    heatRows: [...document.querySelectorAll(".summary-heat-row")].map(node => node.textContent.replace(/\s+/g, " ").trim()),
+    addOptions: [...document.querySelectorAll("#summary-heat-add-model option")].map(node => node.textContent.trim())
   }));
-  add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote) && summaryImport.time === "2026.6.1 - 2026.6.30" && /3 个有效标签/.test(summaryImport.labels) && summaryImport.platforms.includes("全网") && summaryImport.platforms.includes("垂媒车主口碑") && summaryImport.platforms.includes("抖音") && !summaryImport.platforms.some(value => ["正面", "负面", "NSR", "平均NSR"].includes(value)), JSON.stringify(summaryImport));
+  add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote), JSON.stringify(summaryImport));
+  add("summary workbook first renders source-backed all-network heat comparison", summaryImport.surfaceTitle === "全网声量及互动量对比" && summaryImport.selectableModels.length === summaryModels.length && summaryImport.selectedModels.length === summaryModels.length && summaryImport.heatRows.length === summaryModels.length && summaryImport.heatRows.some(row => /奥迪E7X.*23\.6万.*217\.0万/.test(row)) && summaryImport.addOptions.length === 1, JSON.stringify(summaryImport));
 
   await page.route("**/api/import-xlsx?filename=AUDI%20E7X.xlsx", route => route.fulfill({
     contentType: "application/json",
@@ -259,6 +284,7 @@ async function main() {
       platforms: { "全网": 1, "垂媒车主口碑": 1.15, "抖音": 1.35 },
       models: summaryModels,
       rows: summaryRows,
+      summaryHeat,
       summaryMetrics: { "奥迪E7X": { overallNsr: .7512874630645843 } },
       importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false } }
     } })
@@ -276,9 +302,10 @@ async function main() {
     brand: document.querySelector("#dash-brand-select")?.value || "",
     model: document.querySelector("#dash-model-select")?.value || "",
     models: [...document.querySelectorAll("#dash-model-select option")].map(option => option.textContent.trim()),
-    platforms: [...document.querySelectorAll("#dashboard-platform-filter option")].map(option => option.textContent.trim())
+    heatRows: document.querySelectorAll(".summary-heat-row").length,
+    selectableModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(option => option.textContent.trim())
   }));
-  add("replacement import resets the dashboard to the imported brand and model", replacementContext.brand === "奥迪" && replacementContext.model === "奥迪E7X" && replacementContext.models.includes("奥迪E7X") && replacementContext.models.includes("奥迪Q6L e-tron") && !replacementContext.models.includes("奥迪A3") && replacementContext.platforms[0] === "全部平台", JSON.stringify(replacementContext));
+  add("replacement import resets the dashboard to the imported brand and model", replacementContext.brand === "奥迪" && replacementContext.model === "奥迪E7X" && replacementContext.models.includes("奥迪E7X") && replacementContext.models.includes("奥迪Q6L e-tron") && !replacementContext.models.includes("奥迪A3") && replacementContext.heatRows === summaryModels.length && replacementContext.selectableModels.length === summaryModels.length, JSON.stringify(replacementContext));
 
   await page.evaluate(() => {
     localStorage.setItem("mmnEngineState:china", JSON.stringify({

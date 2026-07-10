@@ -40,6 +40,11 @@ def product_summary_cells(include_attributes=True):
         cells[(row, 16)] = 0.1
         cells[(row, 17)] = 0.6 + offset * 0.03
 
+    cells[(19, 1)] = "互动量"
+    for offset, model in enumerate(MODELS):
+        cells[(20 + offset, 1)] = model
+        cells[(20 + offset, 2)] = (offset + 1) * 1000
+
     if include_attributes:
         for start_row, source in ((11, "全网"), (29, "垂媒车主口碑"), (47, "抖音")):
             cells[(start_row, 22)] = source
@@ -69,6 +74,7 @@ class ProductSummaryImportTest(unittest.TestCase):
         self.assertEqual({row[4] for row in dataset["rows"]}, {"外观", "价格", "安全"})
         self.assertNotIn("正面", {row[2] for row in dataset["rows"]})
         self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
+        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"], {"volume": 402, "interaction": 4000})
 
     def test_summary_import_rejects_when_attribute_blocks_are_missing(self):
         with self.assertRaisesRegex(ValueError, "属性NSR区块"):

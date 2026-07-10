@@ -46,6 +46,7 @@ let dataModelFilter="all",dataTrafficFilter="all",dataSearch="";
 let dataBrandFilter="all";
 let dashBrandOpen="";
 let dashboardPlatformFilter="all";
+let summaryDashboardModels=[];
 let dashModelMenuOpen=false;
 let learningBrandOpen="";
 let cognitionBrandOpen="";
@@ -897,7 +898,7 @@ function render(){
  const metrics=metricDisplay(a);
  renderEditionChrome();
  renderAccount();
- document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=dashCompetitors.join(" / ");document.querySelector("#dash-samples").textContent=isBlockedImport()?"旧版结果已隔离":(isSummaryImport()?"属性NSR评分（无标签声量）":`${a.ownComments.toLocaleString()} 条`);
+ document.querySelector("#dash-project").textContent=state.config.project;renderModelSwitcher();document.querySelector("#dash-competitor").textContent=dashCompetitors.join(" / ");document.querySelector("#dash-samples").textContent=isBlockedImport()?"旧版结果已隔离":(isSummaryImport()?`${(state.models||[]).length} 车汇总对标`:`${a.ownComments.toLocaleString()} 条`);
  document.querySelector("#kpi-nsr").textContent=metrics.nsr;document.querySelector("#kpi-nsr-note").textContent=metrics.nsrNote;document.querySelector("#kpi-ips").textContent=metrics.ips;document.querySelector("#kpi-ips-note").textContent=metrics.ipsNote;document.querySelector("#kpi-intent").textContent=metrics.intent;document.querySelector("#kpi-intent-note").textContent=metrics.intentNote;document.querySelector("#kpi-risk").textContent=metrics.risk;document.querySelector("#kpi-risk-note").textContent=isSummaryImport()?"源表未提供风险量级":`阈值 ${state.config.riskThreshold.toLocaleString()}`;
  renderDashboard(a);renderData();renderCognition(a);renderVertical();renderVideos();renderActions(a);renderKnowhow(a);renderFounderDistill();renderBloggerSkill();renderStrategyKb();renderLearning(a);renderArchitecture();renderWorkspace();renderConfig();
 }
@@ -1111,9 +1112,55 @@ function emotionQuadrantData(rows){
  const byValence=[...items].sort((a,b)=>b.valence-a.valence||b.samples-a.samples),positiveCount=items.length>=4?Math.max(2,Math.min(items.length-2,Math.ceil(items.length/2))):Math.ceil(items.length/2),positive=byValence.slice(0,positiveCount),negative=byValence.slice(positiveCount);
  const split=(source,metric,descending=true)=>{const sorted=[...source].sort((a,b)=>(descending?b[metric]-a[metric]:a[metric]-b[metric])||b.samples-a.samples),cut=Math.max(1,Math.ceil(sorted.length/2));return[sorted.slice(0,cut),sorted.slice(cut)]};
  const [active,steady]=split(positive,"activation",true),[damaged,concern]=split(negative,"activation",true),result=new Map([["active-positive",active],["steady-positive",steady],["concern-negative",concern],["damaged-negative",damaged]]);
- const used=new Set(),fallback=[...items].sort((a,b)=>b.samples-a.samples);
- emotionQuadrantDefinitions.forEach(q=>{let values=result.get(q.key)||[];if(!values.length){const candidate=fallback.find(x=>!used.has(x.label))||fallback[0];values=candidate?[{...candidate,boundaryFallback:true}]:[]}values.forEach(x=>used.add(x.label));result.set(q.key,values.sort((a,b)=>b.samples-a.samples).slice(0,3))});
+ emotionQuadrantDefinitions.forEach(q=>result.set(q.key,(result.get(q.key)||[]).sort((a,b)=>b.samples-a.samples).slice(0,3)));
  return result;
+}
+function renderSummaryAttributeMatrix(rows){
+ const sources=[...new Set(rows.map(r=>r[2]).filter(Boolean))],byLabel=new Map();
+ rows.forEach(r=>{const score=Number(r[14]);if(!r[4]||!Number.isFinite(score))return;const item=byLabel.get(r[4])||{label:r[4],category:r[3],scores:new Map()};item.scores.set(r[2],score);byLabel.set(r[4],item)});
+ const items=[...byLabel.values()].sort((a,b)=>(b.scores.get(sources[0])??-2)-(a.scores.get(sources[0])??-2)||String(a.label).localeCompare(String(b.label),"zh-CN"));
+ if(!items.length)return`<div class="empty-state">当前数据来源没有可展示的属性 NSR。</div>`;
+ const columns=`minmax(170px,1.2fr) repeat(${Math.max(sources.length,1)},minmax(125px,1fr))`;
+ return`<div class="summary-attribute-head" style="grid-template-columns:${columns}"><b>属性标签</b>${sources.map(source=>`<b>${escapeHtml(source)}</b>`).join("")}</div><div class="summary-attribute-body">${items.map(item=>`<div class="summary-attribute-row" style="grid-template-columns:${columns}"><div class="summary-attribute-label"><b>${escapeHtml(item.label)}</b><small>${escapeHtml(item.category)}</small></div>${sources.map(source=>{const score=item.scores.get(source);if(!Number.isFinite(score))return`<div class="summary-attribute-cell missing">—</div>`;const percent=score*100,tone=score>=.25?"positive":score<0?"negative":"neutral";return`<div class="summary-attribute-cell ${tone}"><span class="summary-attribute-value">${percent.toFixed(1)}%</span><i style="width:${Math.min(Math.abs(percent),100).toFixed(1)}%"></i></div>`}).join("")}</div>`).join("")}</div>`;
+}
+function summaryHeatNumber(value){return Math.max(0,Number(value)||0)}
+function summaryHeatDisplay(value){const number=summaryHeatNumber(value);return number>=10000?`${(number/10000).toFixed(1)}万`:number.toLocaleString()}
+function summaryHeatSelection(){
+ const available=(state.models||[]).filter(Boolean);
+ summaryDashboardModels=summaryDashboardModels.filter(model=>available.includes(model));
+ if(!summaryDashboardModels.length&&available.length)summaryDashboardModels=[...available];
+ return summaryDashboardModels;
+}
+function renderSummaryHeatDashboard(a){
+ const available=(state.models||[]).filter(Boolean),selected=summaryHeatSelection(),heat=state.summaryHeat||{},ownRows=a?.own||state.rows.filter(r=>r[0]===state.config.model);
+ const sources=[...new Set(ownRows.map(r=>r[2]).filter(Boolean))],labels=[...new Set(ownRows.map(r=>r[4]).filter(Boolean))],referenceModels=available.filter(model=>model!==state.config.model);
+ if(dashboardPlatformFilter!=="all"&&!sources.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
+ const filteredRows=dashboardPlatformFilter==="all"?ownRows:ownRows.filter(r=>r[2]===dashboardPlatformFilter);
+ const rows=selected.map(model=>({model,volume:summaryHeatNumber(heat[model]?.volume),interaction:summaryHeatNumber(heat[model]?.interaction)}));
+ const maxVolume=Math.max(...rows.map(row=>row.volume),1),maxInteraction=Math.max(...rows.map(row=>row.interaction),1);
+ document.querySelector(".dashboard-data-title-copy span").textContent="产品评价汇总";
+ document.querySelector(".dashboard-data-title-copy h2").textContent="全网声量及互动量对比";
+ document.querySelector("#dashboard-data-note").textContent=`${labels.length} 个有效标签 · ${available.length} 台可选车型`;
+ document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>数据来源</span><select id="dashboard-platform-filter" aria-label="按数据来源筛选属性NSR"><option value="all">全部来源</option>${sources.map(source=>`<option value="${escapeAttr(source)}" ${source===dashboardPlatformFilter?"selected":""}>${escapeHtml(source)}</option>`).join("")}</select></label>`;
+ document.querySelector("#dashboard-data-context").innerHTML=[
+  ["本品车型",state.config.model,"own-model"],
+  ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
+  ["时间维度",dashboardTimeDimension(),"time-dimension"],
+  ["数据维度","全网声量 × 互动量 × 属性NSR评分","data-dimension"],
+  ["当前标签",labels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
+ ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
+ document.querySelector("#dashboard-data-summary").innerHTML=[
+  ["导入车型数",available.length],
+  ["当前对比车型",selected.length],
+  ["数据来源数",sources.length],
+  ["属性标签数",labels.length]
+ ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
+ const surface=document.querySelector("#dashboard-emotion-quadrant");
+ surface.className="summary-dashboard-workbench";
+ surface.innerHTML=`<div class="summary-heat-workbench"><aside class="summary-heat-selector"><div><span>对比车型</span><b>仅限本次导入车型</b></div><div class="summary-heat-model-list">${available.map(model=>`<label><input type="checkbox" value="${escapeAttr(model)}" ${selected.includes(model)?"checked":""}><span>${escapeHtml(model)}</span></label>`).join("")}</div><label class="summary-heat-add"><span>添加车型</span><select id="summary-heat-add-model"><option value="">选择车型</option>${available.filter(model=>!selected.includes(model)).map(model=>`<option value="${escapeAttr(model)}">${escapeHtml(model)}</option>`).join("")}</select></label></aside><section class="summary-heat-chart"><div class="summary-heat-legend"><span><i class="volume"></i>全网声量</span><span><i class="interaction"></i>全网互动量</span></div>${rows.length?rows.map(row=>`<div class="summary-heat-row"><b>${escapeHtml(row.model)}</b><div class="summary-heat-bars"><div><span>声量</span><i class="volume" style="width:${row.volume/maxVolume*100}%"></i><strong>${summaryHeatDisplay(row.volume)}</strong></div><div><span>互动量</span><i class="interaction" style="width:${row.interaction/maxInteraction*100}%"></i><strong>${summaryHeatDisplay(row.interaction)}</strong></div></div></div>`).join(""):`<div class="empty-state">请从左侧添加至少一台车型。</div>`}</section></div><section class="summary-attribute-section"><header><div><span>属性诊断</span><b>真实属性 NSR 对比</b></div><small>${dashboardPlatformFilter==="all"?"全部来源":escapeHtml(dashboardPlatformFilter)}</small></header><div class="summary-attribute-matrix">${renderSummaryAttributeMatrix(filteredRows)}</div></section>`;
+ document.querySelectorAll(".summary-heat-model-list input").forEach(input=>input.onchange=()=>{summaryDashboardModels=[...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node=>node.value);renderSummaryHeatDashboard()});
+ const add=document.querySelector("#summary-heat-add-model");if(add)add.onchange=()=>{if(add.value&&!summaryDashboardModels.includes(add.value)){summaryDashboardModels=[...summaryDashboardModels,add.value];renderSummaryHeatDashboard()}};
+ document.querySelector("#dashboard-platform-filter").onchange=event=>{dashboardPlatformFilter=event.target.value;renderSummaryHeatDashboard(a)};
 }
 function dashboardTimeDimension(){
  const importedRange=String(state.importQuality?.timeRange||"").trim();
@@ -1124,17 +1171,23 @@ function dashboardTimeDimension(){
  return periods.length?`${periods[0]} — ${periods[periods.length-1]}`:"当前导入周期";
 }
 function renderDashboardData(a){
+ if(isSummaryImport()){
+  renderSummaryHeatDashboard(a);
+  return;
+ }
  const platforms=[...new Set(a.own.map(r=>r[2]).filter(Boolean))];
  if(dashboardPlatformFilter!=="all"&&!platforms.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
  const filteredRows=dashboardPlatformFilter==="all"?a.own:a.own.filter(r=>r[2]===dashboardPlatformFilter);
  const categories=[...new Set(a.own.map(r=>r[3]).filter(Boolean))],labels=[...new Set(a.own.map(r=>r[4]).filter(Boolean))],filteredLabels=[...new Set(filteredRows.map(r=>r[4]).filter(Boolean))],referenceModels=[...new Set(state.rows.map(r=>r[0]).filter(x=>x&&x!==state.config.model))];
  document.querySelector("#dashboard-data-note").textContent=isBlockedImport()?state.importQuality.message:(a.own.length?`${filteredLabels.length} 个有效标签`:`${state.config.model} 暂无数据`);
+ document.querySelector(".dashboard-data-title-copy span").textContent="声量数据中心";
+ document.querySelector(".dashboard-data-title-copy h2").textContent="平台情绪标签四象限";
  document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>平台</span><select id="dashboard-platform-filter" aria-label="按平台筛选四象限"><option value="all">全部平台</option>${platforms.map(platform=>`<option value="${escapeAttr(platform)}" ${platform===dashboardPlatformFilter?"selected":""}>${escapeHtml(platform)}</option>`).join("")}</select></label>`;
  document.querySelector("#dashboard-data-context").innerHTML=[
   ["本品车型",state.config.model,"own-model"],
   ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
   ["时间维度",dashboardTimeDimension(),"time-dimension"],
-  ["数据维度",isSummaryImport()?"属性NSR评分 × 数据来源 × 认知标签":"平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
+  ["数据维度","平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
   ["当前标签",filteredLabels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
  ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
  document.querySelector("#dashboard-data-summary").innerHTML=[
@@ -1143,9 +1196,11 @@ function renderDashboardData(a){
   ["主要赛道",categories[0]||"—"],
   ["主要标签",labels[0]||"—"]
  ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
+ const surface=document.querySelector("#dashboard-emotion-quadrant");
+ surface.className="emotion-quadrant";
  const quadrantData=emotionQuadrantData(filteredRows);
  const filteredTotal=filteredRows.reduce((sum,r)=>sum+(+r[8]||0),0);
- document.querySelector("#dashboard-emotion-quadrant").innerHTML=filteredRows.length?emotionQuadrantDefinitions.map(q=>{const top=quadrantData.get(q.key)||[];return`<section class="emotion-quadrant-cell ${q.key}" data-quadrant="${q.key}"><header><div><span>${q.title}</span><small>${q.subtitle}</small></div><b>TOP ${top.length}</b></header><div class="emotion-tag-list">${top.map((x,i)=>`<button type="button" class="emotion-tag" data-emotion-label="${escapeAttr(x.label)}" data-emotion-quadrant="${q.key}" aria-label="查看${escapeAttr(x.label)}赛道与竞品表现"><span>${String(i+1).padStart(2,"0")}</span><b>${escapeHtml(x.label)}</b><small>${escapeHtml(x.category)} · ${filteredTotal?(x.samples/filteredTotal*100).toFixed(1):"0.0"}%</small></button>`).join("")}</div></section>`}).join(""):`<div class="empty-state">当前平台暂无 ${state.config.model} 的情绪标签数据。</div>`;
+ surface.innerHTML=filteredRows.length?emotionQuadrantDefinitions.map(q=>{const top=quadrantData.get(q.key)||[];return`<section class="emotion-quadrant-cell ${q.key}" data-quadrant="${q.key}"><header><div><span>${q.title}</span><small>${q.subtitle}</small></div><b>TOP ${top.length}</b></header><div class="emotion-tag-list">${top.map((x,i)=>`<button type="button" class="emotion-tag" data-emotion-label="${escapeAttr(x.label)}" data-emotion-quadrant="${q.key}" aria-label="查看${escapeAttr(x.label)}赛道与竞品表现"><span>${String(i+1).padStart(2,"0")}</span><b>${escapeHtml(x.label)}</b><small>${escapeHtml(x.category)} · ${filteredTotal?(x.samples/filteredTotal*100).toFixed(1):"0.0"}%</small></button>`).join("")}</div></section>`}).join(""):`<div class="empty-state">当前平台暂无 ${state.config.model} 的情绪标签数据。</div>`;
  document.querySelector("#dashboard-platform-filter").onchange=event=>{dashboardPlatformFilter=event.target.value;renderDashboardData(a)};
  document.querySelectorAll("#dashboard-emotion-quadrant [data-emotion-label]").forEach(button=>button.onclick=()=>openEmotionLabelDialog(button.dataset.emotionLabel,button.dataset.emotionQuadrant,dashboardPlatformFilter));
 }
@@ -3120,6 +3175,7 @@ async function importDataFile(file,{merge=false}={}){
  // 替换导入必须同步重置工作台上下文，避免旧项目的品牌下拉框覆盖新导入车型。
  dashBrandOpen=brandForDisplay(state.config?.model);
  dashboardPlatformFilter="all";
+ summaryDashboardModels=[...(state.models||[])];
  ensureModelIdentities(state.models||[]);save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
 }
 document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await importDataFile(file,{merge:/\.csv$/i.test(file.name)})}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
