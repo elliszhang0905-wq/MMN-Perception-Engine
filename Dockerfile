@@ -11,8 +11,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN sed -i \
+       -e 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+       -e 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' \
+       -e 's|http://security.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+       /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update \
+    && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
        libreoffice-writer libreoffice-impress libreoffice-calc \
        tesseract-ocr tesseract-ocr-chi-sim fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
