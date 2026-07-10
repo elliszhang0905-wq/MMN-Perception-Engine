@@ -11,7 +11,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple python-pptx
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       libreoffice-writer libreoffice-impress libreoffice-calc \
+       tesseract-ocr tesseract-ocr-chi-sim fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-bf-factory.txt /tmp/requirements-bf-factory.txt
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r /tmp/requirements-bf-factory.txt
 
 COPY . /app
 

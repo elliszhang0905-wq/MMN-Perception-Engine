@@ -84,6 +84,9 @@ git@github.com:elliszhang0905-wq/MMN-Perception-Engine.git
 | `scripts/run_mmn_ppt_agent.sh` | 一键运行 MMN PPT Agent 工作流 |
 | `scripts/mmn_ppt_ingest_sources.py` | MarkItDown 资料解析入口 |
 | `scripts/mmn_ppt_inspect.py` | python-pptx PPTX 读取检查入口 |
+| `bf_factory/` | BF领域契约、解析、抽取、生成、版本、学习、脱敏和Word导出 |
+| `bf-factory.js` | BF工厂与BF资产库前端交互 |
+| `requirements-bf-factory.txt` | BF文件解析、OCR和Word导出Python依赖 |
 | `deploy.sh` | 服务器部署入口 |
 | `rollback.sh` | 服务器回滚入口 |
 | `test_mmn_cloud.sh` | 云端功能检查脚本 |
@@ -369,6 +372,7 @@ YYYY-MM-DD_beta-1.01_功能名称.md
 | 博主/达人蒸馏 | 已支持样本库、能力画像、RAG chunk | 不得复刻外部账号原文 |
 | 内容能力蒸馏知识库 | 已支持账号自动蒸馏和兜底导入 | 主入口应是账号输入，不是文件上传 |
 | RAG知识库 | 已接入策略库、人工学习、博主能力、内容能力 | 输出需保留来源和合规边界 |
+| BF工厂 | P0已完成上传、结构化、动态生成、编辑、Word导出和终稿回流 | 三类BF只是种子范式；优质自定义终稿只允许脱敏方法论跨项目复用 |
 | 云端部署 | 已有 Docker/部署脚本/回滚脚本 | 服务器只在用户明确要求时更新 |
 
 ## 15. 新功能验收标准
@@ -404,3 +408,45 @@ Qwen Agent 接手时，应以以下身份工作：
 MMN 可以交接给 Qwen Agent 或其他研发智能体继续开发，但交接内容必须包括代码、文档、数据边界、模型调度规则、发布流程和验收机制。
 
 MMN 的长期价值不在某一个底层模型，而在 MMN 自有的汽车营销策略模型、知识库、工作流和可持续学习机制。
+
+## 18. BF工厂 P0 交接说明
+
+BF工厂服务品牌客户商业化内容 Brief 闭环，不是普通文档总结器。前台入口为“核心工作流 → MMN策略输出 → BF工厂”，后台入口为“资产沉淀 → BF资产库”。
+
+### 稳定结构与开放范式
+
+- `strategy`、`product`、`content`、`execution`、`risk`、`materials` 六层是稳定知识本体。
+- 探店、云评/口播、高质感摄影是种子范式，不得改回封闭三选一模板。
+- 未知和混合需求进入 `CUSTOM`，按内容意图动态组合章节。
+- 优质 `CUSTOM` 终稿回流后，可沉淀脱敏章节范式；后续相似需求应通过 `find_matching_template_profile` 真正召回使用。
+
+### 关键接口
+
+- `GET/POST /api/bf/projects`
+- `GET/POST /api/bf/documents`
+- `GET /api/bf/schema`
+- `GET /api/bf/briefs` 与 `GET /api/bf/briefs/{id}`
+- `POST /api/bf/generations`
+- `POST /api/bf/briefs/{id}/versions`
+- `POST /api/bf/briefs/{id}/finalizations`
+- `POST /api/bf/briefs/{id}/exports`
+- `GET /api/bf/template-profiles`
+- `GET /api/bf/knowledge-chunks`
+
+### 模型、降级与安全
+
+- 标准链路：DeepSeek内部策略判断 → Qwen中文初稿 → DeepSeek逻辑与风险复核。
+- 模型不可用时必须返回 `EDITABLE_DEGRADED`，保留可编辑本地结构化结果。
+- 外部模型调用默认脱敏，客户、车型、竞品、预算、联系人、链接和提取码不得进入审计明文。
+- 原始文件按组织、客户和项目目录隔离；反例只用于风险，禁用样本不得进入生成上下文。
+- 服务器首次构建会安装 LibreOffice、Tesseract中文OCR和Noto CJK字体，构建时间会明显长于纯Python版本。
+
+### 验收命令
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m unittest tests.test_bf_runtime_compat tests.test_bf_api -v
+bash scripts/release_gate.sh
+```
+
+BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP闭环4项通过、发布门禁 `failed: []` 且 `runtimeErrors: []`。P1继续处理批量上传、深度表格解析、效果回流、多版本对比和PDF导出。

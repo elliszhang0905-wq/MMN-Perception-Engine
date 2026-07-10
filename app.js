@@ -45,6 +45,7 @@ let mapFilter="all",mapLimit=12;
 let dataModelFilter="all",dataTrafficFilter="all",dataSearch="";
 let dataBrandFilter="all";
 let dashBrandOpen="";
+let dashboardPlatformFilter="all";
 let dashModelMenuOpen=false;
 let learningBrandOpen="";
 let cognitionBrandOpen="";
@@ -622,21 +623,25 @@ function learnings(){if(session)return serverLearnings;try{return JSON.parse(loc
 function saveLearnings(items){localStorage.setItem(storageKey("mmnStrategyLearnings"),JSON.stringify(items))}
 function similarLearnings(label,limit=3){return learnings().filter(x=>x.label===label||x.model===state.config.model).sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||"")).slice(0,limit)}
 function latestLearning(label){return learnings().filter(x=>x.model===state.config.model&&x.label===label).sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""))[0]}
+function isRedundantModelOption(model){
+ const compact=String(model||"").replace(/\s+/g,"");
+ return /^(?:上汽)?奥迪E5$/i.test(compact);
+}
 function modelOptions(){
  const models=new Set([state.config.model]);
  state.rows.forEach(r=>{if(r[0])models.add(r[0])});
  (verticalState.items||[]).forEach(x=>{if(x.ownModel)models.add(x.ownModel);if(x.competitor)models.add(x.competitor)});
  (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
- return [...models].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+ return [...models].filter(x=>x&&!isRedundantModelOption(x)).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
 }
 function learningModelOptions(){
  const models=new Set(modelOptions());
  Object.keys(modelIdentities.items||{}).forEach(x=>x&&models.add(x));
  learnings().forEach(x=>{if(x.model)models.add(x.model)});
- return [...models].filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+ return [...models].filter(x=>x&&!isRedundantModelOption(x)).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
 }
 function dataModelOptions(){
- return [...new Set(state.rows.map(r=>r[0]).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
+ return [...new Set(state.rows.map(r=>r[0]).filter(x=>x&&!isRedundantModelOption(x)))].sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
 }
 function brandForModel(model){
  const text=String(model||"").trim();
@@ -773,11 +778,18 @@ function syncDashboardCompetitors(){
 function applyModelSelection(model){
  const models=modelOptions();
  if(!models.includes(model))return;
+ const changed=state.config.model!==model;
  state.config.model=model;
  state.config.brand=brandForModel(model);
  const comps=dcdTopPositiveCompetitors(model);
  state.config.competitor=comps.join(" / ");
  state.config.project=`${model}认知诊断${comps.length?`｜${comps.length}车核心竞品`:""}`;
+ if(changed){
+  videoState.config={...videoState.config,ownModel:model,competitor1:comps[0]||"",competitor2:comps[1]||"",competitor3:comps[2]||""};
+  contentStrategyState={loading:false,result:null,error:""};
+  resetContentPptPlan();
+  saveVideoState();
+ }
 }
 function score(r){const [sat,risk]=emotions[r[5]]||[0,0],iw=identityWeights[r[6]]||.85,pw=state.platforms[r[2]]||1,intw=intentWeights[r[7]]||.5,n=+r[8]||0,impact=+r[9]||3;return{positive:sat>0?n*sat*iw*pw*intw:0,negative:risk>0?n*risk*impact*pw*intw:0}}
 function analysis(){
@@ -932,14 +944,25 @@ function syncDashboardModelFromControls(){
  return state.config.model;
 }
 function renderDashboard(a){
- const top=[...a.labels].sort((x,y)=>Math.max(y.op,y.on)-Math.max(x.op,x.on)).slice(0,6),max=Math.max(...top.flatMap(x=>[x.op,x.on]),1);
- document.querySelector("#asset-chart").innerHTML=top.length?top.map(x=>`<div class="bar-row"><b>${x.label}</b><div class="tracks"><i class="pos" style="width:${x.op/max*100}%"></i><i class="neg" style="width:${x.on/max*100}%"></i></div><span class="bar-value">${Math.round(x.op-x.on).toLocaleString()}</span></div>`).join(""):`<div class="empty-state">暂无 ${state.config.model} 的认知资产数据，请先导入该车型声量数据。</div>`;
- const selected=a.labels.filter(x=>x.priority>0).slice(0,4);document.querySelector("#top-actions").innerHTML=selected.map(x=>{const ac=actionFor(x);return`<div class="action-card ${ac.type==="风险修复"?"risk":""}"><div><b>${ac.type} · ${x.label}</b><p>${ac.proposition}</p></div><span class="score">${x.priority.toFixed(1)}</span></div>`}).join("")||"<p>暂无可执行建议，请补充数据。</p>";
+ const top=[...a.labels].sort((x,y)=>Math.max(y.op,y.on)-Math.max(x.op,x.on)).slice(0,6);
+ document.querySelector("#asset-chart").innerHTML=top.length?`<div class="asset-benchmark-legend"><span><i class="green"></i>高于 Benchmark</span><span><i class="yellow"></i>接近 Benchmark</span><span><i class="red"></i>低于 Benchmark</span></div>${top.map(x=>{const current=x.op+x.on?x.op/(x.op+x.on)*100:0,benchmark=x.cp+x.cn?x.cp/(x.cp+x.cn)*100:50,delta=current-benchmark,status=delta>=5?"green":delta<=-5?"red":"yellow";return`<button type="button" class="asset-benchmark-row" data-asset-label="${escapeAttr(x.label)}" aria-label="查看${escapeAttr(x.label)}的本品与竞品对比"><span class="asset-benchmark-label"><b>${escapeHtml(x.label)}</b><small>Benchmark ${benchmark.toFixed(1)}%</small></span><span class="asset-benchmark-track"><i class="asset-benchmark-bar ${status}" style="width:${current}%"></i><span class="asset-benchmark-marker" style="left:${benchmark}%" title="Benchmark ${benchmark.toFixed(1)}%"></span></span><strong class="${status}">${current.toFixed(1)}%</strong></button>`}).join("")}`:`<div class="empty-state">暂无 ${state.config.model} 的认知资产数据，请先导入该车型声量数据。</div>`;
+ document.querySelectorAll("#asset-chart [data-asset-label]").forEach(row=>row.onclick=()=>openAssetBenchmarkDialog(row.dataset.assetLabel));
+ const selected=a.labels.filter(x=>x.priority>0).slice(0,4);document.querySelector("#top-actions").innerHTML=selected.map(x=>{const ac=actionFor(x);return`<div class="action-card"><div><b>本周继续修复 · ${x.label}</b><p>${ac.proposition}</p></div></div>`}).join("")||"<p>暂无可执行建议，请补充数据。</p>";
 	 renderModelJudgmentWorkbench();
  renderDashboardTopicPlanner(a);
 	 renderDashboardData(a);
  renderDashboardCognition(a);
  renderOpportunityMap(a);
+}
+function openAssetBenchmarkDialog(label){
+ const rows=state.rows.filter(r=>r[4]===label),models=[...new Set(rows.map(r=>r[0]).filter(Boolean))];
+ if(!rows.length||!models.length)return;
+ const values=models.map(model=>{const modelRows=rows.filter(r=>r[0]===model),scores=modelRows.reduce((sum,r)=>{const s=score(r);sum.positive+=s.positive;sum.negative+=s.negative;sum.samples+=+r[8]||0;return sum},{positive:0,negative:0,samples:0}),total=scores.positive+scores.negative;return{model,value:total?scores.positive/total*100:0,samples:scores.samples,isOwn:model===state.config.model}}).sort((a,b)=>Number(b.isOwn)-Number(a.isOwn)||b.value-a.value);
+ const competitors=values.filter(x=>!x.isOwn),benchmark=competitors.length?competitors.reduce((sum,x)=>sum+x.value,0)/competitors.length:50,own=values.find(x=>x.isOwn),delta=own?own.value-benchmark:0;
+ const dialog=document.querySelector("#asset-benchmark-dialog"),body=document.querySelector("#asset-benchmark-dialog-body");
+ document.querySelector("#asset-benchmark-dialog-title").textContent=`${label}｜本品与竞品展现`;
+ body.innerHTML=`<div class="trend-summary asset-dialog-summary"><div><span>当前标签</span><b>${escapeHtml(label)}</b><small>点击柱体或标签进入对比</small></div><div><span>本品</span><b>${escapeHtml(state.config.model)}</b><small>${own?`${own.value.toFixed(1)}% · ${own.samples.toLocaleString()} 条声量`:'暂无该标签样本'}</small></div><div><span>竞品 Benchmark</span><b>${benchmark.toFixed(1)}%</b><small>${competitors.length} 个竞品均值</small></div><div><span>本品相对竞品</span><b class="${delta>=5?'green':delta<=-5?'red':'yellow'}">${delta>0?'+':''}${delta.toFixed(1)}pp</b><small>${delta>=5?'高于 Benchmark':delta<=-5?'低于 Benchmark':'接近 Benchmark'}</small></div></div><div class="asset-dialog-list">${values.map(x=>{const d=x.value-benchmark,status=d>=5?'green':d<=-5?'red':'yellow';return`<div class="asset-dialog-row ${x.isOwn?'own':''}"><div><span>${x.isOwn?'本品':'竞品'}</span><b>${escapeHtml(x.model)}</b><small>${x.samples.toLocaleString()} 条声量</small></div><div class="asset-dialog-track"><i class="asset-benchmark-bar ${status}" style="width:${x.value}%"></i><span class="asset-benchmark-marker" style="left:${benchmark}%"></span></div><strong class="${status}">${x.value.toFixed(1)}%</strong><em>${x.isOwn?'当前车型':`${d>0?'+':''}${d.toFixed(1)}pp`}</em></div>`}).join("")}</div>`;
+ dialog.showModal();
 }
 function renderDashboardTopicPlanner(a=analysis()){
  const box=document.querySelector("#dashboard-topic-plan");
@@ -959,8 +982,8 @@ function renderDashboardTopicPlanner(a=analysis()){
  const labels=(a.labels||[]).filter(x=>x.priority>0).slice(0,5).map(x=>x.label).join(" / ")||"核心卖点";
 	 box.innerHTML=`<div class="topic-plan-empty"><b>${model} 选题规划待生成</b><span>当前诊断重点：${escapeHtml(labels)}｜竞品：${escapeHtml(competitor||"待补充")}</span></div>`;
 }
-function dashboardTopicPlanningPayload({model,stage,goal,report,competitors,coreSellingPoints}){
- return{org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),project:{...strategyProjectContext(),model,stage,launchStage:stage},launchStage:stage,stage,coreSellingPoints,competitors,budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal,question:`${model} ${stage}车型传播选题规划`,signal:report};
+function dashboardTopicPlanningPayload({model,stage,platform,goal,report,competitors,coreSellingPoints}){
+ return{org_id:session?.org_id,user_id:session?.user_id,edition:activeEdition(),project:{...strategyProjectContext(),model,stage,launchStage:stage,communicationPlatform:platform},launchStage:stage,stage,communicationPlatform:platform,platforms:[platform],coreSellingPoints,competitors,budget:state.config.budget,targetAudience:state.config.targetIdentity,communicationGoal:goal,question:`${model} ${stage} ${platform}车型传播选题规划`,signal:report};
 }
 async function buildFallbackDashboardTopicPlan(payload,modelText="",modelLabel="MMN深度策略"){
  const data=await api("/api/topic-planning/run",{method:"POST",body:JSON.stringify(payload)});
@@ -970,26 +993,32 @@ async function buildFallbackDashboardTopicPlan(payload,modelText="",modelLabel="
  plan.modelLabel=`${modelLabel} + topic_planning_engine`;
  return plan;
 }
-function localTopicItem(id,topic,stage,goal,priority,competitors){
+function localTopicFormats(platform){
+ if(platform==="小红书")return["场景图文笔记","体验清单","口碑短视频"];
+ if(platform==="B站")return["深度评测视频","技术解析视频","长周期用车报告"];
+ return["竖屏短视频","直播切片","热点话题视频"];
+}
+function localTopicItem(id,topic,stage,platform,goal,priority,competitors){
  const comp=competitors.length?competitors.join(" / "):"核心竞品";
- return{id,topic,taxonomy:["媒体角度","单车类",stage,goal],communicationStages:[stage],applicableModels:["全车型"],contentGoals:[goal],userDecisionStages:["兴趣建立","方案比较","下单转化"],creatorTypes:["专业汽车评测达人","家庭场景KOC","车主口碑达人"],recommendedFormats:["短视频","图文长帖","直播切片"],priority,fitReason:`围绕${state.config.model}在${stage}的核心购买理由，把${comp}对比、真实场景和转化疑虑拆成可传播内容。`,conditions:["当前车型与传播目标已明确","需要快速形成选题排期"],exclusions:["缺少车型定位时不建议直接投放","重大舆情期需先做风险复核"]};
+ return{id,topic,taxonomy:["媒体角度","单车类",stage,platform,goal],communicationStages:[stage],applicableModels:["全车型"],contentGoals:[goal],userDecisionStages:["兴趣建立","方案比较","下单转化"],creatorTypes:["专业汽车评测达人","家庭场景KOC","车主口碑达人"],recommendedFormats:localTopicFormats(platform),priority,fitReason:`围绕${state.config.model}在${stage}面向${platform}建立核心购买理由，把${comp}对比、真实场景和转化疑虑拆成平台适配内容。`,conditions:["当前车型、传播阶段、平台与目标已明确","需要快速形成选题排期"],exclusions:["缺少车型定位时不建议直接投放","重大舆情期需先做风险复核"]};
 }
 function buildLocalDashboardTopicPlan(payload,reason=""){
- const summary=payload.project||{},model=summary.model||state.config.model||"当前车型",stage=payload.launchStage||summary.stage||"上市中",goal=payload.communicationGoal||"建立核心购买理由",competitors=payload.competitors||[];
+ const summary=payload.project||{},model=summary.model||state.config.model||"当前车型",stage=payload.launchStage||summary.stage||"上市中",platform=payload.communicationPlatform||"抖音/视频号",goal=payload.communicationGoal||"建立核心购买理由",competitors=payload.competitors||[];
  const topics=[
-  localTopicItem("local_compare",`产品竞争分析：${model} 对比 ${competitors[0]||"核心竞品"}`,stage,"竞品比较",96,competitors),
-  localTopicItem("local_scene",`${model} 家庭场景真实用车选题`,stage,"场景种草",92,competitors),
-  localTopicItem("local_owner",`${model} 车主口碑与高频疑虑澄清`,stage,"口碑验证",90,competitors),
-  localTopicItem("local_cost",`${model} 用车成本、权益与保值解释`,stage,"转化承接",86,competitors),
-  localTopicItem("local_tech",`${model} 核心技术与智能体验拆解`,stage,"卖点教育",84,competitors),
-  localTopicItem("local_store",`${model} 到店试驾与下订决策内容`,stage,"到店转化",82,competitors)
+  localTopicItem("local_compare",`产品竞争分析：${model} 对比 ${competitors[0]||"核心竞品"}`,stage,platform,"竞品比较",96,competitors),
+  localTopicItem("local_scene",`${model} 家庭场景真实用车选题`,stage,platform,"场景种草",92,competitors),
+  localTopicItem("local_owner",`${model} 车主口碑与高频疑虑澄清`,stage,platform,"口碑验证",90,competitors),
+  localTopicItem("local_cost",`${model} 用车成本、权益与保值解释`,stage,platform,"转化承接",86,competitors),
+  localTopicItem("local_tech",`${model} 核心技术与智能体验拆解`,stage,platform,"卖点教育",84,competitors),
+  localTopicItem("local_store",`${model} 到店试驾与下订决策内容`,stage,platform,"到店转化",82,competitors)
  ];
- const phaseStrategy=`${model}在${stage}先用竞品对比建立搜索入口，再用场景实测和车主口碑补齐信任，最后用权益和试驾内容承接转化。`;
- return{engine:"local_topic_planning_fallback",taxonomyVersion:"2026-07-09.mmn.local-topic-fallback.v1",inputSummary:{brand:summary.brand||state.config.brand||"",model,launchStage:stage,coreSellingPoints:payload.coreSellingPoints||[],competitors,budgetTier:String(payload.budget||state.config.budget||"预算待定"),targetAudience:payload.targetAudience||state.config.targetIdentity||"目标购车人群",communicationGoal:goal},taxonomy:topics,selectedTopics:topics,phases:[{phase:stage,strategy:phaseStrategy,topics:topics.slice(0,4)}],creatorMatches:topics.slice(0,5).map((x,i)=>({topic:x.topic,primaryCreatorType:x.creatorTypes[i%3],backupCreatorType:x.creatorTypes[(i+1)%3],brief:`用${x.recommendedFormats[0]}讲清${x.topic}；必须出现车型、场景、对比对象和明确购买理由。`})),schedule:topics.slice(0,6).map((x,i)=>({week:`第${i+1}周`,phase:stage,topic:x.topic,format:x.recommendedFormats[i%3],kpi:i<2?"搜索讨论与完播率":"互动咨询与到店线索"})),strategyConclusion:`${phaseStrategy}${reason?` 本次为前端兜底规划，原因：${reason}`:""}`,modelNarrative:"当前入口未稳定命中MMN后端接口，页面先基于车型、阶段、目标、竞品和预算生成可执行选题；接口恢复后仍会优先使用旗舰策略模型结果。",modelLabel:"前端兜底选题规划"};
+ const phaseStrategy=`${model}在${stage}以${platform}为主阵地，先用竞品对比建立入口，再用平台适配的场景实测和车主口碑补齐信任，最后用权益和试驾内容承接转化。`;
+ return{engine:"local_topic_planning_fallback",taxonomyVersion:"2026-07-10.mmn.local-topic-fallback.v2",inputSummary:{brand:summary.brand||state.config.brand||"",model,launchStage:stage,communicationPlatform:platform,coreSellingPoints:payload.coreSellingPoints||[],competitors,budgetTier:String(payload.budget||state.config.budget||"预算待定"),targetAudience:payload.targetAudience||state.config.targetIdentity||"目标购车人群",communicationGoal:goal},taxonomy:topics,selectedTopics:topics,phases:[{phase:stage,strategy:phaseStrategy,topics:topics.slice(0,4)}],creatorMatches:topics.slice(0,5).map((x,i)=>({topic:x.topic,primaryCreatorType:x.creatorTypes[i%3],backupCreatorType:x.creatorTypes[(i+1)%3],brief:`在${platform}用${x.recommendedFormats[0]}讲清${x.topic}；必须出现车型、场景、对比对象和明确购买理由。`})),schedule:topics.slice(0,6).map((x,i)=>({week:`第${i+1}周`,phase:stage,topic:x.topic,format:x.recommendedFormats[i%3],kpi:i<2?"搜索讨论与完播率":"互动咨询与到店线索"})),strategyConclusion:`${phaseStrategy}${reason?` 本次为前端兜底规划，原因：${reason}`:""}`,modelNarrative:"当前入口未稳定命中MMN后端接口，页面先基于车型、传播阶段、平台、目标、竞品和预算生成可执行选题；接口恢复后仍会优先使用旗舰策略模型结果。",modelLabel:"前端兜底选题规划"};
 }
 async function runDashboardTopicPlanning(){
 	 const model=syncDashboardModelFromControls();
 	 const stage=document.querySelector("#dashboard-topic-stage")?.value||state.config.stage||"上市中";
+	 const platform=document.querySelector("#dashboard-topic-platform")?.value||"抖音/视频号";
 	 const goal=document.querySelector("#dashboard-topic-goal")?.value?.trim()||"建立核心购买理由并抢占竞品对比搜索";
 	 state.config.stage=stage;
  dashboardTopicPlanState={loading:true,result:null,error:""};
@@ -998,9 +1027,10 @@ async function runDashboardTopicPlanning(){
 	  const report=reportPayload();
 	  const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
 	  const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
-	  const planningPayload=dashboardTopicPlanningPayload({model,stage,goal,report,competitors,coreSellingPoints});
+	  const planningPayload=dashboardTopicPlanningPayload({model,stage,platform,goal,report,competitors,coreSellingPoints});
 		  const question=[
 	   `${model} ${stage}车型传播选题规划`,
+	   `传播平台：${platform}`,
 	   `传播目标：${goal}`,
 	   `核心卖点：${coreSellingPoints.join("、")||state.config.project}`,
    `核心竞品：${competitors.join("、")||"待补充"}`,
@@ -1019,7 +1049,7 @@ async function runDashboardTopicPlanning(){
   const report=reportPayload();
   const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
   const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
-  const fallback=buildLocalDashboardTopicPlan(dashboardTopicPlanningPayload({model,stage,goal,report,competitors,coreSellingPoints}),err.message);
+  const fallback=buildLocalDashboardTopicPlan(dashboardTopicPlanningPayload({model,stage,platform,goal,report,competitors,coreSellingPoints}),err.message);
   dashboardTopicPlanState={loading:false,result:fallback,error:""};
   renderDashboardTopicPlanner();
   toast("接口暂未命中，已先生成本地兜底选题规划");
@@ -1030,29 +1060,86 @@ function renderModelJudgmentWorkbench(){
  const items=modelJudgmentsFor(state.config.model).slice(0,5);
  box.innerHTML=items.length?`<div class="model-judgment-list">${items.map(item=>`<article class="model-judgment-card"><div><span>${item.dimension||"综合判断"} · ${item.brand_name||state.config.brand}</span><b>${item.model_name||state.config.model}</b></div><p>${item.viewpoint||item.source_text||""}</p><dl><dt>归因</dt><dd>${item.attribution||"待补充"}</dd><dt>策略动作</dt><dd>${item.strategy_implication||"待补充"}</dd><dt>还缺证据</dt><dd>${item.evidence_needed||"待补充"}</dd></dl><small>${(item.tags||[]).slice(0,8).map(x=>`#${x}`).join(" ")}｜${(item.created_at||item.createdAt||"").slice(0,10)}</small></article>`).join("")}</div>`:`<p class="empty">还没有沉淀到 ${state.config.model} 的车型判断。你可以直接输入一句判断，MMN会自动拆成车型资产。</p>`;
 }
+const emotionQuadrantDefinitions=[
+ {key:"active-positive",title:"高唤醒正向",subtitle:"正向效价 · 高表达强度"},
+ {key:"steady-positive",title:"稳态正向",subtitle:"正向效价 · 稳定认可"},
+ {key:"concern-negative",title:"疑虑负向",subtitle:"负向效价 · 决策疑虑"},
+ {key:"damaged-negative",title:"受损负向",subtitle:"负向效价 · 高风险受损"}
+];
+function emotionQuadrantData(rows){
+ const valence={兴奋:1,惊喜:1,期待:.65,信任:.8,认可:.75,自豪:1,怀疑:-.45,焦虑:-.65,嘲讽:-.75,失望:-.85,愤怒:-1,后悔:-.9};
+ const activation={兴奋:1,惊喜:.95,自豪:.85,期待:.4,信任:.25,认可:.3,怀疑:.35,焦虑:.65,嘲讽:.75,失望:.7,愤怒:1,后悔:.85};
+ const grouped=new Map();
+ rows.forEach(r=>{if(!r[4])return;const samples=+r[8]||0,item=grouped.get(r[4])||{label:r[4],category:r[3],samples:0,valenceTotal:0,activationTotal:0,emotions:new Set()};item.samples+=samples;item.valenceTotal+=(valence[r[5]]??0)*samples;item.activationTotal+=(activation[r[5]]??.5)*samples;item.emotions.add(r[5]);grouped.set(r[4],item)});
+ const items=[...grouped.values()].map(x=>({...x,valence:x.samples?x.valenceTotal/x.samples:0,activation:x.samples?x.activationTotal/x.samples:0}));
+ if(!items.length)return new Map(emotionQuadrantDefinitions.map(q=>[q.key,[]]));
+ const byValence=[...items].sort((a,b)=>b.valence-a.valence||b.samples-a.samples),positiveCount=items.length>=4?Math.max(2,Math.min(items.length-2,Math.ceil(items.length/2))):Math.ceil(items.length/2),positive=byValence.slice(0,positiveCount),negative=byValence.slice(positiveCount);
+ const split=(source,metric,descending=true)=>{const sorted=[...source].sort((a,b)=>(descending?b[metric]-a[metric]:a[metric]-b[metric])||b.samples-a.samples),cut=Math.max(1,Math.ceil(sorted.length/2));return[sorted.slice(0,cut),sorted.slice(cut)]};
+ const [active,steady]=split(positive,"activation",true),[damaged,concern]=split(negative,"activation",true),result=new Map([["active-positive",active],["steady-positive",steady],["concern-negative",concern],["damaged-negative",damaged]]);
+ const used=new Set(),fallback=[...items].sort((a,b)=>b.samples-a.samples);
+ emotionQuadrantDefinitions.forEach(q=>{let values=result.get(q.key)||[];if(!values.length){const candidate=fallback.find(x=>!used.has(x.label))||fallback[0];values=candidate?[{...candidate,boundaryFallback:true}]:[]}values.forEach(x=>used.add(x.label));result.set(q.key,values.sort((a,b)=>b.samples-a.samples).slice(0,3))});
+ return result;
+}
+function dashboardTimeDimension(){
+ const text=String(state.sourceNote||""),range=text.match(/(20\d{2}[.\/-]\d{1,2}[.\/-]\d{1,2})\s*(?:-|—|–|至|到)\s*(20\d{2}[.\/-]\d{1,2}[.\/-]\d{1,2})/);
+ if(range)return`${range[1]} — ${range[2]}`;
+ const periods=[...new Set((verticalState.items||[]).map(x=>x.period).filter(Boolean))].sort();
+ return periods.length?`${periods[0]} — ${periods[periods.length-1]}`:"当前导入周期";
+}
 function renderDashboardData(a){
- const rows=a.own.slice(0,8),platforms=[...new Set(a.own.map(r=>r[2]).filter(Boolean))];
- const categories=[...new Set(a.own.map(r=>r[3]).filter(Boolean))],labels=[...new Set(a.own.map(r=>r[4]).filter(Boolean))];
- document.querySelector("#dashboard-data-note").textContent=a.own.length?(state.sourceNote||"已按当前车型筛选"):`${state.config.model} 暂无数据`;
+ const platforms=[...new Set(a.own.map(r=>r[2]).filter(Boolean))];
+ if(dashboardPlatformFilter!=="all"&&!platforms.includes(dashboardPlatformFilter))dashboardPlatformFilter="all";
+ const filteredRows=dashboardPlatformFilter==="all"?a.own:a.own.filter(r=>r[2]===dashboardPlatformFilter);
+ const categories=[...new Set(a.own.map(r=>r[3]).filter(Boolean))],labels=[...new Set(a.own.map(r=>r[4]).filter(Boolean))],filteredLabels=[...new Set(filteredRows.map(r=>r[4]).filter(Boolean))],referenceModels=[...new Set(state.rows.map(r=>r[0]).filter(x=>x&&x!==state.config.model))];
+ document.querySelector("#dashboard-data-note").textContent=a.own.length?`${filteredLabels.length} 个有效标签`:`${state.config.model} 暂无数据`;
+ document.querySelector("#dashboard-platform-control").innerHTML=`<label class="platform-filter-bubble dashboard-platform-bubble"><span>平台</span><select id="dashboard-platform-filter" aria-label="按平台筛选四象限"><option value="all">全部平台</option>${platforms.map(platform=>`<option value="${escapeAttr(platform)}" ${platform===dashboardPlatformFilter?"selected":""}>${escapeHtml(platform)}</option>`).join("")}</select></label>`;
+ document.querySelector("#dashboard-data-context").innerHTML=[
+  ["本品车型",state.config.model,"own-model"],
+  ["数据参照车型",referenceModels.join(" / ")||"暂无参照车型","reference-models"],
+  ["时间维度",dashboardTimeDimension(),"time-dimension"],
+  ["数据维度","平台 × 情绪效价 × 表达强度 × 认知赛道","data-dimension"],
+  ["当前标签",filteredLabels.slice(0,6).join(" / ")||"暂无有效标签","label-dimension"]
+ ].map(([name,value,cls])=>`<div class="${cls}"><span>${name}</span><b title="${escapeAttr(value)}">${escapeHtml(value)}</b></div>`).join("");
  document.querySelector("#dashboard-data-summary").innerHTML=[
   ["车型数",a.own.length?1:0],
   ["平台数",platforms.length],
   ["主要赛道",categories[0]||"—"],
   ["主要标签",labels[0]||"—"]
  ].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join("");
- document.querySelector("#dashboard-data-table").innerHTML=`<thead><tr><th>车型</th><th>平台</th><th>赛道</th><th>标签</th><th>情绪</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td><b>${r[0]}</b></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td><td>${r[5]}</td></tr>`).join(""):`<tr><td colspan="5" class="empty-cell">暂无 ${state.config.model} 的声量数据，请导入该车型声量数据，或切换到已有数据的车型。</td></tr>`}</tbody>`;
+ const quadrantData=emotionQuadrantData(filteredRows);
+ const filteredTotal=filteredRows.reduce((sum,r)=>sum+(+r[8]||0),0);
+ document.querySelector("#dashboard-emotion-quadrant").innerHTML=filteredRows.length?emotionQuadrantDefinitions.map(q=>{const top=quadrantData.get(q.key)||[];return`<section class="emotion-quadrant-cell ${q.key}" data-quadrant="${q.key}"><header><div><span>${q.title}</span><small>${q.subtitle}</small></div><b>TOP ${top.length}</b></header><div class="emotion-tag-list">${top.map((x,i)=>`<button type="button" class="emotion-tag" data-emotion-label="${escapeAttr(x.label)}" data-emotion-quadrant="${q.key}" aria-label="查看${escapeAttr(x.label)}赛道与竞品表现"><span>${String(i+1).padStart(2,"0")}</span><b>${escapeHtml(x.label)}</b><small>${escapeHtml(x.category)} · ${filteredTotal?(x.samples/filteredTotal*100).toFixed(1):"0.0"}%</small></button>`).join("")}</div></section>`}).join(""):`<div class="empty-state">当前平台暂无 ${state.config.model} 的情绪标签数据。</div>`;
+ document.querySelector("#dashboard-platform-filter").onchange=event=>{dashboardPlatformFilter=event.target.value;renderDashboardData(a)};
+ document.querySelectorAll("#dashboard-emotion-quadrant [data-emotion-label]").forEach(button=>button.onclick=()=>openEmotionLabelDialog(button.dataset.emotionLabel,button.dataset.emotionQuadrant,dashboardPlatformFilter));
+}
+function openEmotionLabelDialog(label,quadrantKey,platform){
+ const definition=emotionQuadrantDefinitions.find(x=>x.key===quadrantKey)||{title:"情绪象限",subtitle:"效价 × 强度动态划分"},quadrantTitle=definition.title;
+ const rows=state.rows.filter(r=>r[4]===label&&(platform==="all"||r[2]===platform));
+ const models=[...new Set(rows.map(r=>r[0]).filter(Boolean))],values=models.map(model=>{const modelRows=rows.filter(r=>r[0]===model),samples=modelRows.reduce((sum,r)=>sum+(+r[8]||0),0),modelTotal=state.rows.filter(r=>r[0]===model&&(platform==="all"||r[2]===platform)).reduce((sum,r)=>sum+(+r[8]||0),0),share=modelTotal?samples/modelTotal*100:0,categories=[...new Set(modelRows.map(r=>r[3]).filter(Boolean))],emotionNames=[...new Set(modelRows.map(r=>r[5]).filter(Boolean))];return{model,share,categories,emotionNames,isOwn:model===state.config.model}}).sort((a,b)=>Number(b.isOwn)-Number(a.isOwn)||b.share-a.share),max=Math.max(...values.map(x=>x.share),1),own=values.find(x=>x.isOwn),competitors=values.filter(x=>!x.isOwn),category=[...new Set(rows.map(r=>r[3]).filter(Boolean))].join(" / ")||"待补充";
+ const dialog=document.querySelector("#emotion-label-dialog"),body=document.querySelector("#emotion-label-dialog-body");
+ document.querySelector("#emotion-label-dialog-title").textContent=`${label}｜赛道与竞品表现`;
+ body.innerHTML=`<div class="trend-summary emotion-dialog-summary"><div><span>情绪象限</span><b>${quadrantTitle}</b><small>${definition.subtitle}</small></div><div><span>所属赛道</span><b>${escapeHtml(category)}</b><small>${platform==="all"?"全部平台":escapeHtml(platform)}</small></div><div><span>本品标签占比</span><b>${own?`${own.share.toFixed(1)}%`:"暂无样本"}</b><small>占本品当前平台总声量</small></div><div><span>竞品覆盖</span><b>${competitors.length} 个</b><small>统一使用车型内占比</small></div></div><div class="emotion-competitor-list">${values.length?values.map(x=>{const delta=x.share-(own?.share||0);return`<div class="emotion-competitor-row ${x.isOwn?"own":""}"><div><span>${x.isOwn?"本品":"竞品"}</span><b>${escapeHtml(x.model)}</b><small>${escapeHtml(x.emotionNames.join(" / "))}</small></div><div class="emotion-competitor-track"><i style="width:${x.share/max*100}%"></i></div><strong>${x.share.toFixed(1)}%</strong><em>${x.isOwn?"占车型总声量":`${delta>0?"+":""}${delta.toFixed(1)}pp`}</em></div>`}).join(""):`<div class="empty-state">暂无可对比的车型数据</div>`}</div>`;
+ dialog.showModal();
 }
 function renderDashboardCognition(a){
  const rows=a.labels.slice(0,8);
  document.querySelector("#dashboard-cognition-table").innerHTML=`<thead><tr><th>认知标签</th><th>诊断</th><th>本品负向</th><th>Gap</th><th>优先级</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td><b>${x.label}</b><small>${x.category}</small></td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.priority.toFixed(1)}</td></tr>`).join(""):`<tr><td colspan="5" class="empty-cell">暂无 ${state.config.model} 的认知诊断数据，导入该车型声量后会自动计算。</td></tr>`}</tbody>`;
 }
+function opportunityMapLabels(labels){
+ const types=["优先修复","抢占空位","持续放大"],groups=new Map(types.map(type=>[type,[]])),base=Math.floor(labels.length/types.length),remainder=labels.length%types.length,capacity=new Map(types.map((type,i)=>[type,base+(i<remainder?1:0)]));
+ const fit=(x,type)=>{const total=Math.max(x.op+x.on,1),original=x.diagnosis===type ? .12 : 0;if(type==="优先修复")return x.on/total+(x.impact||0)/10+original;if(type==="抢占空位")return Math.max(x.gap||0,0)*4+(x.white||0)/20+(x.impact||0)/20+original;return x.op/total+Math.max(-(x.gap||0),0)*2+original};
+ const pairs=labels.flatMap(x=>types.map(type=>({x,type,score:fit(x,type)}))).sort((a,b)=>b.score-a.score),assigned=new Set();
+ pairs.forEach(({x,type})=>{if(assigned.has(x.label)||groups.get(type).length>=capacity.get(type))return;groups.get(type).push({...x,mapDiagnosis:type,mapRebalanced:x.diagnosis!==type});assigned.add(x.label)});
+ labels.filter(x=>!assigned.has(x.label)).forEach(x=>{const type=types.find(t=>groups.get(t).length<capacity.get(t))||types[0];groups.get(type).push({...x,mapDiagnosis:type,mapRebalanced:x.diagnosis!==type})});
+ return types.flatMap(type=>groups.get(type));
+}
 function renderOpportunityMap(a){
- const all=a.labels.filter(x=>x.op+x.on+x.cp+x.cn>0),filtered=mapFilter==="all"?all:all.filter(x=>x.diagnosis===mapFilter),ranked=[...filtered].sort((x,y)=>bigness(y)-bigness(x)),shown=ranked.slice(0,mapLimit),maxGap=Math.max(...all.map(x=>Math.abs(x.gap)),.01);
+ const all=opportunityMapLabels(a.labels.filter(x=>x.op+x.on+x.cp+x.cn>0)),filtered=mapFilter==="all"?all:all.filter(x=>x.mapDiagnosis===mapFilter),ranked=[...filtered].sort((x,y)=>bigness(y)-bigness(x)),shown=ranked.slice(0,mapLimit),maxGap=Math.max(...all.map(x=>Math.abs(x.gap)),.01);
  document.querySelectorAll("#map-filters button").forEach(b=>b.classList.toggle("active",b.dataset.filter===mapFilter));
  document.querySelector("#map-limit").value=String(mapLimit);
- document.querySelector("#map-summary").textContent=`当前筛选 ${filtered.length} 个标签，地图显示 Top ${shown.length}；完整结果见下方列表。`;
- document.querySelector("#opportunity-map").innerHTML=shown.length?layoutBubbles(shown.map(x=>{const left=50+(x.gap/maxGap)*42,bottom=Math.min(88,Math.max(9,x.impact/5*84)),cls=x.on>=state.config.riskThreshold?"risk":x.gap>0?"chance":"asset";return{...x,left,bottom,cls,w:Math.max(54,x.label.length*13+22),h:27}})).map(b=>`<span class="bubble ${b.cls}" style="left:${b.x}%;bottom:${b.y}%" title="${b.label}｜${b.diagnosis}｜Gap ${(b.gap*100).toFixed(1)}%｜优先级 ${b.priority.toFixed(1)}"><i style="width:${Math.hypot(b.x-b.left,b.y-b.bottom)*3.2}px;transform:rotate(${Math.atan2(b.bottom-b.y,b.left-b.x)}rad)"></i>${b.label}</span>`).join(""):`<div class="map-empty">当前筛选下暂无可展示标签</div>`;
- document.querySelector("#opportunity-table").innerHTML=`<thead><tr><th>认知标签</th><th>赛道</th><th>诊断</th><th>本品负向</th><th>认知 Gap</th><th>Impact</th><th>优先级</th></tr></thead><tbody>${ranked.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td><span class="tag ${x.diagnosis==="优先修复"?"risk":x.diagnosis==="持续放大"?"asset":""}">${x.diagnosis}</span></td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.priority.toFixed(1)}</td></tr>`).join("")}</tbody>`;
+ document.querySelector("#map-summary").textContent=`当前筛选 ${filtered.length} 个标签，地图显示 Top ${shown.length}。策略分类已按风险、竞品领先度与本品资产动态校准。`;
+ document.querySelector("#opportunity-map").innerHTML=shown.length?layoutBubbles(shown.map(x=>{const left=50+(x.gap/maxGap)*42,bottom=Math.min(88,Math.max(9,x.impact/5*84)),cls=x.mapDiagnosis==="优先修复"?"risk":x.mapDiagnosis==="抢占空位"?"chance":"asset";return{...x,left,bottom,cls,w:Math.max(54,x.label.length*13+22),h:27}})).map(b=>`<span class="bubble ${b.cls}" style="left:${b.x}%;bottom:${b.y}%" title="${b.label}｜${b.mapDiagnosis}｜Gap ${(b.gap*100).toFixed(1)}%｜优先级 ${b.priority.toFixed(1)}"><i style="width:${Math.hypot(b.x-b.left,b.y-b.bottom)*3.2}px;transform:rotate(${Math.atan2(b.bottom-b.y,b.left-b.x)}rad)"></i>${b.label}</span>`).join(""):`<div class="map-empty">暂无有效认知标签，请先导入当前车型数据</div>`;
+ document.querySelector("#opportunity-table").innerHTML=`<thead><tr><th>认知标签</th><th>赛道</th><th>诊断</th><th>本品负向</th><th>认知 Gap</th><th>Impact</th><th>优先级</th></tr></thead><tbody>${ranked.map(x=>`<tr><td><b>${x.label}</b></td><td>${x.category}</td><td><span class="tag ${x.mapDiagnosis==="优先修复"?"risk":x.mapDiagnosis==="持续放大"?"asset":""}">${x.mapDiagnosis}</span></td><td class="negative">${Math.round(x.on).toLocaleString()}</td><td>${(x.gap*100).toFixed(1)}%</td><td>${x.impact.toFixed(1)}</td><td>${x.priority.toFixed(1)}</td></tr>`).join("")}</tbody>`;
 }
 function bigness(x){return (x.priority||0)*1000+(x.on||0)+Math.max(x.op||0,x.cp||0)}
 function layoutBubbles(items){
@@ -1289,7 +1376,11 @@ async function saveSemanticCalibration(){
  }catch(err){toast(`保存校准失败：${err.message}`)}
 }
 function renderData(){
- document.querySelector("#data-source-note").textContent=`${state.sourceNote||"当前数据已载入。"} 每行代表一组“车型 × 平台 × 认知标签 × 情绪 × 用户身份”的聚合数据，修改后自动重新计算。`;
+ const sourceNote=state.sourceNote||"当前数据已载入。";
+ const legacyImportNote=sourceNote.includes("属性层级 NSR 已拆分为正/负两类聚合行");
+ document.querySelector("#data-source-note").textContent=legacyImportNote
+  ?"本次分析聚焦 2026.5.1—6.4 的六款车用户讨论，重点对比智己L6与小米SU7、Model 3、蔚来ET5T、蔚来ET5、极氪007，看看哪些卖点真正被认可、哪些问题正在拖累口碑。"
+  :sourceNote;
  renderSemanticResult();
  const models=dataModelOptions();if(dataModelFilter!=="all"&&!models.includes(dataModelFilter))dataModelFilter="all";
  ensureModelIdentities(models);
@@ -1457,7 +1548,7 @@ function renderVertical(){
  renderVerticalTrend(modelItems.filter(x=>x.competitor===comp),modelPeriods);
  renderPeriodPicker(modelPeriods,activePeriod);
  const matrix=enforceVerticalMatrixPeriod(competitors.map(c=>buildCompetitionMatrixRow(modelItems,c,activePeriod,modelPeriods)).filter(x=>x.current),activePeriod);
- document.querySelector("#vertical-ranking-table").innerHTML=`<thead><tr><th>竞品车型</th><th><button class="th-period" id="period-toggle" title="选择数据抓取周期">当前周期：${activePeriod||"—"}</button></th><th>正向排名</th><th>较上一周期</th><th>反向排名</th><th>较上一周期</th><th>完整趋势</th><th>对比占比</th><th>状态</th></tr></thead><tbody>${matrix.length?matrix.sort((a,b)=>(a.current.positiveRank||999)-(b.current.positiveRank||999)).map(x=>`<tr><td><b>${x.competitor}</b><small>${x.current.platform}</small></td><td><b>${activePeriod}</b><small>${x.prev?`对比 ${x.prev.period}`:"无上一周期记录"}</small></td><td>${x.current.positiveRank||"—"}</td><td>${rankDelta(x.posDelta)}</td><td>${x.current.negativeRank||"—"}</td><td>${rankDelta(x.negDelta)}</td><td><button class="trend-open" data-competitor="${escapeAttr(x.competitor)}" title="查看完整周期趋势">${miniTrend(x.rows)}</button></td><td>${formatShare(x.current.share)}</td><td><span class="tag ${rankStatus(x.current)==="高关注高对比"?"risk":rankStatus(x.current)==="正向关注强"?"asset":""}">${rankStatus(x.current)}</span></td></tr>`).join(""):`<tr><td colspan="9"><p class="empty">当前周期 ${activePeriod||"—"} 没有该本品的竞品关系记录。请切换周期或检查原始排名文件。</p></td></tr>`}</tbody>`;
+ document.querySelector("#vertical-ranking-table").innerHTML=`<thead><tr><th>竞品车型</th><th><button class="th-period" id="period-toggle" title="选择数据抓取周期">当前周期：${activePeriod||"—"}</button></th><th>正向排名</th><th>较上一周期</th><th>反向排名</th><th>较上一周期</th><th>完整趋势</th><th>对比占比</th><th>状态</th></tr></thead><tbody>${matrix.length?matrix.sort((a,b)=>(a.current.positiveRank||999)-(b.current.positiveRank||999)).map(x=>`<tr><td><b>${x.competitor}</b><small>${x.current.platform}</small></td><td><b>${activePeriod}</b><small>${x.prev?`对比 ${x.prev.period}`:"无上一周期记录"}</small></td><td title="同一来源、同一周期、同一本品车型内的相同名次会标记为并列">${rankDisplay(x,"positiveRank",matrix)}</td><td>${rankDelta(x.posDelta)}</td><td title="同一来源、同一周期、同一本品车型内的相同名次会标记为并列">${rankDisplay(x,"negativeRank",matrix)}</td><td>${rankDelta(x.negDelta)}</td><td><button class="trend-open" data-competitor="${escapeAttr(x.competitor)}" title="查看完整周期趋势">${miniTrend(x.rows)}</button></td><td>${formatShare(x.current.share)}</td><td><span class="tag ${rankStatus(x.current)==="高关注高对比"?"risk":rankStatus(x.current)==="正向关注强"?"asset":""}">${rankStatus(x.current)}</span></td></tr>`).join(""):`<tr><td colspan="9"><p class="empty">当前周期 ${activePeriod||"—"} 没有该本品的竞品关系记录。请切换周期或检查原始排名文件。</p></td></tr>`}</tbody>`;
  document.querySelector("#period-toggle").onclick=()=>{verticalPeriodPickerOpen=!verticalPeriodPickerOpen;renderVertical()};
  document.querySelectorAll(".trend-open").forEach(b=>b.onclick=()=>openTrendDialog(modelItems,b.dataset.competitor,model,modelPeriods));
  const learnButton=document.querySelector("#vertical-ai-learn");
@@ -1507,6 +1598,16 @@ function rankDelta(v){
  if(v>0)return`<span class="delta up">↑${v}</span>`;
  if(v<0)return`<span class="delta down">↓${Math.abs(v)}</span>`;
  return"<span class='delta flat'>持平</span>";
+}
+function rankDisplay(item,field,matrix=[]){
+ const current=item?.current||item,rank=Number(current?.[field]);
+ if(!Number.isFinite(rank)||rank<=0)return"—";
+ const sourceKey=current.source||current.platform||"";
+ const ties=matrix.filter(entry=>{
+  const peer=entry.current||entry;
+  return peer&&peer.period===current.period&&peer.ownModel===current.ownModel&&peer.platform===current.platform&&(peer.source||peer.platform||"")===sourceKey&&Number(peer[field])===rank;
+ }).length;
+ return ties>1?`并列第 ${rank}`:`第 ${rank}`;
 }
 function miniTrend(rows){
  const data=[...rows].sort(sortVerticalItem).slice(-6),maxRank=Math.max(10,...data.flatMap(x=>[x.positiveRank||0,x.negativeRank||0])),w=120,h=34,pad=4;
@@ -1920,8 +2021,8 @@ function contentAssetStrategyContext(){
  const modelRows=assetSlots.map(s=>{const model=assetModel(s.key),its=items.filter(x=>x.assetSlot===s.key||x.assetModel===model||x.model===model),cats=aggregateVideos(its,"category"),blockers={};its.forEach(x=>(x.mmnLabels?.blockers||[]).forEach(b=>blockers[b]=(blockers[b]||0)+1));return{role:s.label,model,count:its.length,topCategory:cats[0]?.key||"暂无",topBlockers:Object.entries(blockers).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([key,count])=>({key,count}))}});
  const tasks=assetPlatforms.flatMap(p=>assetSlots.map(s=>{const f=videoState.files?.[p.key]?.[s.key];return f?{platform:p.name,role:s.label,model:assetModel(s.key),status:f.taskStatus||"synced",query:f.crawlTask?.query||"",count:+f.count||f.items?.length||0,source:f.source||"",exportedAt:f.exportedAt||f.syncedAt||f.crawlTask?.startedAt||""}:null}).filter(Boolean));
  const topContents=[...items].sort((a,b)=>(b.engagement||0)-(a.engagement||0)).slice(0,18).map(x=>({platform:x.platform,role:x.assetRole,model:x.assetModel||x.model,title:x.title,author:x.author,category:x.category,blockers:x.mmnLabels?.blockers||[],actions:x.mmnLabels?.actions||[],engagement:Math.round(x.engagement||0),url:x.url||""}));
- const competitors=assetSlots.filter(s=>s.key!=="own").map(s=>assetModel(s.key)).filter(Boolean);
- const model=assetModel("own")||state.config.model,upstream=upstreamStrategySignals(model,competitors);
+ const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+ const model=state.config.model,upstream=upstreamStrategySignals(model,competitors);
  return{
   drillType:"content_asset_strategy",
   drillKey:model,
@@ -1961,6 +2062,7 @@ function renderContentMmnStrategy(){
 }
 async function runContentMmnStrategy(silent=false){
  const ctx=contentAssetStrategyContext();
+ const requestedModel=ctx.project.model;
  contentStrategyState={loading:true,result:{text:localContentStrategyDraft(ctx),parts:{rules:localContentStrategyDraft(ctx)},context:ctx},error:""};
  renderContentMmnStrategy();
  try{
@@ -1969,9 +2071,11 @@ async function runContentMmnStrategy(silent=false){
   clearTimeout(timer);
   const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
   if(!res.ok||!data.ok)throw new Error(data.error||"MMN策略生成失败");
+  if(state.config.model!==requestedModel)return;
   contentStrategyState={loading:false,result:{...data,context:ctx},error:""};
   if(!silent)toast("MMN已完成内容资产营销策略交叉验证");
  }catch(err){
+  if(state.config.model!==requestedModel)return;
   contentStrategyState={loading:false,result:{text:localContentStrategyDraft(ctx),parts:{rules:localContentStrategyDraft(ctx)},context:ctx},error:err.name==="AbortError"?"模型生成超过90秒":err.message};
   if(!silent)toast("MMN策略暂用本地规则兜底");
  }
@@ -2043,6 +2147,7 @@ function renderContentPptPlanner(){
 }
 async function runContentPptPlan(){
  const ctx=strategyPptContext();
+ const requestedModel=ctx.project.model;
  contentPptState={loading:true,result:{text:localStrategyPptBrief(ctx),parts:{rules:localStrategyPptBrief(ctx)},context:ctx},error:""};
  renderContentPptPlanner();
  try{
@@ -2051,9 +2156,11 @@ async function runContentPptPlan(){
   clearTimeout(timer);
   const data=await res.json().catch(()=>({ok:false,error:"模型接口返回格式异常"}));
   if(!res.ok||!data.ok)throw new Error(data.error||"MMN策略PPT方案生成失败");
+  if(state.config.model!==requestedModel)return;
   contentPptState={loading:false,result:{...data,context:ctx,text:publicMmnText(data.text)},error:""};
   toast("MMN已完成策略PPT方案交叉验证");
  }catch(err){
+  if(state.config.model!==requestedModel)return;
   contentPptState={loading:false,result:{text:localStrategyPptBrief(ctx),parts:{rules:localStrategyPptBrief(ctx)},context:ctx},error:err.name==="AbortError"?"模型生成超过90秒":err.message};
   toast("MMN策略PPT方案暂用本地规则兜底");
  }
@@ -2347,7 +2454,7 @@ function renderTopicPlanPanel(plan){
  const creatorHtml=creators.map(x=>`<tr><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.primaryCreatorType)}</td><td>${escapeHtml(x.backupCreatorType)}</td><td>${escapeHtml(x.brief)}</td></tr>`).join("");
  const scheduleHtml=schedule.map(x=>`<tr><td>${escapeHtml(x.week)}</td><td>${escapeHtml(x.phase)}</td><td>${escapeHtml(x.topic)}</td><td>${escapeHtml(x.format)}</td><td>${escapeHtml(x.kpi)}</td></tr>`).join("");
  const modelNarrative=plan.modelNarrative?`<details class="topic-model-narrative"><summary>${escapeHtml(plan.modelLabel||"MMN深度策略结论")}</summary><div>${markdownish(plan.modelNarrative)}</div></details>`:"";
- return`<section class="topic-plan-panel"><div class="topic-plan-head"><div><b>车型传播选题规划器</b><span>${escapeHtml(plan.taxonomyVersion)} · ${escapeHtml(summary.model||"当前车型")} · ${escapeHtml(summary.launchStage||"上市阶段")} · ${escapeHtml(summary.budgetTier||"预算层级")}</span></div><em>${escapeHtml(plan.modelLabel||plan.engine||"topic_planning_engine")}</em></div><p class="topic-plan-conclusion">${escapeHtml(plan.strategyConclusion||"")}</p>${modelNarrative}<div class="topic-phase-grid">${phaseHtml}</div><div class="topic-card-grid">${topicCards}</div><div class="topic-table-wrap"><table><thead><tr><th>选题</th><th>主达人</th><th>备选达人</th><th>Brief要点</th></tr></thead><tbody>${creatorHtml}</tbody></table></div><div class="topic-table-wrap"><table><thead><tr><th>周期</th><th>阶段</th><th>选题</th><th>形式</th><th>KPI</th></tr></thead><tbody>${scheduleHtml}</tbody></table></div></section>`;
+ return`<section class="topic-plan-panel"><div class="topic-plan-head"><div><b>车型传播选题规划器</b><span>${escapeHtml(plan.taxonomyVersion)} · ${escapeHtml(summary.model||"当前车型")} · ${escapeHtml(summary.launchStage||"传播阶段")} · ${escapeHtml(summary.communicationPlatform||"传播平台")} · ${escapeHtml(summary.budgetTier||"预算层级")}</span></div><em>${escapeHtml(plan.modelLabel||plan.engine||"topic_planning_engine")}</em></div><p class="topic-plan-conclusion">${escapeHtml(plan.strategyConclusion||"")}</p>${modelNarrative}<div class="topic-phase-grid">${phaseHtml}</div><div class="topic-card-grid">${topicCards}</div><div class="topic-table-wrap"><table><thead><tr><th>选题</th><th>主达人</th><th>备选达人</th><th>Brief要点</th></tr></thead><tbody>${creatorHtml}</tbody></table></div><div class="topic-table-wrap"><table><thead><tr><th>周期</th><th>阶段</th><th>选题</th><th>形式</th><th>KPI</th></tr></thead><tbody>${scheduleHtml}</tbody></table></div></section>`;
 }
 function immediateStrategyDraft(query,references,mode){
  const titles=references.slice(0,3).map(x=>x.title).filter(Boolean).join("、")||"当前知识库";
@@ -2917,6 +3024,8 @@ const modelJudgmentForm=document.querySelector("#model-judgment-form");if(modelJ
 const accountButton=document.querySelector("#account-button");if(accountButton)accountButton.onclick=()=>document.querySelector("#login-dialog").showModal();
 document.querySelector("#login-submit").onclick=async e=>{e.preventDefault();const f=document.querySelector("#login-form");try{const data=await api("/api/login",{method:"POST",body:JSON.stringify({org:f.elements.org.value,name:f.elements.name.value,email:f.elements.email.value})});saveSession(data.session);document.querySelector("#login-dialog").close();await Promise.all([loadServerLearnings(),loadWorkspace()]);toast(`已进入 ${data.session.org}`)}catch(err){toast(`登录失败：${err.message}`)}};
 document.querySelector("#trend-dialog-close").onclick=()=>document.querySelector("#trend-dialog").close();
+document.querySelector("#asset-benchmark-dialog-close").onclick=()=>document.querySelector("#asset-benchmark-dialog").close();
+document.querySelector("#emotion-label-dialog-close").onclick=()=>document.querySelector("#emotion-label-dialog").close();
 document.querySelector("#data-drill-close").onclick=()=>document.querySelector("#data-drill-dialog").close();
 const semanticAnalyzeButton=document.querySelector("#semantic-analyze");
 if(semanticAnalyzeButton)semanticAnalyzeButton.onclick=analyzeSemanticText;

@@ -29,7 +29,8 @@ fi
 
 echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check app.js
-python3 -m py_compile server.py
+"$NODE_BIN" --check bf-factory.js
+python3 -m py_compile server.py bf_factory/*.py
 
 echo "MMN release gate:研发档案检查"
 if rg -n "AI|ChatGPT|Codex|大模型辅助|AI生成|智能编写" "docs/研发档案"; then

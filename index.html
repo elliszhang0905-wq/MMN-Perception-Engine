@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-topic-planning-5">
+  <link rel="stylesheet" href="style.css?v=beta-1.01-data-platform-filter-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -42,7 +42,11 @@
       <div class="nav-section primary-nav">
         <span>核心工作流</span>
         <button class="active" data-page="dashboard">决策驾驶舱</button>
-        <button data-page="contentstrategy">MMN策略输出</button>
+        <details class="nav-subsection" open>
+          <summary>MMN策略输出</summary>
+          <button data-page="contentstrategy">策略输出总览</button>
+          <button data-page="bffactory" data-bf-tab="new">BF工厂</button>
+        </details>
         <button data-page="strategykb">RAG策略台</button>
         <button data-page="videos">内容资产</button>
       </div>
@@ -55,6 +59,7 @@
       </details>
       <details class="nav-section">
         <summary>资产沉淀</summary>
+        <button data-page="bflibrary">BF资产库</button>
         <button data-page="knowhow">打法知识库</button>
         <button data-page="learning">人工结论</button>
       </details>
@@ -110,27 +115,40 @@
         <div><span>03</span><b>看证据</b><small>RAG依据与人工结论</small></div>
         <div><span>04</span><b>出策略</b><small>初版输出与后台复核</small></div>
       </div>
-      <div class="kpis">
-        <article class="kpi"><span>口碑健康 NSR</span><strong id="kpi-nsr">—</strong><small id="kpi-nsr-note"></small></article>
-        <article class="kpi"><span>目标人群穿透 IPS</span><strong id="kpi-ips">—</strong><small>目标身份有效评论占比</small></article>
-        <article class="kpi"><span>购买意向指数</span><strong id="kpi-intent">—</strong><small>越高代表声量越接近购买</small></article>
-        <article class="kpi danger"><span>购买阻力风险</span><strong id="kpi-risk">—</strong><small id="kpi-risk-note"></small></article>
+      <div class="kpis dashboard-kpis">
+        <article class="kpi">
+          <span class="metric-label">口碑健康 NSR <button type="button" class="metric-help" aria-label="了解口碑健康 NSR" aria-describedby="tip-kpi-nsr">?</button><span class="metric-tooltip" id="tip-kpi-nsr" role="tooltip">看品牌口碑基本盘。高位说明正向认知可支撑传播放大；低位说明购买疑虑正在拖累转化，应先修复核心阻力。</span></span>
+          <strong id="kpi-nsr">—</strong><small id="kpi-nsr-note"></small>
+        </article>
+        <article class="kpi">
+          <span class="metric-label">目标人群穿透 IPS <button type="button" class="metric-help" aria-label="了解目标人群穿透 IPS" aria-describedby="tip-kpi-ips">?</button><span class="metric-tooltip" id="tip-kpi-ips" role="tooltip">看传播是否真正打进目标购车人群。高位可延续当前内容与渠道；低位说明声量热但人群不准，应调整达人、场景和投放定向。</span></span>
+          <strong id="kpi-ips">—</strong><small>目标身份有效评论占比</small>
+        </article>
+        <article class="kpi">
+          <span class="metric-label">购买意向指数 <button type="button" class="metric-help" aria-label="了解购买意向指数" aria-describedby="tip-kpi-intent">?</button><span class="metric-tooltip" id="tip-kpi-intent" role="tooltip">看用户离下单还有多远。高位说明已进入对比、试驾或购买阶段，应强化权益与转化承接；低位应先做价值教育和场景种草。</span></span>
+          <strong id="kpi-intent">—</strong><small>越高代表声量越接近购买</small>
+        </article>
+        <article class="kpi danger dashboard-kpi-risk" hidden>
+          <span class="metric-label">购买阻力风险 <button type="button" class="metric-help" aria-label="了解购买阻力风险" aria-describedby="tip-kpi-risk">?</button><span class="metric-tooltip" id="tip-kpi-risk" role="tooltip">看哪些负面问题最可能阻碍下单。高于阈值时，先集中内容与公关资源解决高频疑虑；风险受控后，再放大优势卖点和转化内容。</span></span>
+          <strong id="kpi-risk">—</strong><small id="kpi-risk-note"></small>
+        </article>
       </div>
       <div class="grid two dashboard-workbench">
-        <article class="panel">
-          <div class="panel-title"><div><span>声量数据中心</span><h2>导入数据结构预览</h2></div><em id="dashboard-data-note">—</em></div>
+        <article class="panel dashboard-data-panel">
+          <div class="panel-title dashboard-data-title"><div class="dashboard-data-title-copy"><span>声量数据中心</span><h2>平台情绪标签四象限</h2></div><div class="dashboard-data-head"><div id="dashboard-platform-control"></div><em id="dashboard-data-note">—</em></div></div>
+          <div id="dashboard-data-context" class="dashboard-data-context" aria-label="当前分析数据口径"></div>
           <div class="dashboard-data-summary" id="dashboard-data-summary"></div>
-          <div class="table-wrap mini"><table id="dashboard-data-table"></table></div>
+          <div id="dashboard-emotion-quadrant" class="emotion-quadrant"></div>
         </article>
-        <article class="panel">
+        <article class="panel dashboard-cognition-panel" hidden>
           <div class="panel-title"><div><span>认知赛道诊断</span><h2>资产、负债与机会排序</h2></div><em>Top 8</em></div>
           <div class="table-wrap mini"><table id="dashboard-cognition-table"></table></div>
         </article>
       </div>
-      <div class="grid two">
+      <div class="grid two dashboard-insight-grid">
         <article class="panel">
           <div class="panel-title"><div><span>认知格局</span><h2>资产与负债</h2></div><em>正向 / 负向</em></div>
-          <div id="asset-chart" class="bar-chart"></div>
+          <div id="asset-chart" class="asset-benchmark-chart"></div>
         </article>
         <article class="panel">
           <div class="panel-title"><div><span>决策建议</span><h2>本周期应优先做什么</h2></div></div>
@@ -143,12 +161,19 @@
           <em>MMN深度策略 + topic_planning_engine</em>
         </div>
         <div class="topic-planner-controls">
-          <label>上市阶段
+          <label>传播阶段
             <select id="dashboard-topic-stage">
               <option>上市前期</option>
               <option selected>上市中</option>
               <option>上市后期</option>
               <option>销售期</option>
+            </select>
+          </label>
+          <label>传播平台
+            <select id="dashboard-topic-platform">
+              <option selected>抖音/视频号</option>
+              <option>小红书</option>
+              <option>B站</option>
             </select>
           </label>
           <label>传播目标
@@ -158,7 +183,7 @@
         </div>
         <div id="dashboard-topic-plan" class="dashboard-topic-plan"></div>
       </article>
-      <article class="panel">
+      <article class="panel dashboard-opportunity-panel">
         <div class="panel-title"><div><span>机会地图</span><h2>认知赛道优先级</h2></div><em>横轴：竞品领先度 · 纵轴：购买影响</em></div>
         <div class="map-toolbar">
           <div id="map-filters" class="segmented">
@@ -171,7 +196,7 @@
         </div>
         <div id="opportunity-map" class="opportunity-map"></div>
         <div class="map-summary" id="map-summary"></div>
-        <div class="table-wrap mini"><table id="opportunity-table"></table></div>
+        <div class="table-wrap mini opportunity-detail-table" hidden><table id="opportunity-table"></table></div>
       </article>
       <article class="panel model-judgment-panel compact-judgment">
         <div class="panel-title">
@@ -283,7 +308,7 @@
         </div>
         <div class="search"><input id="vertical-search" placeholder="筛选车型 / 竞品 / 平台 / 文件"></div>
       </div>
-      <div class="notice" id="vertical-source-note">支持汽车之家、懂车帝正反向排名 Excel。导入后可查看本品和竞品竞争格局，以及时间轴趋势变化。</div>
+      <div class="notice" id="vertical-source-note" hidden>支持汽车之家、懂车帝正反向排名 Excel。导入后可查看本品和竞品竞争格局，以及时间轴趋势变化。</div>
       <div id="vertical-ai-learning" class="qwen-result"></div>
       <div class="vertical-controls">
         <div class="field"><label>数据来源</label><select id="vertical-platform"></select></div>
@@ -480,6 +505,144 @@
         <div class="panel-title"><div><span>MMN策略PPT输出</span><h2>把内容资产转成车型策略方案</h2></div><em id="content-ppt-status">MMN交叉验证</em></div>
         <div id="content-ppt-planner" class="content-ppt-planner"></div>
       </article>
+    </section>
+
+    <section class="page bf-page" id="bffactory">
+      <div class="bf-hero">
+        <div>
+          <p class="eyebrow">BF FACTORY · COMMERCIAL CONTENT SYSTEM</p>
+          <h2>品牌商业化内容 Brief 生成与训练系统</h2>
+          <p>把品牌需求、车型诊断、历史优质BF与执行规范，转成达人和商单团队可以直接执行的内容任务。</p>
+        </div>
+        <div class="bf-loop"><span>演示</span><i>→</i><span>成交</span><i>→</i><span>交付</span><i>→</i><span>沉淀</span></div>
+      </div>
+      <article class="bf-open-notice">
+        <b>三类BF只是首批种子范式，不是封闭模板。</b>
+        <span>MMN会根据项目阶段、传播目标、达人、平台、内容方向和历史优质样本，理解新型或混合型需求，动态整理章节并学习最终版本。</span>
+      </article>
+      <div class="bf-subnav" aria-label="BF工厂子菜单">
+        <button class="active" data-bf-tab="new">新建BF</button>
+        <button data-bf-tab="creator">达人BF生成器</button>
+        <button data-bf-tab="store">探店BF生成器</button>
+        <button data-bf-tab="cloud">云评/口播BF生成器</button>
+        <button data-bf-tab="photo">高质感摄影BF生成器</button>
+        <button data-bf-tab="script">脚本框架生成器</button>
+        <button data-bf-tab="checklist">拍摄执行清单</button>
+        <button data-bf-tab="export">BF导出</button>
+      </div>
+      <div class="bf-workbench">
+        <article class="panel bf-generator-panel">
+          <div class="panel-title"><div><span>NEW BRIEF</span><h2>先判断，再生成可执行BF</h2></div><em id="bf-generation-status">等待生成条件</em></div>
+          <div class="bf-project-strip">
+            <label>项目归属<select id="bf-project"></select></label>
+            <label>客户隔离标识<input id="bf-client-key" value="MMN-DEMO"></label>
+            <button type="button" class="ghost" id="bf-refresh-projects">刷新项目</button>
+          </div>
+          <div class="bf-seed-grid">
+            <button type="button" data-bf-profile="AUTO" class="active"><b>智能识别 / 自定义</b><span>适合新型和混合型Brief</span></button>
+            <button type="button" data-bf-profile="STORE_VISIT"><b>探店种子范式</b><span>静态体验、到店CTA、用户第一视角</span></button>
+            <button type="button" data-bf-profile="CLOUD_REVIEW"><b>云评/口播种子范式</b><span>核心论点、事实支撑、话题矩阵</span></button>
+            <button type="button" data-bf-profile="HIGH_END_PHOTOGRAPHY"><b>摄影种子范式</b><span>视觉调性、镜头清单、车务执行</span></button>
+          </div>
+          <form id="bf-generation-form">
+            <div class="form-grid bf-form-grid">
+              <div class="field"><label>品牌</label><input name="brand" id="bf-brand" required></div>
+              <div class="field"><label>车型</label><input name="model" id="bf-model" required></div>
+              <div class="field"><label>核心竞品</label><input name="competitors" placeholder="用顿号分隔"></div>
+              <div class="field"><label>项目阶段</label><select name="projectStage"><option>上市期</option><option selected>车展期</option><option>展车期</option><option>平销期</option><option>改款期</option><option>促销期</option><option>竞品防守期</option><option>口碑强化期</option></select></div>
+              <div class="field"><label>传播目标</label><input name="communicationGoals" placeholder="种草、认知建立、竞品攻防"></div>
+              <div class="field"><label>内容平台</label><select name="platform"><option selected>抖音</option><option>小红书</option><option>B站</option><option>微信视频号</option><option>多平台</option></select></div>
+              <div class="field"><label>达人类型</label><input name="creatorTypes" placeholder="汽车垂类达人、女性生活方式"></div>
+              <div class="field"><label>内容形式</label><input name="contentForms" placeholder="短视频、口播、摄影、图文"></div>
+              <div class="field"><label>预算区间（可选）</label><input name="budget" placeholder="例如 20-50万"></div>
+              <div class="field"><label>发布节奏（可选）</label><input name="publishingSchedule" placeholder="例如 车展首日-7天"></div>
+            </div>
+            <div class="field"><label>内容方向与新型需求</label><textarea id="bf-content-directions" name="contentDirections" rows="4" placeholder="可以输入任意新型或混合型需求，例如：车展期女性第一视角体验 + 竞品同场景对比 + 动态路跑素材采集 + 评论区议题引导"></textarea></div>
+            <div class="field"><label>特殊要求</label><textarea name="specialRequirements" rows="3" placeholder="甲方口径、禁用内容、素材要求、达人分工或任何无法归入固定模板的要求"></textarea></div>
+            <div class="bf-switch-grid">
+              <label><input type="checkbox" name="isPriceAllowed">允许聊价格</label>
+              <label><input type="checkbox" name="isAdasAllowed">允许聊智驾</label>
+              <label><input type="checkbox" name="isDynamicDrivingAllowed">允许动态试驾</label>
+              <label><input type="checkbox" name="needsStoreCta">需要CTA到店</label>
+              <label><input type="checkbox" name="needsExecutionChecklist" checked>生成拍摄执行清单</label>
+              <label><input type="checkbox" name="needsMaterialLinks">需要素材链接</label>
+              <label><input type="checkbox" name="redactBeforeExternal" checked>外部模型调用前脱敏</label>
+            </div>
+            <button type="submit" class="primary bf-generate-button">生成MMN商业化内容BF</button>
+          </form>
+        </article>
+        <div class="bf-output-column">
+          <article class="panel bf-strategy-panel">
+            <div class="panel-title"><div><span>INTERNAL STRATEGY</span><h2>生成前内部策略判断</h2></div><em>不默认导出给达人</em></div>
+            <div id="bf-internal-strategy" class="bf-empty">生成后显示传播问题、核心打法、竞品压力、达人角色、风险和执行必进项。</div>
+          </article>
+          <article class="panel bf-editor-panel">
+            <div class="panel-title"><div><span>EDITABLE BRIEF</span><h2>在线编辑与版本回流</h2></div><em id="bf-editor-version">未生成</em></div>
+            <div id="bf-section-plan" class="bf-section-plan"></div>
+            <details class="bf-correction-panel">
+              <summary>人工校正关键业务字段</summary>
+              <p>修改会写入新版本并标记为人工来源；正文仍可在下方继续编辑。</p>
+              <div class="bf-correction-grid">
+                <label>BF类型<input id="bf-correct-type" placeholder="允许新型、混合型或自定义BF"></label>
+                <label>自动摘要<textarea id="bf-correct-summary" rows="3"></textarea></label>
+                <label>核心策略判断<textarea id="bf-correct-strategy" rows="3"></textarea></label>
+                <label>内容方向<textarea id="bf-correct-content" rows="3" placeholder="用顿号或换行分隔"></textarea></label>
+                <label>风险提示<textarea id="bf-correct-risk" rows="3" placeholder="用顿号或换行分隔"></textarea></label>
+                <label>标签<textarea id="bf-correct-tags" rows="3" placeholder="用顿号或换行分隔"></textarea></label>
+              </div>
+            </details>
+            <textarea id="bf-editor" rows="24" placeholder="生成后的可编辑BF将在这里出现"></textarea>
+            <div class="bf-editor-actions">
+              <select id="bf-sample-grade" aria-label="BF样本等级"><option value="NORMAL">普通样本</option><option value="QUALITY">优质样本</option><option value="NEGATIVE">反例样本</option><option value="DISABLED">禁用样本</option></select>
+              <button class="ghost" id="bf-save-draft" type="button">保存草稿</button>
+              <button class="primary" id="bf-finalize" type="button">保存最终版并回流</button>
+              <button class="ghost" id="bf-export-word" type="button">导出Word</button>
+            </div>
+          </article>
+          <article class="panel bf-evidence-panel">
+            <div class="panel-title"><div><span>EVIDENCE</span><h2>历史BF与字段来源</h2></div><em>优质优先 · 反例只做风险</em></div>
+            <div id="bf-evidence-list" class="bf-evidence-list"><p class="empty">暂无本次检索证据。</p></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="page bf-page" id="bflibrary">
+      <div class="bf-hero compact">
+        <div><p class="eyebrow">BF ASSET LIBRARY</p><h2>真实项目BF资产沉淀</h2><p>原始文件、结构化样本、优质范式、反例风险和甲方执行口径统一管理。</p></div>
+      </div>
+      <div class="bf-subnav" aria-label="BF资产库子菜单">
+        <button class="active" data-bf-library-view="raw">原始BF文件</button>
+        <button data-bf-library-view="structured">结构化BF样本</button>
+        <button data-bf-library-view="quality">优质BF样本</button>
+        <button data-bf-library-view="negative">反例/禁用样本</button>
+        <button data-bf-library-view="claim">甲方口径库</button>
+        <button data-bf-library-view="shooting">拍摄规范库</button>
+        <button data-bf-library-view="vehicle">车务执行规范库</button>
+        <button data-bf-library-view="risk">表达红线库</button>
+        <button data-bf-library-view="material">素材链接库</button>
+      </div>
+      <div class="bf-library-layout">
+        <article class="panel bf-upload-panel">
+          <div class="panel-title"><div><span>PROJECT-SCOPED UPLOAD</span><h2>上传原始BF</h2></div><em>默认脱敏后调用外部模型</em></div>
+          <label class="field">项目归属<select id="bf-library-project"></select></label>
+          <div class="bf-dropzone" id="bf-dropzone">
+            <b>拖拽或选择BF文件</b>
+            <span>Word / PPT / PDF / 图片 / Excel / CSV / TXT / MD</span>
+            <button type="button" class="primary file-button" data-file-target="bf-document-file">选择文件</button>
+            <input class="file-input-hidden" id="bf-document-file" type="file" accept=".doc,.docx,.ppt,.pptx,.pdf,.jpg,.jpeg,.png,.webp,.xls,.xlsx,.csv,.txt,.md">
+          </div>
+          <div id="bf-upload-status" class="notice">上传后自动解析、识别BF范式、抽取字段并生成标签。</div>
+        </article>
+        <article class="panel bf-library-panel">
+          <div class="panel-title"><div><span>ASSET VIEW</span><h2 id="bf-library-title">原始BF文件</h2></div><em id="bf-library-count">0项</em></div>
+          <div class="bf-library-filters">
+            <input id="bf-library-search" placeholder="搜索BF名称、车型、类型或标签">
+            <select id="bf-library-grade"><option value="">全部等级</option><option>QUALITY</option><option>NORMAL</option><option>NEGATIVE</option><option>DISABLED</option></select>
+          </div>
+          <div id="bf-library-list" class="bf-library-list"><p class="empty">选择项目后加载BF资产。</p></div>
+        </article>
+      </div>
     </section>
 
     <section class="page" id="actions">
@@ -833,6 +996,14 @@
     <div class="dialog-head"><h2 id="trend-dialog-title">竞争趋势详情</h2><button id="trend-dialog-close">×</button></div>
     <div id="trend-dialog-body"></div>
   </dialog>
+  <dialog id="asset-benchmark-dialog" class="wide-dialog">
+    <div class="dialog-head"><h2 id="asset-benchmark-dialog-title">标签竞品对比</h2><button id="asset-benchmark-dialog-close" aria-label="关闭标签竞品对比">×</button></div>
+    <div id="asset-benchmark-dialog-body"></div>
+  </dialog>
+  <dialog id="emotion-label-dialog" class="wide-dialog">
+    <div class="dialog-head"><h2 id="emotion-label-dialog-title">情绪标签竞品表现</h2><button id="emotion-label-dialog-close" aria-label="关闭情绪标签竞品表现">×</button></div>
+    <div id="emotion-label-dialog-body"></div>
+  </dialog>
   <dialog id="data-drill-dialog" class="wide-dialog">
     <div class="dialog-head"><h2 id="data-drill-title">声量拆解详情</h2><button id="data-drill-close">×</button></div>
     <div id="data-drill-body"></div>
@@ -861,6 +1032,7 @@
   </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-topic-planning-5"></script>
+  <script src="app.js?v=beta-1.01-data-platform-filter-1"></script>
+  <script src="bf-factory.js?v=beta-1.01-bf-p0-1"></script>
 </body>
 </html>

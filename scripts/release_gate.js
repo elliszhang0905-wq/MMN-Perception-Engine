@@ -41,10 +41,106 @@ async function main() {
   const dashboardText = await page.locator(".dashboard-import").innerText();
   add("dashboard does not expose file format wording", !/Excel|CSV|模板/.test(dashboardText), dashboardText);
 
-  const dataTableRows = await page.locator("#dashboard-data-table tbody tr").count().catch(() => 0);
+  const emotionQuadrants = await page.locator("#dashboard-emotion-quadrant .emotion-quadrant-cell").count().catch(() => 0);
   const cognitionRows = await page.locator("#dashboard-cognition-table tbody tr").count().catch(() => 0);
-  add("dashboard data panel renders", dataTableRows > 0, String(dataTableRows));
+  add("dashboard emotion quadrant renders", emotionQuadrants === 4, String(emotionQuadrants));
   add("dashboard cognition panel renders", cognitionRows > 0, String(cognitionRows));
+
+  const dataPanelLayout = await page.evaluate(() => {
+    const workbench = document.querySelector(".dashboard-workbench")?.getBoundingClientRect();
+    const panel = document.querySelector(".dashboard-data-panel")?.getBoundingClientRect();
+    return { workbenchWidth: workbench?.width || 0, panelWidth: panel?.width || 0 };
+  });
+  add("dashboard data preview spans the full workbench width", dataPanelLayout.workbenchWidth > 0 && dataPanelLayout.panelWidth / dataPanelLayout.workbenchWidth > .98, JSON.stringify(dataPanelLayout));
+
+  const dataContext = await page.evaluate(() => {
+    const title=document.querySelector(".dashboard-data-title-copy h2"),rect=title?.getBoundingClientRect();
+    return {
+      title:title?.textContent.trim()||"",titleHeight:rect?.height||0,fontSize:parseFloat(getComputedStyle(title).fontSize)||0,
+      own:document.querySelector("#dashboard-data-context .own-model b")?.textContent.trim()||"",
+      references:document.querySelector("#dashboard-data-context .reference-models b")?.textContent.trim()||"",
+      time:document.querySelector("#dashboard-data-context .time-dimension b")?.textContent.trim()||"",
+      dimension:document.querySelector("#dashboard-data-context .data-dimension b")?.textContent.trim()||"",
+      labels:document.querySelector("#dashboard-data-context .label-dimension b")?.textContent.trim()||""
+    };
+  });
+  add("dashboard data header is single-line and exposes analysis context", dataContext.titleHeight <= dataContext.fontSize * 1.7 && dataContext.own && dataContext.references && dataContext.time && dataContext.dimension.includes("情绪") && dataContext.labels && !/\.xlsx|\.csv/i.test(Object.values(dataContext).join(" ")), JSON.stringify(dataContext));
+
+  const platformFilter = page.locator("#dashboard-platform-filter");
+  const platformOptions = await platformFilter.locator("option").allTextContents().catch(() => []);
+  let platformFilterResult = { selected: "", quadrants: 0, minTags: 0, maxTags: 0 };
+  if (platformOptions.length > 1) {
+    await platformFilter.selectOption({ index: 1 });
+    platformFilterResult = await page.evaluate(() => {
+      const counts=[...document.querySelectorAll("#dashboard-emotion-quadrant .emotion-tag-list")].map(list => list.querySelectorAll(".emotion-tag").length);
+      return {selected:document.querySelector("#dashboard-platform-filter")?.value||"",quadrants:document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length,minTags:Math.min(...counts),maxTags:Math.max(...counts)};
+    });
+  }
+  add("dashboard platform keeps all four emotion quadrants populated", platformOptions.includes("全部平台") && platformFilterResult.selected && platformFilterResult.quadrants === 4 && platformFilterResult.minTags >= 1 && platformFilterResult.maxTags <= 3, JSON.stringify({ platformOptions, platformFilterResult }));
+
+  const firstEmotionTag = page.locator("#dashboard-emotion-quadrant .emotion-tag").first();
+  if (await firstEmotionTag.count()) await firstEmotionTag.click();
+  const emotionDialog = await page.evaluate(() => ({
+    open: document.querySelector("#emotion-label-dialog")?.open || false,
+    title: document.querySelector("#emotion-label-dialog-title")?.textContent.trim() || "",
+    hasTrack: document.querySelectorAll("#emotion-label-dialog .emotion-competitor-track").length > 0,
+    values: [...document.querySelectorAll("#emotion-label-dialog .emotion-competitor-row>strong")].map(node => node.textContent.trim()),
+    text: document.querySelector("#emotion-label-dialog-body")?.textContent.trim() || ""
+  }));
+  add("emotion label bubble only shows comparable percentages", emotionDialog.open && emotionDialog.hasTrack && emotionDialog.values.length > 0 && emotionDialog.values.every(value => /^\d+(?:\.\d+)?%$/.test(value)) && /所属赛道/.test(emotionDialog.text) && /百分点|pp|车型总声量/.test(emotionDialog.text), JSON.stringify(emotionDialog));
+  if (emotionDialog.open) await page.locator("#emotion-label-dialog-close").click();
+
+  const opportunityFilters = {};
+  for (const type of ["优先修复", "抢占空位", "持续放大"]) {
+    await page.locator(`#map-filters button[data-filter="${type}"]`).click();
+    opportunityFilters[type] = await page.locator("#opportunity-map .bubble").count();
+  }
+  await page.locator('#map-filters button[data-filter="all"]').click();
+  add("opportunity map keeps every strategy filter populated", Object.values(opportunityFilters).every(count => count > 0), JSON.stringify(opportunityFilters));
+
+  const assetVisualization = await page.evaluate(() => ({
+    rows: document.querySelectorAll("#asset-chart .asset-benchmark-row").length,
+    bars: document.querySelectorAll("#asset-chart .asset-benchmark-bar").length,
+    markers: document.querySelectorAll("#asset-chart .asset-benchmark-marker").length,
+    benchmarkLabels: [...document.querySelectorAll("#asset-chart .asset-benchmark-label small")].filter(node => /Benchmark/.test(node.textContent)).length,
+    legendColors: new Set([...document.querySelectorAll("#asset-chart .asset-benchmark-legend i")].map(node => node.className)).size,
+    cards: document.querySelectorAll("#asset-chart .asset-signal-card").length,
+    icons: document.querySelectorAll("#asset-chart svg").length,
+    firstRowText: document.querySelector("#asset-chart .asset-benchmark-row")?.textContent.trim() || ""
+  }));
+  add(
+    "asset and liability uses tricolor horizontal bars with benchmark",
+    assetVisualization.rows > 0 && assetVisualization.bars === assetVisualization.rows && assetVisualization.markers === assetVisualization.rows && assetVisualization.benchmarkLabels === assetVisualization.rows && assetVisualization.legendColors === 3 && assetVisualization.cards === 0 && assetVisualization.icons === 0 && /Benchmark/.test(assetVisualization.firstRowText),
+    JSON.stringify(assetVisualization)
+  );
+  await page.locator("#asset-chart .asset-benchmark-row").first().click();
+  const assetDialog = await page.evaluate(() => ({
+    open: document.querySelector("#asset-benchmark-dialog")?.open || false,
+    title: document.querySelector("#asset-benchmark-dialog-title")?.textContent.trim() || "",
+    rows: document.querySelectorAll("#asset-benchmark-dialog .asset-dialog-row").length,
+    ownRows: document.querySelectorAll("#asset-benchmark-dialog .asset-dialog-row.own").length,
+    competitorText: document.querySelector("#asset-benchmark-dialog-body")?.textContent.trim() || ""
+  }));
+  add(
+    "asset label opens own and competitor comparison bubble",
+    assetDialog.open && assetDialog.rows > 1 && assetDialog.ownRows === 1 && /本品/.test(assetDialog.competitorText) && /竞品/.test(assetDialog.competitorText),
+    JSON.stringify(assetDialog)
+  );
+  await page.locator("#asset-benchmark-dialog-close").click();
+
+  const metricHelp = await page.evaluate(() => Object.fromEntries(
+    ["nsr", "ips", "intent", "risk"].map(key => [key, document.querySelector(`#tip-kpi-${key}`)?.textContent.trim() || ""])
+  ));
+  const metricHelpText = Object.values(metricHelp).join(" ");
+  add(
+    "dashboard metric help uses marketing strategy language",
+    metricHelp.nsr.includes("传播放大") && metricHelp.nsr.includes("核心阻力") &&
+      metricHelp.ips.includes("达人") && metricHelp.ips.includes("投放定向") &&
+      metricHelp.intent.includes("试驾") && metricHelp.intent.includes("转化承接") &&
+      metricHelp.risk.includes("公关资源") && metricHelp.risk.includes("优势卖点") &&
+      !/加权声量|样本均值|权重计算/.test(metricHelpText),
+    JSON.stringify(metricHelp)
+  );
 
   const identityCheck = await page.evaluate(() => {
     const groups = brandModelGroups(["极氪009", "Zeekr 009", "ZEEKR 009", "Zeeker 009", "阿维塔06", "沃尔沃EX90", "乐道L60", "银河L6", "智己L6", "智己LS7"]);
@@ -71,6 +167,43 @@ async function main() {
   await page.locator('#nav button[data-page="strategykb"]').click();
   add("strategy knowledge page opens", await page.locator("#strategykb.page.active").count() === 1);
   add("strategy CTA labels use MMN", await page.locator("#run-rag-search").innerText().then(text => text.includes("MMN")).catch(() => false));
+
+  const bfNav = await page.locator('#nav button[data-page="bffactory"]').count();
+  const bfLibraryNav = await page.locator('#nav button[data-page="bflibrary"]').count();
+  add("BF factory and asset library have first-class navigation", bfNav === 1 && bfLibraryNav >= 1, JSON.stringify({ bfNav, bfLibraryNav }));
+  if (bfNav) {
+    await page.locator('#nav button[data-page="bffactory"]').first().click();
+  }
+  const bfSurface = await page.evaluate(() => ({
+    active: document.querySelector("#bffactory")?.classList.contains("active") || false,
+    seedCount: document.querySelectorAll("#bffactory [data-bf-profile]").length,
+    hasOpenNotice: /种子|举一反三|新型|混合型/.test(document.querySelector("#bffactory")?.textContent || ""),
+    hasCustomDirection: Boolean(document.querySelector("#bf-content-directions")),
+    hasEditor: Boolean(document.querySelector("#bf-editor")),
+  }));
+  add("BF factory is open-ended rather than a fixed three-template picker", bfSurface.active && bfSurface.seedCount >= 3 && bfSurface.hasOpenNotice && bfSurface.hasCustomDirection && bfSurface.hasEditor, JSON.stringify(bfSurface));
+
+  const bfCorrection = await page.evaluate(() => ({
+    active: Boolean(document.querySelector("#bffactory")),
+    type: Boolean(document.querySelector("#bf-correct-type")),
+    summary: Boolean(document.querySelector("#bf-correct-summary")),
+    strategy: Boolean(document.querySelector("#bf-correct-strategy")),
+    content: Boolean(document.querySelector("#bf-correct-content")),
+    risk: Boolean(document.querySelector("#bf-correct-risk")),
+    tags: Boolean(document.querySelector("#bf-correct-tags")),
+  }));
+  add("BF editor exposes business-field correction before version return", bfCorrection.active && Object.values(bfCorrection).every(Boolean), JSON.stringify(bfCorrection));
+  if (bfLibraryNav) {
+    const libraryButton = page.locator('#nav button[data-page="bflibrary"]').first();
+    await libraryButton.evaluate(node => { const group = node.closest("details.nav-section"); if (group) group.open = true; });
+    await libraryButton.click();
+  }
+  const bfUpload = await page.evaluate(() => ({
+    active: document.querySelector("#bflibrary")?.classList.contains("active") || false,
+    accept: document.querySelector("#bf-document-file")?.getAttribute("accept") || "",
+    hasProjectScope: Boolean(document.querySelector("#bf-library-project")),
+  }));
+  add("BF asset library exposes project-scoped multi-format upload", bfUpload.active && /\.docx/.test(bfUpload.accept) && /\.pptx/.test(bfUpload.accept) && /\.pdf/.test(bfUpload.accept) && /\.png/.test(bfUpload.accept) && bfUpload.hasProjectScope, JSON.stringify(bfUpload));
 
   await page.locator('#nav button[data-page="dashboard"]').click();
   let chooserOpened = false;
