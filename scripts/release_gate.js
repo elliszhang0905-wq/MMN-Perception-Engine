@@ -270,10 +270,14 @@ async function main() {
     selectableModels: [...document.querySelectorAll(".summary-heat-model-list label span")].map(node => node.textContent.trim()),
     selectedModels: [...document.querySelectorAll(".summary-heat-model-list input:checked")].map(node => node.value),
     heatRows: [...document.querySelectorAll(".summary-heat-row")].map(node => node.textContent.replace(/\s+/g, " ").trim()),
-    addOptions: [...document.querySelectorAll("#summary-heat-add-model option")].map(node => node.textContent.trim())
+    addOptions: [...document.querySelectorAll("#summary-heat-add-model option")].map(node => node.textContent.trim()),
+    attributeRows: document.querySelectorAll(".summary-attribute-row").length,
+    attributeValues: [...document.querySelectorAll(".summary-attribute-value")].map(node => node.textContent.trim()),
+    quadrants: document.querySelectorAll("#dashboard-emotion-quadrant .emotion-quadrant-cell").length
   }));
   add("summary workbook keeps verified NSR and suppresses unsupported metrics", summaryImport.model === "奥迪E7X" && summaryImport.nsr === "75.1%" && summaryImport.ips === "不适用" && /未提供目标人群/.test(summaryImport.ipsNote) && summaryImport.intent === "不适用" && /未提供购买意向/.test(summaryImport.intentNote), JSON.stringify(summaryImport));
   add("summary workbook first renders source-backed all-network heat comparison", summaryImport.surfaceTitle === "全网声量及互动量对比" && summaryImport.selectableModels.length === summaryModels.length && summaryImport.selectedModels.length === summaryModels.length && summaryImport.heatRows.length === summaryModels.length && summaryImport.heatRows.some(row => /奥迪E7X.*23\.6万.*217\.0万/.test(row)) && summaryImport.addOptions.length === 1, JSON.stringify(summaryImport));
+  add("summary workbook renders real attribute NSR without emotion quadrants", summaryImport.attributeRows === 3 && summaryImport.attributeValues.length === 9 && summaryImport.attributeValues.every(value => /^-?\d+(?:\.\d)?%$/.test(value)) && summaryImport.quadrants === 0, JSON.stringify(summaryImport));
 
   await page.route("**/api/import-xlsx?filename=AUDI%20E7X.xlsx", route => route.fulfill({
     contentType: "application/json",
