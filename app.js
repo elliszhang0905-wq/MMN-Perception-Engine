@@ -183,8 +183,8 @@ function importedModelsFromSourceNote(note){
 }
 function normalizeLoadedEngineState(saved){
  if(!saved||!Array.isArray(saved.rows))return saved;
- if(/^summary_xlsx_/i.test(String(saved.datasetVersion||""))&&!saved.importQuality){
-  return {...saved,rows:[],models:[],summaryMetrics:{},importQuality:{kind:"INVALID_LEGACY_SUMMARY_IMPORT",message:"已阻止旧版产品评价汇总表结果：该版本可能错误识别平台和标签。请使用“导入数据”重新替换导入原始文件。"}};
+ if(/^summary_xlsx_/i.test(String(saved.datasetVersion||""))&&(!saved.importQuality||!saved.summaryHeat)){
+  return {...saved,rows:[],models:[],summaryMetrics:{},summaryHeat:{},importQuality:{kind:"INVALID_LEGACY_SUMMARY_IMPORT",message:"已阻止旧版产品评价汇总表结果：该版本缺少车型热度字段或可能错误识别平台和标签。请使用“导入数据”重新替换导入原始文件。"}};
  }
  const imported=importedModelsFromSourceNote(saved.sourceNote);
  const primary=imported.find(m=>saved.rows.some(r=>r[0]===m));

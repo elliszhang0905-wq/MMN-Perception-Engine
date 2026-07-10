@@ -317,7 +317,8 @@ async function main() {
       sourceNote: "已从旧版产品评价汇总表导入。",
       config: { project: "奥迪E7X认知诊断", brand: "奥迪", model: "奥迪E7X", competitor: "小米YU7", targetIdentity: "目标核心人群", budget: 800, priorityThreshold: 60, riskThreshold: 500 },
       platforms: { 抖音: 1.25 },
-      rows: [["奥迪E7X", "本品", "正面", "整体口碑", "总体口碑", "兴奋", "目标核心人群", "高意向", 100, 4, 1, 4]]
+      rows: [["奥迪E7X", "本品", "正面", "整体口碑", "总体口碑", "兴奋", "目标核心人群", "高意向", 100, 4, 1, 4]],
+      importQuality: { kind: "PRODUCT_EVALUATION_SUMMARY", timeRange: "2026.6.1 - 2026.6.30", metricCoverage: { nsr: true, ips: false, intent: false, risk: false } }
     }));
   });
   await page.reload({ waitUntil: "networkidle" });
