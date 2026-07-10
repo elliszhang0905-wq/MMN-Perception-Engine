@@ -958,7 +958,7 @@ function applyRoleRestrictions(){
  });
 }
 function renderModelSwitcher(){
- const models=dashboardModelOptions(),wrap=document.querySelector("#dash-model");
+ const models=modelOptions(),wrap=document.querySelector("#dash-model");
  const groups=brandModelGroups(models);
  if(!dashBrandOpen||!groups.some(g=>g.brand===dashBrandOpen))dashBrandOpen=brandForDisplay(state.config.model);
  const activeGroup=groups.find(g=>g.brand===dashBrandOpen)||groups[0]||{brand:"",models:[]};

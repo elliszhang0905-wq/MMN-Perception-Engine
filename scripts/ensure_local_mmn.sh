@@ -16,6 +16,32 @@ is_healthy() {
   curl -fsS -m 3 "${LOCAL_URL}/api/health" >/dev/null 2>&1
 }
 
+server_pid() {
+  lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -n 1
+}
+
+backend_code_is_newer() {
+  local pid
+  pid=$(server_pid)
+  [[ -n "${pid}" && -f "${PID_FILE}" ]] || return 1
+  [[ "$(cat "${PID_FILE}" 2>/dev/null || true)" == "${pid}" ]] || return 0
+  find server.py bf_factory -type f -name '*.py' -newer "${PID_FILE}" -print -quit 2>/dev/null | grep -q .
+}
+
+stop_stale_server() {
+  local pid
+  pid=$(server_pid)
+  if [[ -n "${pid}" ]] && backend_code_is_newer; then
+    echo "检测到后端代码已更新，正在重启 MMN 本地服务..."
+    kill "${pid}" 2>/dev/null || true
+    for _ in {1..20}; do
+      [[ -z "$(server_pid)" ]] && return
+      sleep 0.2
+    done
+    kill -9 "${pid}" 2>/dev/null || true
+  fi
+}
+
 stop_stuck_server() {
   local pids
   pids=$(lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)
@@ -34,6 +60,8 @@ stop_stuck_server() {
 }
 
 start_server() {
+  stop_stale_server
+
   if is_healthy; then
     echo "MMN 本地服务已可用：${LOCAL_URL}"
     return
