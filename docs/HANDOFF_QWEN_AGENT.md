@@ -476,6 +476,13 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 缺少车型、全网NSR或属性NSR任一必需区块时必须拒绝导入，不能回退到通用文件解析。
 - 每次改动汇总表导入路径，必须运行 `tests.test_product_summary_import` 和浏览器发布门禁中的汇总表场景。
 
+### 2026-07-10 汇总表导入修复发布状态
+
+- GitHub提交：`768d7c4`；ECS通过提交归档同步到 `/opt/mmn-perception-engine`。
+- 发布前代码归档：`backups/code_before_768d7c4_20260710_220429.tar.gz`；运行数据备份：`backups/mmn_backup_20260710_220429.tar.gz` 与 `backups/mmn_backup_20260710_220444.tar.gz`。
+- 本地和生产容器均验证完整测试33/33通过；浏览器发布门禁的真实NSR与旧版隔离场景均通过。
+- 公网首页已加载 `app.js?v=beta-1.01-summary-import-2`，健康接口正常，发布后错误日志为0。
+
 ### 2026-07-10 BF界面修复发布状态
 
 - GitHub提交：`0172cca`（规则外显清理、子菜单隐藏、三种实拍BF类型）与 `5c9c561`（前端缓存版本刷新）。

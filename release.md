@@ -408,3 +408,18 @@ beta 1.01｜产品评价汇总表导入质量修复
 - 本地完整测试、汇总表专项测试、发布门禁和空白检查通过后推送 GitHub `main`。
 - 服务器发布前创建代码归档和运行数据备份；使用提交归档同步到 `/opt/mmn-perception-engine`，再执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`。
 - 发布后验证公网首页、健康接口、前端资源版本、容器状态、生产测试和近期错误日志。
+
+## 云端发布结果
+
+- GitHub提交：`768d7c4 fix: validate product summary workbook imports`。
+- ECS部署时间：2026-07-10 22:05（Asia/Shanghai）。
+- 发布前代码归档：`backups/code_before_768d7c4_20260710_220429.tar.gz`。
+- 发布前运行数据备份：`backups/mmn_backup_20260710_220429.tar.gz`；部署脚本运行数据备份：`backups/mmn_backup_20260710_220444.tar.gz`。
+- 本地完整测试33/33通过；专项汇总表测试2/2通过；浏览器发布门禁通过，`failed: []`、`runtimeErrors: []`。
+- 公网首页和 `/api/health` 通过，首页已加载 `app.js?v=beta-1.01-summary-import-2`。
+- 生产容器内完整测试33/33通过；`mmn-app`、`mmn-db`、`mmn-scheduler` healthy，`mmn-web` running。
+- 发布后近10分钟日志未发现 `traceback`、`exception`、`critical` 或 `error`。
+
+## 发布结论
+
+产品评价汇总表导入已从“可被错误字段污染的推断”改为“按已验证区块和数据边界展示”。旧版错误结果会被隔离；同类不完整文件会被拒绝导入，防止再次生成看似正常但不可信的驾驶舱指标。
