@@ -298,7 +298,11 @@ async function main() {
       title: document.querySelector(".summary-platform-popover header")?.textContent.replace(/\s+/g, " ").trim() || "",
       groups: [...document.querySelectorAll(".summary-platform-group")].map(node => ({
         platform: node.querySelector(".summary-platform-name")?.textContent.trim() || "",
-        series: [...node.querySelectorAll(".summary-platform-series>div")].map(series => series.textContent.replace(/\s+/g, " ").trim())
+        series: [...node.querySelectorAll(".summary-platform-series>div")].map(series => ({
+          text: series.textContent.replace(/\s+/g, " ").trim(),
+          width: series.querySelector("em")?.style.width || "",
+          color: series.querySelector("em") ? getComputedStyle(series.querySelector("em")).backgroundColor : ""
+        }))
       })),
       closeLabel: close?.getAttribute("aria-label") || "",
       closeText: close?.textContent.trim() || "",
@@ -316,7 +320,7 @@ async function main() {
   });
   const douyinGroup = platformBubble.groups.find(group => group.platform === "抖音");
   const closeCentered = platformBubble.closeGeometry && platformBubble.closeGeometry.width === platformBubble.closeGeometry.height && Math.abs(platformBubble.closeGeometry.beforeLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.beforeTop - platformBubble.closeGeometry.clientHeight / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterLeft - platformBubble.closeGeometry.clientWidth / 2) < .6 && Math.abs(platformBubble.closeGeometry.afterTop - platformBubble.closeGeometry.clientHeight / 2) < .6;
-  add("competitor heat bubble pairs each platform with the product model", /小米YU7.*奥迪E7X.*分平台声量对比/.test(platformBubble.title) && platformBubble.groups.length === 9 && platformBubble.groups.every(group => group.series.length === 2) && douyinGroup?.series.some(row => /小米YU7.*90\.2万/.test(row)) && douyinGroup?.series.some(row => /本品.*奥迪E7X.*10\.4万/.test(row)), JSON.stringify(platformBubble));
+  add("competitor heat bubble pairs each platform with percentage trends", /小米YU7.*奥迪E7X.*分平台声量对比/.test(platformBubble.title) && platformBubble.groups.length === 9 && platformBubble.groups.every(group => group.series.length === 2) && douyinGroup?.series.some(row => /小米YU7.*69\.3%/.test(row.text) && row.width === "69.3454%" && row.color === "rgb(230, 160, 170)") && douyinGroup?.series.some(row => /本品.*奥迪E7X.*44\.0%/.test(row.text) && row.width === "43.9721%" && row.color === "rgb(156, 207, 227)"), JSON.stringify(platformBubble));
   add("platform bubble close icon is geometrically centered", platformBubble.closeLabel === "关闭分平台声量气泡" && platformBubble.closeText === "" && closeCentered, JSON.stringify(platformBubble.closeGeometry));
   await page.locator(".summary-platform-popover button").click();
   await page.locator('.summary-heat-model-list input[value="小米YU7"]').uncheck();
