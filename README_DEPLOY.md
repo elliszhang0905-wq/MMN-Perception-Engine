@@ -525,3 +525,13 @@ docker system df
 ```bash
 docker image prune
 ```
+# 社媒趋势中心配置
+
+在服务器 `.env` 中配置 `TIKHUB_API_KEY`。该变量只注入 `mmn-app` 后端容器，不写入前端文件。搜索端点可按 `.env.example` 中的三个 `TIKHUB_SOCIAL_*_ENDPOINT` 变量覆盖。部署后验证：
+
+```bash
+curl -fsS http://127.0.0.1:8765/api/health
+curl -fsS 'http://127.0.0.1:8765/api/social-trends/latest?keyword=测试车型&edition=china'
+```
+
+首次真实采集需登录后在“社媒趋势中心”发起；确认三平台来源、证据链接、快照 ID 和双模型状态均可追溯。

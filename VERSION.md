@@ -2,7 +2,7 @@
 
 ## 当前本地研发基线
 
-**MMN Perception Engine beta 1.01**
+**MMN Perception Engine beta 1.02**
 
 定位：本地 Mac 主研发与主数据兜底版本。
 
@@ -15,7 +15,7 @@
 
 ## 当前服务器演示基线
 
-**MMN Perception Engine beta 1.01 Demo Stable**
+**MMN Perception Engine beta 1.02 Demo Stable**
 
 定位：云端稳定演示版本。
 

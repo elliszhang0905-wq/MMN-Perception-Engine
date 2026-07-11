@@ -23,7 +23,8 @@ RUN sed -i \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-bf-factory.txt /tmp/requirements-bf-factory.txt
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r /tmp/requirements-bf-factory.txt
+COPY requirements-creator-distillation.txt /tmp/requirements-creator-distillation.txt
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r /tmp/requirements-bf-factory.txt -r /tmp/requirements-creator-distillation.txt
 
 COPY . /app
 

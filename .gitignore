@@ -11,3 +11,8 @@ data/reports/
 backups/
 cloud_model_test_result.json
 .codebase-memory/
+.playwright-cli/
+.serena/
+logs/
+output/playwright/
+data/opportunity/

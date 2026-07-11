@@ -46,11 +46,13 @@ services:
     depends_on:
       mmn-db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - mmn_net
 
   mmn-db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: mmn-db
     restart: unless-stopped
     environment:
@@ -66,6 +68,44 @@ services:
       retries: 5
     networks:
       - mmn_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: mmn-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mmn_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mmn_net
+
+  mmn-creator-worker:
+    image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
+    container_name: mmn-creator-worker
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://mmn:${POSTGRES_PASSWORD:-change-me}@mmn-db:5432/mmn}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MMN_CREATOR_DB_PATH: /app/data/creator_distillation.db
+    command: ["celery", "-A", "creator_distillation.tasks:celery_app", "worker", "-Q", "creator-distillation", "--loglevel=INFO", "--concurrency=2"]
+    volumes:
+      - mmn_data:/app/data
+      - mmn_logs:/app/logs
+    depends_on:
+      redis: {condition: service_healthy}
+      mmn-db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A creator_distillation.tasks:celery_app inspect ping --destination celery@$$HOSTNAME --timeout 5 | grep -q pong"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    networks: [mmn_net]
 
   mmn-scheduler:
     image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
@@ -101,3 +141,4 @@ volumes:
   mmn_backups:
   mmn_logs:
   mmn_postgres:
+  mmn_redis:

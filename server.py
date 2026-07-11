@@ -22,7 +22,7 @@ from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread, Timer
 from urllib.parse import parse_qs, quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import HTTPError
 import urllib.robotparser as robotparser
 import xml.etree.ElementTree as ET
@@ -30,7 +30,19 @@ from zoneinfo import ZoneInfo
 
 from bf_factory.exporters import export_brief_docx
 from bf_factory.generation import compose_section_plan, generate_internal_strategy, render_adaptive_brief
-from bf_factory.parsers import BFParseError, MAX_UPLOAD_BYTES
+from bf_factory.parsers import BFParseError, MAX_UPLOAD_BYTES, parse_document, validate_upload
+from opportunity_pipeline import (
+    UNIFIED_LABELS,
+    build_competitor_product_summaries,
+    build_official_page_evidence,
+    build_opportunity_map,
+    build_product_document,
+    cross_validate_model_analyses,
+    is_public_official_url,
+    normalize_market_signals,
+    heat_scores,
+)
+from cockpit_decision_loop import derive_execution_recommendations
 from bf_factory.repository import (
     BFConflictError,
     BFNotFoundError,
@@ -40,11 +52,19 @@ from bf_factory.repository import (
 from bf_factory.service import BFService
 from bf_factory.schema import BF_BRIEF_JSON_SCHEMA
 from bf_factory.storage import sanitize_filename
+from creator_distillation import CreatorDistillationService
+from creator_distillation.service import api_error as creator_distillation_api_error
+from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, save_snapshot as save_social_trend_snapshot
+try:
+    from creator_distillation.tasks import celery_app as creator_celery_app, enqueue_distillation as _enqueue_distillation
+    enqueue_distillation = _enqueue_distillation if creator_celery_app else None
+except Exception:
+    enqueue_distillation = None
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "beta 1.01"
-APP_VERSION_CODE = "beta-1.01"
-APP_RELEASE_DATE = "2026-06-28"
+APP_VERSION = "beta 1.02"
+APP_VERSION_CODE = "beta-1.02-system-iteration-1"
+APP_RELEASE_DATE = "2026-07-12"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -70,6 +90,10 @@ ROUTER_RESPONSE_CACHE = {}
 ROUTER_CACHE_LOCK = Lock()
 ROUTER_REVIEW_LOCK = Lock()
 ROUTER_REVIEW_TASKS = {}
+OPPORTUNITY_JOB_LOCK = Lock()
+OPPORTUNITY_JOB_TASKS = {}
+LEGACY_VERTICAL_CLAIM_LOCK = Lock()
+LEGACY_VERTICAL_CLAIM_CHECKED = set()
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
@@ -156,6 +180,14 @@ def bf_service():
     gateway = bf_model_gateway if BF_MODELS_ENABLED else None
     return BFService(bf_repository(), DATA_DIR / "bf", model_gateway=gateway)
 
+_CREATOR_DISTILLATION_SERVICE = None
+
+def creator_distillation_service():
+    global _CREATOR_DISTILLATION_SERVICE
+    if _CREATOR_DISTILLATION_SERVICE is None:
+        _CREATOR_DISTILLATION_SERVICE = CreatorDistillationService(enqueue=enqueue_distillation)
+    return _CREATOR_DISTILLATION_SERVICE
+
 def init_db():
     with db() as conn:
         conn.executescript("""
@@ -206,8 +238,21 @@ def init_db():
             payload_json text not null,
             created_at text not null
         );
+        create table if not exists strategy_knowledge_assets (
+            id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
+            asset_json text not null,
+            source_snapshot_id text,
+            created_at text not null,
+            updated_at text not null
+        );
+        create index if not exists idx_strategy_knowledge_assets_scope
+        on strategy_knowledge_assets(org_id, edition, updated_at desc);
         create table if not exists vertical_import_batches (
             id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
             platform text not null,
             filename text not null,
             file_hash text not null,
@@ -216,10 +261,12 @@ def init_db():
             item_count integer not null default 0,
             imported_at text not null,
             parser_version text not null,
-            unique(platform, file_hash)
+            unique(org_id, edition, platform, file_hash)
         );
         create table if not exists vehicle_assets (
             id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
             platform text not null,
             brand_name text,
             model_name text not null,
@@ -231,10 +278,12 @@ def init_db():
             period_last text,
             import_count integer not null default 1,
             extra_json text not null default '{}',
-            unique(platform, model_name)
+            unique(org_id, edition, platform, model_name)
         );
         create table if not exists vertical_rank_assets (
             id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
             platform text not null,
             period text not null,
             own_model text not null,
@@ -248,14 +297,12 @@ def init_db():
             parse_mode text,
             first_seen_at text not null,
             updated_at text not null,
-            unique(platform, period, own_model, competitor_model)
+            unique(org_id, edition, platform, period, own_model, competitor_model)
         );
-        create unique index if not exists idx_vertical_rank_assets_unique
-        on vertical_rank_assets(platform, period, own_model, competitor_model);
-        create unique index if not exists idx_vehicle_assets_unique
-        on vehicle_assets(platform, model_name);
         create table if not exists vertical_ai_learnings (
             id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
             platform text not null,
             model_name text not null,
             period text,
@@ -263,7 +310,7 @@ def init_db():
             summary_text text not null,
             knowledge_json text not null,
             created_at text not null,
-            unique(platform, model_name, period)
+            unique(org_id, edition, platform, model_name, period)
         );
         create table if not exists model_judgment_assets (
             id text primary key,
@@ -518,6 +565,20 @@ def init_db():
             payload_json text not null default '{}',
             created_at text not null
         );
+        create table if not exists product_fact_documents (
+            id text primary key,
+            org_id text,
+            user_id text,
+            edition text not null default 'china',
+            brand text,
+            model text,
+            version text,
+            filename text not null,
+            sha256 text not null,
+            storage_path text,
+            payload_json text not null default '{}',
+            created_at text not null
+        );
         create table if not exists semantic_calibrations (
             id text primary key,
             edition text not null default 'china',
@@ -527,23 +588,307 @@ def init_db():
             user_note text,
             created_at text not null
         );
+        create table if not exists cockpit_execution_cycles (
+            id text primary key,
+            org_id text not null,
+            user_id text not null,
+            edition text not null default 'china',
+            model text not null,
+            opportunity_run_id text not null,
+            opportunity_label text not null,
+            status text not null default 'planned',
+            plan_json text not null default '{}',
+            monitoring_json text not null default '{}',
+            created_at text not null,
+            updated_at text not null
+        );
+        create index if not exists idx_cockpit_execution_cycles_scope
+        on cockpit_execution_cycles(org_id, edition, model, updated_at desc);
         """)
+        migrate_vertical_scope_schema(conn)
+        conn.execute("create unique index if not exists idx_vertical_rank_assets_unique on vertical_rank_assets(org_id, edition, platform, period, own_model, competitor_model)")
+        conn.execute("create unique index if not exists idx_vehicle_assets_unique on vehicle_assets(org_id, edition, platform, model_name)")
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
         ensure_column(conn, "content_capability_chunks", "content_breakdown_json", "text not null default '{}'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
+        conn.execute("""
+            delete from vertical_rank_assets
+            where id in (
+              select bad.id
+              from vertical_rank_assets bad
+              join vertical_rank_assets good
+                on good.id<>bad.id
+               and good.org_id=bad.org_id
+               and good.edition=bad.edition
+               and good.platform=bad.platform
+               and coalesce(good.source_file,'')=coalesce(bad.source_file,'')
+               and coalesce(good.file_hash,'')=coalesce(bad.file_hash,'')
+               and trim(coalesce(good.sheet,''))=trim(coalesce(bad.sheet,''))
+               and good.own_model=bad.own_model
+               and good.competitor_model=bad.competitor_model
+               and coalesce(good.positive_rank,-1)=coalesce(bad.positive_rank,-1)
+               and coalesce(good.negative_rank,-1)=coalesce(bad.negative_rank,-1)
+               and abs(coalesce(good.compare_share,-999)-coalesce(bad.compare_share,-999))<0.0000001
+               and coalesce(good.parse_mode,'')<>'auto-long'
+              where bad.parse_mode='auto-long'
+            )
+        """)
+        backfill_strategy_knowledge_assets(conn)
     bf_repository().init_schema()
+    with db() as conn:
+        init_social_trend_schema(conn)
+
+
+def backfill_strategy_knowledge_assets(conn):
+    """Recover durable RAG assets from every historical project snapshot."""
+    rows = conn.execute(
+        "select id, org_id, edition, payload_json, created_at from project_snapshots order by created_at"
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        for item in payload.get("strategyKb") or []:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            asset_row_id = strategy_asset_row_id(
+                conn,
+                str(item["id"]),
+                row["org_id"] or "local",
+                row["edition"] or "china",
+            )
+            conn.execute(
+                """insert into strategy_knowledge_assets
+                (id, org_id, edition, asset_json, source_snapshot_id, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?)
+                on conflict(id) do update set
+                  asset_json=excluded.asset_json,
+                  source_snapshot_id=excluded.source_snapshot_id,
+                  updated_at=excluded.updated_at""",
+                (
+                    asset_row_id, row["org_id"] or "local", row["edition"] or "china",
+                    json.dumps(item, ensure_ascii=False), row["id"], row["created_at"], row["created_at"]
+                )
+            )
+
+
+def strategy_asset_row_id(conn, item_id, org_id, edition):
+    """Keep caller-visible asset IDs while preventing cross-org primary-key takeover."""
+    item_id = str(item_id or "").strip()
+    org_id = str(org_id or "local").strip() or "local"
+    edition = edition_from(edition)
+    existing = conn.execute(
+        "select org_id, edition from strategy_knowledge_assets where id=?",
+        (item_id,),
+    ).fetchone()
+    if not existing or (existing["org_id"] == org_id and existing["edition"] == edition):
+        return item_id
+    return stable_id("strategy-asset-row", org_id, edition, item_id)
+
+
+def durable_asset_library(edition="china", org_id="local"):
+    edition = edition_from(edition)
+    with db() as conn:
+        strategy_rows = conn.execute(
+            "select asset_json from strategy_knowledge_assets where org_id=? and edition=? order by updated_at desc", (org_id, edition)
+        ).fetchall()
+        legacy_creator_rows = conn.execute(
+            "select payload_json from project_snapshots where org_id=? and edition=? order by created_at desc", (org_id, edition)
+        ).fetchall()
+        counts = {
+            "bloggerProfiles": conn.execute("select count(*) from blogger_skill_profiles where edition=?", (edition,)).fetchone()[0],
+            "bloggerSamples": conn.execute("select count(*) from blogger_skill_samples where edition=?", (edition,)).fetchone()[0],
+            "contentChunks": conn.execute("select count(*) from content_capability_chunks where edition=?", (edition,)).fetchone()[0],
+            "contentSources": conn.execute("select count(*) from content_capability_sources where edition=?", (edition,)).fetchone()[0],
+            "verticalLearnings": conn.execute("select count(*) from vertical_ai_learnings where org_id=? and edition=?", (org_id, edition)).fetchone()[0],
+        }
+    strategy = []
+    for row in strategy_rows:
+        try:
+            strategy.append(json.loads(row["asset_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    creators = {}
+    for row in legacy_creator_rows:
+        try:
+            creator_groups = (json.loads(row["payload_json"] or "{}").get("creatorState") or {}).get("creators") or {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        for platform, items in creator_groups.items():
+            for item in items or []:
+                key = str(item.get("id") or item.get("uid") or item.get("name") or "")
+                if key and key not in creators:
+                    creators[key] = {
+                        "id": key,
+                        "platform": platform,
+                        "display_name": item.get("name") or item.get("display_name") or "待补全达人",
+                        "profile": {"summary": item.get("summary") or item.get("publicProfile") or "历史达人资产"},
+                        "legacy": True,
+                    }
+    return {"ok": True, "edition": edition, "strategyAssets": strategy, "legacyCreators": list(creators.values()), "counts": counts}
 
 def now():
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
 
 VERTICAL_PLATFORMS = {"汽车之家", "懂车帝"}
-VERTICAL_ASSET_PARSER_VERSION = "vertical-rank-asset-v2"
+VERTICAL_ASSET_PARSER_VERSION = "vertical-rank-asset-v3"
 
 def ensure_column(conn, table, column, ddl):
     cols = [row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()]
     if column not in cols:
         conn.execute(f"alter table {table} add column {column} {ddl}")
+
+
+def migrate_vertical_scope_schema(conn):
+    """Upgrade every legacy vertical table independently and recover partial runs."""
+    specs = {
+        "vertical_import_batches": {
+            "create": """create table vertical_import_batches (
+                id text primary key, org_id text not null default 'local', edition text not null default 'china',
+                platform text not null, filename text not null, file_hash text not null, periods_json text not null,
+                model_count integer not null default 0, item_count integer not null default 0,
+                imported_at text not null, parser_version text not null,
+                unique(org_id, edition, platform, file_hash))""",
+            "columns": "id, org_id, edition, platform, filename, file_hash, periods_json, model_count, item_count, imported_at, parser_version",
+            "legacy_select": "id, 'local', 'china', platform, filename, file_hash, periods_json, model_count, item_count, imported_at, parser_version",
+        },
+        "vehicle_assets": {
+            "create": """create table vehicle_assets (
+                id text primary key, org_id text not null default 'local', edition text not null default 'china',
+                platform text not null, brand_name text, model_name text not null, first_seen_at text not null,
+                last_seen_at text not null, first_source text, last_source text, period_first text, period_last text,
+                import_count integer not null default 1, extra_json text not null default '{}',
+                unique(org_id, edition, platform, model_name))""",
+            "columns": "id, org_id, edition, platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source, period_first, period_last, import_count, extra_json",
+            "legacy_select": "id, 'local', 'china', platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source, period_first, period_last, import_count, extra_json",
+            "index": "idx_vehicle_assets_unique",
+        },
+        "vertical_rank_assets": {
+            "create": """create table vertical_rank_assets (
+                id text primary key, org_id text not null default 'local', edition text not null default 'china',
+                platform text not null, period text not null, own_model text not null, competitor_model text not null,
+                positive_rank integer, negative_rank integer, compare_share real, source_file text not null,
+                file_hash text not null, sheet text, parse_mode text, first_seen_at text not null, updated_at text not null,
+                unique(org_id, edition, platform, period, own_model, competitor_model))""",
+            "columns": "id, org_id, edition, platform, period, own_model, competitor_model, positive_rank, negative_rank, compare_share, source_file, file_hash, sheet, parse_mode, first_seen_at, updated_at",
+            "legacy_select": "id, 'local', 'china', platform, period, own_model, competitor_model, positive_rank, negative_rank, compare_share, source_file, file_hash, sheet, parse_mode, first_seen_at, updated_at",
+            "index": "idx_vertical_rank_assets_unique",
+        },
+        "vertical_ai_learnings": {
+            "create": """create table vertical_ai_learnings (
+                id text primary key, org_id text not null default 'local', edition text not null default 'china',
+                platform text not null, model_name text not null, period text, source_file text,
+                summary_text text not null, knowledge_json text not null, created_at text not null,
+                unique(org_id, edition, platform, model_name, period))""",
+            "columns": "id, org_id, edition, platform, model_name, period, source_file, summary_text, knowledge_json, created_at",
+            "legacy_select": "id, 'local', 'china', platform, model_name, period, source_file, summary_text, knowledge_json, created_at",
+        },
+    }
+
+    for table, spec in specs.items():
+        legacy_table = f"{table}_legacy_scope"
+        current_columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
+        legacy_exists = conn.execute(
+            "select 1 from sqlite_master where type='table' and name=?", (legacy_table,)
+        ).fetchone()
+
+        if {"org_id", "edition"}.issubset(current_columns):
+            if legacy_exists:
+                conn.execute(
+                    f"insert or ignore into {table} ({spec['columns']}) "
+                    f"select {spec['legacy_select']} from {legacy_table}"
+                )
+                conn.execute(f"drop table {legacy_table}")
+            continue
+
+        if legacy_exists:
+            raise sqlite3.OperationalError(f"无法安全迁移 {table}：同时存在未迁移表与遗留备份")
+        if spec.get("index"):
+            conn.execute(f"drop index if exists {spec['index']}")
+        conn.execute(f"alter table {table} rename to {legacy_table}")
+        conn.execute(spec["create"])
+        conn.execute(
+            f"insert into {table} ({spec['columns']}) "
+            f"select {spec['legacy_select']} from {legacy_table}"
+        )
+        conn.execute(f"drop table {legacy_table}")
+
+
+def claim_legacy_vertical_scope(conn, target_org_id):
+    """Assign an entirely unclaimed legacy vertical corpus to one known admin org.
+
+    This deliberately has no read-time fallback to ``local``: either the whole
+    legacy corpus is still unclaimed and moves once, or no rows move at all.
+    """
+    target_org_id = str(target_org_id or "").strip()
+    result = {"claimed": False, "targetOrgId": target_org_id, "rowCounts": {}}
+    if not target_org_id or target_org_id == "local":
+        return result
+
+    tables = (
+        "vertical_import_batches",
+        "vehicle_assets",
+        "vertical_rank_assets",
+        "vertical_ai_learnings",
+    )
+    total_rows = 0
+    nonlocal_rows = 0
+    for table in tables:
+        columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
+        if "org_id" not in columns:
+            result["reason"] = "schema_not_scoped"
+            return result
+        row = conn.execute(
+            f"select count(*) as total, "
+            "sum(case when org_id='local' then 1 else 0 end) as local_count, "
+            "sum(case when org_id<>'local' then 1 else 0 end) as nonlocal_count "
+            f"from {table}"
+        ).fetchone()
+        counts = {
+            "total": int(row["total"] or 0),
+            "local": int(row["local_count"] or 0),
+            "nonlocal": int(row["nonlocal_count"] or 0),
+        }
+        result["rowCounts"][table] = counts
+        total_rows += counts["total"]
+        nonlocal_rows += counts["nonlocal"]
+
+    if not total_rows:
+        result["reason"] = "empty"
+        return result
+    if nonlocal_rows:
+        result["reason"] = "already_scoped"
+        return result
+    if any(counts["total"] != counts["local"] for counts in result["rowCounts"].values()):
+        result["reason"] = "mixed_scope"
+        return result
+
+    for table in tables:
+        conn.execute(f"update {table} set org_id=? where org_id='local'", (target_org_id,))
+    result["claimed"] = True
+    result["reason"] = "claimed"
+    return result
+
+
+def ensure_legacy_vertical_claim(target_org_id, conn=None):
+    """Run the safe legacy claim once per database and resolved admin org."""
+    target_org_id = str(target_org_id or "").strip()
+    if not target_org_id or target_org_id == "local":
+        return {"claimed": False, "targetOrgId": target_org_id, "reason": "invalid_target"}
+    key = (str(DB_PATH), target_org_id)
+    with LEGACY_VERTICAL_CLAIM_LOCK:
+        if key in LEGACY_VERTICAL_CLAIM_CHECKED:
+            return {"claimed": False, "targetOrgId": target_org_id, "reason": "already_checked"}
+        if conn is not None:
+            result = claim_legacy_vertical_scope(conn, target_org_id)
+        else:
+            with db() as own_conn:
+                result = claim_legacy_vertical_scope(own_conn, target_org_id)
+        if result.get("reason") != "schema_not_scoped":
+            LEGACY_VERTICAL_CLAIM_CHECKED.add(key)
+        return result
 
 def edition_from(value):
     return "global" if value == "global" else "china"
@@ -560,6 +905,38 @@ def format_int(value):
 def stable_id(*parts):
     text = "|".join(str(x or "") for x in parts)
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+def validate_social_trends_with_models(result):
+    """Reuse MMN's Qwen + DeepSeek evidence review without exposing provider branding."""
+    sample = [{"id": x.get("id"), "platform": x.get("platformLabel"), "text": x.get("text", "")[:260],
+               "sentiment": x.get("sentiment"), "heat": x.get("heat"), "url": x.get("sourceUrl")}
+              for x in result.get("items", [])[:30]]
+    if not sample:
+        result["qa"]["dualModel"] = {"required": True, "status": "insufficient_evidence", "verifiedEvidenceIds": []}
+        return result
+    if not (qwen_config()["configured"] and deepseek_config()["configured"]):
+        result["qa"]["dualModel"] = {"required": True, "status": "pending_configuration", "verifiedEvidenceIds": []}
+        return result
+    messages = [{"role": "system", "content": (
+        "你是MMN Evidence QA。仅依据输入证据，复核每条内容的正向/负向/中性、车型相关性和矩阵内容判断。"
+        "不得补充外部事实。只返回JSON：{items:[{id,sentiment,relevant,matrixContent,reason}],strategyConclusion,risks}。"
+    )}, {"role": "user", "content": json.dumps({"keyword": result.get("keyword"), "evidence": sample}, ensure_ascii=False)}]
+    outputs, errors = {}, {}
+    for provider, caller in (("qwen", call_qwen), ("deepseek", call_deepseek)):
+        try:
+            outputs[provider] = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
+        except Exception as exc:
+            errors[provider] = str(exc)
+    qitems = {str(x.get("id")): x for x in outputs.get("qwen", {}).get("items", [])}
+    ditems = {str(x.get("id")): x for x in outputs.get("deepseek", {}).get("items", [])}
+    verified = [key for key in qitems.keys() & ditems.keys()
+                if qitems[key].get("relevant") is True and ditems[key].get("relevant") is True
+                and qitems[key].get("sentiment") == ditems[key].get("sentiment")]
+    result["qa"]["dualModel"] = {"required": True, "status": "aligned" if len(outputs) == 2 else "manual_required",
+                                      "verifiedEvidenceIds": verified, "errors": errors}
+    conclusions = [str(outputs.get(p, {}).get("strategyConclusion") or "").strip() for p in ("qwen", "deepseek")]
+    result["qa"]["strategyOutput"] = "\n".join(x for x in conclusions if x) or "证据不足，暂不输出策略结论"
+    return result
 
 def file_hash(data):
     return hashlib.sha256(data).hexdigest()
@@ -1606,10 +1983,45 @@ def cloud_accounts():
         }
     }
 
-def make_auth_token(username, role):
+
+def resolve_cloud_auth_scope(username):
+    """Resolve a signed username to one deterministic server-side org/user scope."""
+    account = cloud_accounts().get(str(username or ""))
+    if not account:
+        return {}
+    email = f"{str(username).lower()}@mmn.local"
+    try:
+        with db() as conn:
+            candidates = conn.execute(
+                """select u.id as user_id, u.org_id, u.created_at
+                   from users u join organizations o on o.id=u.org_id
+                   where u.email=? and o.name=?""",
+                (email, account["org"]),
+            ).fetchall()
+            if not candidates:
+                return {}
+            activity_tables = ("learning_cases", "project_snapshots", "strategy_knowledge_assets", "product_fact_documents", "cockpit_execution_cycles", "agent_runs", "social_trend_snapshots")
+            scored = []
+            for candidate in candidates:
+                score = 0
+                for table in activity_tables:
+                    try:
+                        score += int(conn.execute(f"select count(*) from {table} where org_id=?", (candidate["org_id"],)).fetchone()[0])
+                    except sqlite3.OperationalError:
+                        continue
+                scored.append((score, candidate["created_at"] or "", candidate))
+            selected = max(scored, key=lambda item: (item[0], item[1]))[2]
+            return {"org_id": selected["org_id"], "user_id": selected["user_id"], "org": account["org"], "email": email}
+    except sqlite3.Error:
+        return {}
+
+
+def make_auth_token(username, role, org_id="", user_id=""):
     payload = {
         "username": username,
         "role": role,
+        "org_id": org_id,
+        "user_id": user_id,
         "iat": int(time.time()),
         "exp": int(time.time()) + 60 * 60 * 12
     }
@@ -2153,9 +2565,23 @@ def set_router_cache(cache_key, payload):
             for key in old_keys:
                 ROUTER_RESPONSE_CACHE.pop(key, None)
 
-def router_decision_payload(decision_id):
+def router_decision_row(decision_id, org_id=""):
     with db() as conn:
         row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+    if not row:
+        return None
+    if org_id:
+        try:
+            owner = str((json.loads(row["project_json"] or "{}") or {}).get("_org_id") or "").strip()
+        except (TypeError, ValueError, json.JSONDecodeError):
+            owner = ""
+        if owner != org_id and not (org_id == "local" and not owner):
+            return None
+    return row
+
+
+def router_decision_payload(decision_id, org_id=""):
+    row = router_decision_row(decision_id, org_id)
     if not row:
         return None
     item = rowdict(row)
@@ -2193,6 +2619,10 @@ def compact_reference_sources(references):
     return items
 
 def model_task_prompt(question, project, references, task_type, role):
+    visible_project = {
+        key: value for key, value in (project or {}).items()
+        if not str(key).startswith("_")
+    }
     refs = compact_reference_sources(references)
     if task_type == "fact_explanation":
         system = "你是MMN事实解释助手。事实只能来自给定结构化数据、RAG引用或官方来源；不得把模型常识当事实裁判。引用不足时必须明确写“需人工复核”。"
@@ -2208,7 +2638,7 @@ def model_task_prompt(question, project, references, task_type, role):
             "任务类型": task_type,
             "角色": role,
             "用户问题": question,
-            "当前项目": project or {},
+            "当前项目": visible_project,
             "引用来源": refs,
             "RAG召回资料": [
                 {"标题": x.get("title", ""), "内容": (x.get("body") or "")[:900], "来源": x.get("source", ""), "原因": x.get("reason", "")}
@@ -3306,8 +3736,8 @@ def cell_value(cell, shared):
     t = cell.attrib.get("t")
     v = cell.find("a:v", NS)
     if v is None:
-        inline = cell.find("a:is/a:t", NS)
-        return inline.text if inline is not None else None
+        inline_parts = [node.text or "" for node in cell.findall(".//a:is//a:t", NS)]
+        return "".join(inline_parts) if inline_parts else None
     raw = v.text
     if raw is None:
         return None
@@ -3368,7 +3798,57 @@ def emotion_neg(nsr, label):
     return "怀疑"
 
 def cell_text(value):
-    return str(value or "").strip()
+    return "" if value is None else str(value).strip()
+
+
+MISSING_CELL_MARKERS = {"", "-", "—", "/", "n/a", "na", "null", "none"}
+
+
+def number_or_none(value):
+    """Parse a numeric cell while preserving the difference between zero and missing."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    text = cell_text(value)
+    if text.lower() in MISSING_CELL_MARKERS:
+        return None
+    normalized = text.replace(",", "")
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?", normalized, re.I)
+    if not match:
+        return None
+    number = float(match.group(0))
+    suffix = normalized[match.end():].strip().lower()
+    multiplier = 100_000_000 if suffix.startswith("亿") else 10_000 if suffix.startswith(("万", "w")) else 1_000 if suffix.startswith(("千", "k")) else 1
+    return number * multiplier
+
+
+def share_or_none(value):
+    """Parse an Excel percentage/share and return None for blank or non-numeric cells."""
+    number = number_or_none(value)
+    if number is None:
+        return None
+    if isinstance(value, str) and "%" in value:
+        return number / 100
+    return number / 100 if abs(number) > 1 else number
+
+
+def first_share_value(*values):
+    """Return the first parseable share, including an explicit zero."""
+    for value in values:
+        parsed = share_or_none(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def excel_datetime_text(value):
+    """Render Excel serial dates used by social export files as readable local datetimes."""
+    number = number_or_none(value)
+    if number is not None and 20_000 <= number <= 80_000 and not isinstance(value, str):
+        moment = datetime(1899, 12, 30) + timedelta(days=float(number))
+        return moment.strftime("%Y-%m-%d %H:%M:%S")
+    return cell_text(value)
 
 def workbook_label_meta(label):
     impact = {"安全":5,"质量":5,"辅助/自动驾驶":4.6,"动力与操控":4.4,"价格":4.2,"智能座舱":4.2,"空间":4.0,"舒适性":3.9,"用车成本":3.8,"品牌口碑":4.1,"品牌信任":4.1,"外观":3.4,"内饰":3.3,"用户服务":3.6,"总体口碑":4.0}
@@ -3394,12 +3874,11 @@ def summary_workbook_metadata(sheets):
 
 
 def summary_attribute_blocks(rows, models):
-    allowed_sources = {"全网", "垂媒车主口碑", "抖音"}
     blocks = []
     for header_row, row in enumerate(rows):
         for source_col, value in enumerate(row):
             source = cell_text(value)
-            if source not in allowed_sources:
+            if not source or (infer_model(source) or source) in models:
                 continue
             model_cols = {}
             for col in range(source_col + 1, len(row)):
@@ -3410,19 +3889,21 @@ def summary_attribute_blocks(rows, models):
                 model_cols[normalized] = col
             if len(model_cols) < 2:
                 continue
+            source = "B站" if source.lower() == "bilibili" else source
             values = []
             for row_idx in range(header_row + 1, len(rows)):
                 label = cell_text(rows[row_idx][source_col] if source_col < len(rows[row_idx]) else "")
                 if not label:
                     break
-                scores = {
-                    model: share_num(rows[row_idx][col] if col < len(rows[row_idx]) else 0)
-                    for model, col in model_cols.items()
-                }
-                numeric_scores = {model: score for model, score in scores.items() if isinstance(score, (int, float)) and -1 <= score <= 1}
+                numeric_scores = {}
+                for model, col in model_cols.items():
+                    raw_score = rows[row_idx][col] if col < len(rows[row_idx]) else ""
+                    score = share_or_none(raw_score)
+                    if score is not None and -1 <= score <= 1:
+                        numeric_scores[model] = score
                 if numeric_scores:
                     values.append((label, numeric_scores))
-            if values:
+            if len(values) >= 3:
                 blocks.append({"source": source, "values": values})
     return blocks
 
@@ -3466,10 +3947,8 @@ def summary_platform_nsr(rows, models):
             scores = {}
             for platform, col in platform_cols.items():
                 raw_score = rows[row_idx][col] if col < len(rows[row_idx]) else ""
-                if cell_text(raw_score) in {"", "-", "—", "/"}:
-                    continue
-                score = share_num(raw_score)
-                if isinstance(score, (int, float)) and -1 <= score <= 1:
+                score = share_or_none(raw_score)
+                if score is not None and -1 <= score <= 1:
                     scores[platform] = round(score, 8)
             if scores:
                 values[model] = scores
@@ -3478,6 +3957,31 @@ def summary_platform_nsr(rows, models):
     if not candidates:
         return {}
     return max(candidates, key=lambda item: (item[0], len(item[2]), item[1]))[2]
+
+
+def summary_overall_nsr(rows, models):
+    """Read only the contiguous 全网 emotion block, never an adjacent platform block."""
+    candidates = []
+    for header_row, row in enumerate(rows):
+        for nsr_col in range(4, len(row)):
+            if [cell_text(row[idx]) for idx in range(nsr_col - 3, nsr_col + 1)] != ["正面", "中性", "负面", "NSR"]:
+                continue
+            model_col = nsr_col - 4
+            if cell_text(row[model_col]) != "全网":
+                continue
+            values = {}
+            for row_idx in range(header_row + 1, min(header_row + len(models) + 1, len(rows))):
+                raw_model = cell_text(rows[row_idx][model_col] if model_col < len(rows[row_idx]) else "")
+                model = infer_model(raw_model) or raw_model
+                if model not in models:
+                    break
+                raw_score = rows[row_idx][nsr_col] if nsr_col < len(rows[row_idx]) else None
+                score = share_or_none(raw_score)
+                if score is not None and -1 <= score <= 1:
+                    values[model] = score
+            candidates.append(values)
+    complete = [values for values in candidates if all(model in values for model in models)]
+    return complete[0] if complete else {}
 
 
 def build_dataset_from_summary_workbook(cells, filename, sheets=None):
@@ -3541,27 +4045,14 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
                 continue
             summary_heat[model]["interaction"] = summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0)
 
-    overall_nsr = {}
-    for header_row, row in enumerate(rows):
-        for nsr_col in range(3, len(row)):
-            if [cell_text(row[idx]) for idx in range(nsr_col - 3, nsr_col + 1)] != ["正面", "中性", "负面", "NSR"]:
-                continue
-            model_col = nsr_col - 4
-            for row_idx in range(header_row + 1, min(header_row + 12, len(rows))):
-                raw_model = cell_text(rows[row_idx][model_col] if model_col < len(rows[row_idx]) else "")
-                model = infer_model(raw_model) or raw_model
-                if model in models:
-                    overall_nsr[model] = share_num(rows[row_idx][nsr_col] if nsr_col < len(rows[row_idx]) else 0)
-            if len(overall_nsr) >= len(models):
-                break
-        if len(overall_nsr) >= len(models):
-            break
+    overall_nsr = summary_overall_nsr(rows, models)
     if len(overall_nsr) < len(models):
         raise ValueError("未识别到完整的全网NSR区块，已拒绝导入。")
 
     attribute_blocks = summary_attribute_blocks(rows, models)
     if not attribute_blocks:
         raise ValueError("未识别到属性NSR区块，已拒绝导入。")
+    attribute_nsr_sources = list(dict.fromkeys(block["source"] for block in attribute_blocks))
     platform_nsr = summary_platform_nsr(rows, models)
 
     file_model = infer_model(Path(filename or "").stem)
@@ -3599,7 +4090,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
 
     metadata = summary_workbook_metadata(sheets)
     time_range = metadata.get("timeRange") or "源表未提供时间范围"
-    platforms = {"全网": 1.0, "垂媒车主口碑": 1.15, "抖音": 1.35}
+    platforms = {source: growth.get(source, 1.0) for source in attribute_nsr_sources}
     platform_nsr_sources = []
     for scores in platform_nsr.values():
         for source in scores:
@@ -3623,6 +4114,7 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             "platformVolumeAvailable": True,
             "platformNsrAvailable": bool(platform_nsr),
             "platformNsrSources": platform_nsr_sources,
+            "attributeNsrSources": attribute_nsr_sources,
             "message": "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。",
         },
         "sourceRowCount": len(model_rows),
@@ -3687,6 +4179,8 @@ def build_dataset_from_workbook(data, filename):
                     rows.append(common + [emotion_pos(nsr), meta[0], meta[1], pos, meta[2], meta[3], meta[4]])
                 if neg:
                     rows.append(common + [emotion_neg(nsr, label), meta[0], meta[1], neg, meta[2], meta[3], meta[4]])
+    if not rows:
+        raise ValueError("未识别到有效车型属性数据，已拒绝用空结果替换驾驶舱。")
     platforms = {"抖音":1.25,"小红书":1.15,"微博":1.1,"懂车帝":1.2,"汽车之家":1.15,"微信":1.05,"B站":1.1,"线下活动":1.3,"垂媒车主口碑":1.25,"微信视频号":1.08,"今日头条":1.05,"其他":0.95}
     return {
         "datasetVersion": "xlsx_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:40],
@@ -3712,6 +4206,21 @@ def find_header(rows):
             return idx
     return 0
 
+
+def find_video_header(rows):
+    hidx = find_header(rows)
+    headers = [str(x or "").strip() for x in (rows[hidx] if rows else [])]
+    if col_index(headers, ("标题", "视频标题", "视频描述", "内容标题", "笔记标题", "作品标题", "title")) is not None:
+        return hidx
+    markers = ("视频id", "视频链接", "大家都在搜", "视频话题", "所属合集", "点赞", "评论", "发布时间")
+    best_index, best_score = 0, 0
+    for index, row in enumerate((rows or [])[:30]):
+        texts = [str(value or "").strip().lower() for value in row]
+        score = sum(any(marker in text for text in texts) for marker in markers)
+        if score > best_score:
+            best_index, best_score = index, score
+    return best_index if best_score >= 2 else hidx
+
 def col_index(headers, keys):
     for i, h in enumerate(headers):
         s = str(h or "").strip().lower()
@@ -3729,19 +4238,12 @@ def col_index_exact(headers, keys):
     return col_index(headers, keys)
 
 def num(v):
-    if isinstance(v, (int, float)):
-        return v
-    s = str(v or "").replace(",", "").strip()
-    m = re.search(r"[-+]?\d+(\.\d+)?", s)
-    return float(m.group(0)) if m else 0
+    value = number_or_none(v)
+    return value if value is not None else 0
 
 def share_num(v):
-    n = num(v)
-    if not n:
-        return 0
-    if isinstance(v, str) and "%" in v:
-        return n / 100
-    return n / 100 if n > 1 else n
+    value = share_or_none(v)
+    return value if value is not None else 0
 
 def classify_video_title(title):
     t = str(title or "")
@@ -3989,10 +4491,19 @@ def build_video_dataset_from_workbook(data, filename):
         rows = sheet_rows(cells)
         if not rows:
             continue
-        hidx = find_header(rows)
+        hidx = find_video_header(rows)
         headers = [str(x or "").strip() for x in rows[hidx]]
         title_i = col_index(headers, ("标题", "视频标题", "视频描述", "内容标题", "笔记标题", "作品标题", "title"))
-        if title_i is None:
+        search_i = col_index(headers, ("大家都在搜", "搜索词", "热搜词"))
+        topic_i = col_index(headers, ("视频话题", "话题", "标签", "hashtag"))
+        collection_i = col_index(headers, ("所属合集", "合集名称", "合集"))
+        text_columns = [
+            (title_i, headers[title_i] if title_i is not None else "标题"),
+            (search_i, headers[search_i] if search_i is not None else "大家都在搜"),
+            (topic_i, headers[topic_i] if topic_i is not None else "视频话题"),
+            (collection_i, headers[collection_i] if collection_i is not None else "所属合集"),
+        ]
+        if not any(index is not None for index, _ in text_columns):
             continue
         platform_i = col_index(headers, ("平台", "来源", "渠道", "app"))
         model_i = col_index(headers, ("车型", "车系", "车款", "model"))
@@ -4003,12 +4514,17 @@ def build_video_dataset_from_workbook(data, filename):
         collect_i = col_index(headers, ("收藏", "收集"))
         share_i = col_index(headers, ("分享", "转发"))
         url_i = col_index(headers, ("链接", "url", "地址"))
-        search_i = col_index(headers, ("大家都在搜", "搜索词", "热搜词"))
-        topic_i = col_index(headers, ("视频话题", "话题", "标签", "hashtag"))
         play_i = col_index(headers, ("播放", "观看", "浏览", "曝光"))
         for row in rows[hidx + 1:]:
-            title = row[title_i] if title_i < len(row) else ""
-            if not str(title or "").strip():
+            title = ""
+            title_source = ""
+            for index, source_name in text_columns:
+                value = row[index] if index is not None and index < len(row) else ""
+                if str(value or "").strip():
+                    title = str(value).strip()
+                    title_source = source_name
+                    break
+            if not title:
                 continue
             url = str(row[url_i] if url_i is not None and url_i < len(row) and row[url_i] else "").strip()
             search_text = str(row[search_i] if search_i is not None and search_i < len(row) and row[search_i] else "").strip()
@@ -4023,10 +4539,11 @@ def build_video_dataset_from_workbook(data, filename):
             item = {
                 "platform": str(platform or "未知平台").strip(),
                 "model": model,
-                "title": str(title).strip(),
+                "title": title,
+                "titleSource": title_source,
                 "category": classify_video_title(classify_text),
                 "author": str(row[author_i] if author_i is not None and author_i < len(row) and row[author_i] else "").strip(),
-                "date": str(row[date_i] if date_i is not None and date_i < len(row) and row[date_i] else "").strip(),
+                "date": excel_datetime_text(row[date_i] if date_i is not None and date_i < len(row) else None),
                 "likes": num(row[like_i] if like_i is not None and like_i < len(row) else 0),
                 "comments": num(row[comment_i] if comment_i is not None and comment_i < len(row) else 0),
                 "collects": num(row[collect_i] if collect_i is not None and collect_i < len(row) else 0),
@@ -4041,7 +4558,7 @@ def build_video_dataset_from_workbook(data, filename):
             item["engagement"] = item["likes"] + item["comments"] * 2 + item["collects"] * 1.5 + item["shares"] * 2 + item["plays"] * 0.01
             items.append(item)
     if not items:
-        raise ValueError("未识别到视频标题列。请确认 Excel 中包含“标题/视频标题/内容标题”等字段。")
+        raise ValueError("未识别到可追溯的视频文本。请确认 Excel 包含标题、大家都在搜、视频话题或所属合集。")
     return {"source": filename, "count": len(items), "items": items}
 
 def creator_type_from_text(text):
@@ -4102,9 +4619,11 @@ def build_creator_dataset_from_workbook(data, filename, platform_key="douyin"):
             continue
         hidx = find_header(rows)
         headers = [str(x or "").strip() for x in rows[hidx]]
-        author_i = col_index_exact(headers, ("达人昵称", "作者", "账号昵称", "昵称", "博主", "达人", "用户名", "用户昵称"))
-        uid_i = col_index(headers, ("达人UID", "UID", "用户ID", "账号ID", "达人ID"))
-        link_i = col_index(headers, ("达人链接", "主页链接", "账号链接", "用户链接"))
+        author_i = col_index_exact(headers, ("博主昵称", "达人昵称", "作者", "账号昵称", "昵称", "博主", "达人", "用户名", "用户昵称"))
+        uid_i = col_index_exact(headers, ("博主ID", "达人UID", "UID", "用户ID", "账号ID", "达人ID"))
+        link_i = col_index_exact(headers, ("博主链接", "达人链接", "主页链接", "账号链接", "用户链接"))
+        bio_i = col_index_exact(headers, ("博主简介", "个人简介", "账号简介", "简介", "签名"))
+        city_i = col_index_exact(headers, ("IP地址", "IP属地", "城市", "所在地", "地区"))
         title_i = col_index(headers, ("标题", "视频标题", "视频描述", "内容标题", "笔记标题", "作品标题", "title"))
         fans_i = col_index(headers, ("粉丝", "粉丝量", "粉丝数"))
         like_i = col_index(headers, ("点赞", "点赞量", "赞"))
@@ -4125,6 +4644,8 @@ def build_creator_dataset_from_workbook(data, filename, platform_key="douyin"):
             text = " ".join([
                 str(row[title_i] if title_i is not None and title_i < len(row) and row[title_i] else ""),
                 str(row[tag_i] if tag_i is not None and tag_i < len(row) and row[tag_i] else ""),
+                str(row[bio_i] if bio_i is not None and bio_i < len(row) and row[bio_i] else ""),
+                str(row[city_i] if city_i is not None and city_i < len(row) and row[city_i] else ""),
                 filename,
             ])
             ctype = creator_type_from_text(text)
@@ -4132,8 +4653,10 @@ def build_creator_dataset_from_workbook(data, filename, platform_key="douyin"):
                 "id": f"plugin_{platform_key}_{safe_key}",
                 "name": name,
                 "uid": uid,
+                "platform": platform_key,
                 "type": ctype,
-                "city": "待补充",
+                "city": str(row[city_i] if city_i is not None and city_i < len(row) and row[city_i] else "").strip() or "待补充",
+                "bio": str(row[bio_i] if bio_i is not None and bio_i < len(row) and row[bio_i] else "").strip(),
                 "fans": 0,
                 "avgViews": 0,
                 "engagementRate": 0,
@@ -4207,7 +4730,18 @@ def date_label(v):
         return str(v)
     return re.sub(r"\s+", "", str(v or "")).strip()
 
-def period_order(label):
+def vertical_reference_year(reference_year=None):
+    if reference_year is not None:
+        try:
+            year = int(reference_year)
+            if 2000 <= year <= 2100:
+                return year
+        except (TypeError, ValueError):
+            pass
+    return datetime.now(ZoneInfo("Asia/Shanghai")).year
+
+
+def period_order(label, reference_year=None):
     s = date_label(label)
     m = re.search(r"(20\d{2})[./-](\d{1,2})[./-](\d{1,2})", s)
     if m:
@@ -4217,10 +4751,10 @@ def period_order(label):
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}"
     m = re.search(r"(\d{1,2})[./-]\d{1,2}[~-](\d{1,2})[./-](\d{1,2})", s)
     if m:
-        return f"2026-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        return f"{vertical_reference_year(reference_year):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
     m = re.search(r"(\d{1,2})[./-](\d{1,2})", s)
     if m:
-        return f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        return f"{vertical_reference_year(reference_year):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
     return s
 
 def source_platform(filename, sheet_names):
@@ -4243,7 +4777,7 @@ def infer_vertical_platform(filename, sheet, headers=None, row=None, fallback="�
         return "易车"
     return fallback or "自动识别"
 
-def period_from_text(*parts):
+def period_from_text(*parts, reference_year=None):
     text = " ".join(str(x or "") for x in parts)
     m = re.search(r"(20\d{2})[./年-]\s*(\d{1,2})[./月-]\s*(\d{1,2})?", text)
     if m:
@@ -4252,7 +4786,7 @@ def period_from_text(*parts):
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}"
     m = re.search(r"(\d{1,2})[./月-]\s*(\d{1,2})[日]?", text)
     if m:
-        return f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+        return f"{vertical_reference_year(reference_year):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
     m = re.search(r"(第?\d{1,2}周|W\d{1,2}|week\s*\d{1,2}|周度|月度|季度)", text, re.I)
     return m.group(1) if m else ""
 
@@ -4263,12 +4797,13 @@ def vertical_item_key(item):
     return "|".join(str(item.get(k) or "") for k in ("platform", "period", "ownModel", "competitor", "positiveRank", "negativeRank", "sheet"))
 
 def add_vertical_item(items, *, filename, platform, sheet, period, own, comp, pos=None, neg=None, share=None, note=""):
+    sheet = str(sheet or "").strip()
     own = clean_model_name(own)
     comp = clean_model_name(comp)
     if not own or not comp or own == comp:
         return
-    pos_v, neg_v, share_v = num(pos), num(neg), share_num(share)
-    if not pos_v and not neg_v:
+    pos_v, neg_v, share_v = number_or_none(pos), number_or_none(neg), share_or_none(share)
+    if not (pos_v and pos_v > 0) and not (neg_v and neg_v > 0):
         return
     items.append({
         "source": filename,
@@ -4277,9 +4812,9 @@ def add_vertical_item(items, *, filename, platform, sheet, period, own, comp, po
         "periodOrder": period_order(period or sheet),
         "ownModel": own,
         "competitor": comp,
-        "positiveRank": int(pos_v) if pos_v else None,
-        "negativeRank": int(neg_v) if neg_v else None,
-        "share": share_v or None,
+        "positiveRank": int(pos_v) if pos_v and pos_v > 0 else None,
+        "negativeRank": int(neg_v) if neg_v and neg_v > 0 else None,
+        "share": share_v,
         "sheet": sheet,
         "parseMode": note or "auto"
     })
@@ -4333,7 +4868,7 @@ def build_competition_rank_export_items(sheets, filename, fallback_platform):
                 comp=cell_at(row, comp_i),
                 pos=cell_at(row, pos_i),
                 neg=cell_at(row, neg_i),
-                share=cell_at(row, compare_share_i) or cell_at(row, pos_share_i),
+                share=first_share_value(cell_at(row, compare_share_i), cell_at(row, pos_share_i)),
                 note="auto-competition-rank"
             )
     return items
@@ -4365,6 +4900,10 @@ def build_generic_vertical_items(sheets, filename, fallback_platform):
         hidx = find_vertical_header(rows)
         headers = [str(x or "").strip() for x in rows[hidx]]
         if any(h == "正向排名top20车系名称" for h in headers):
+            continue
+        if "本品车系名称" in headers and "竞品车系名称" in headers:
+            # This is the dedicated汽车之家 weekly format handled above. Parsing it
+            # again here creates a second ISO-date observation for the same week.
             continue
         platform_i = col_index(headers, platform_keys)
         period_i = col_index(headers, period_keys)
@@ -4486,7 +5025,7 @@ def build_vertical_media_dataset_from_workbook(data, filename):
                 comp = clean_model_name(row[2])
                 if not own or not comp:
                     continue
-                pos, share, neg = num(row[1]), share_num(row[3]), num(row[4])
+                pos, share, neg = num(row[1]), share_or_none(row[3]), num(row[4])
                 if not pos and not neg:
                     continue
                 items.append({
@@ -4583,31 +5122,32 @@ def validate_vertical_platform(dataset):
                 item["platform"] = platform
     return dataset
 
-def summarize_vertical_assets(platform):
+def summarize_vertical_assets(platform, org_id="local", edition="china"):
+    edition = edition_from(edition)
     with db() as conn:
         row = conn.execute("""
             select
               count(*) as model_count,
               count(distinct nullif(brand_name,'')) as brand_count
             from vehicle_assets
-            where platform=?
-        """, (platform,)).fetchone()
+            where org_id=? and edition=? and platform=?
+        """, (org_id, edition, platform)).fetchone()
         rank_row = conn.execute("""
             select
               count(*) as relation_count,
               count(distinct period) as period_count
             from vertical_rank_assets
-            where platform=?
-        """, (platform,)).fetchone()
+            where org_id=? and edition=? and platform=?
+        """, (org_id, edition, platform)).fetchone()
         brands = conn.execute("""
             select coalesce(nullif(brand_name,''),'待识别品牌') as brand_name,
                    count(*) as model_count
             from vehicle_assets
-            where platform=?
+            where org_id=? and edition=? and platform=?
             group by coalesce(nullif(brand_name,''),'待识别品牌')
             order by model_count desc, brand_name asc
             limit 12
-        """, (platform,)).fetchall()
+        """, (org_id, edition, platform)).fetchall()
     return {
         "platform": platform,
         "brandCount": int(row["brand_count"] or 0),
@@ -4617,9 +5157,10 @@ def summarize_vertical_assets(platform):
         "topBrands": [dict(x) for x in brands]
     }
 
-def vertical_assets_payload(platform="all", limit=5000):
+def vertical_assets_payload(platform="all", limit=5000, org_id="local", edition="china"):
+    edition = edition_from(edition)
     platforms = VERTICAL_PLATFORMS if platform in ("", "all", "全部来源") else [platform]
-    summaries = [summarize_vertical_assets(p) for p in platforms if p in VERTICAL_PLATFORMS]
+    summaries = [summarize_vertical_assets(p, org_id, edition) for p in platforms if p in VERTICAL_PLATFORMS]
     with db() as conn:
         placeholders = ",".join("?" for _ in platforms if _ in VERTICAL_PLATFORMS)
         if not placeholders:
@@ -4628,10 +5169,10 @@ def vertical_assets_payload(platform="all", limit=5000):
             select platform, period, own_model, competitor_model, positive_rank, negative_rank,
                    compare_share, source_file, sheet, parse_mode, updated_at
             from vertical_rank_assets
-            where platform in ({placeholders})
+            where org_id=? and edition=? and platform in ({placeholders})
             order by platform, period, own_model, coalesce(positive_rank, 999), coalesce(negative_rank, 999), competitor_model
             limit ?
-        """, (*[p for p in platforms if p in VERTICAL_PLATFORMS], int(limit or 5000))).fetchall()
+        """, (org_id, edition, *[p for p in platforms if p in VERTICAL_PLATFORMS], int(limit or 5000))).fetchall()
     items = [{
         "source": row["source_file"] or "vertical_rank_assets",
         "platform": row["platform"],
@@ -4665,13 +5206,65 @@ def vertical_assets_payload(platform="all", limit=5000):
         "sources": list(source_map.values())
     }
 
-def remember_vertical_dataset(data, filename, dataset):
+
+def build_opportunity_vertical_evidence(own_model, competitors, org_id="local", edition="china"):
+    """Use latest vertical-media relationship rows as cross-validation evidence only."""
+    own_model = str(own_model or "").strip()
+    competitors = sorted({str(item or "").strip() for item in competitors or [] if str(item or "").strip()})
+    if not own_model or not competitors:
+        return []
+    placeholders = ",".join("?" for _ in competitors)
+    with db() as conn:
+        rows = conn.execute(
+            f"""select platform, period, own_model, competitor_model, positive_rank, negative_rank,
+                       compare_share, source_file, sheet, parse_mode, updated_at
+                from vertical_rank_assets
+                where org_id=? and edition=? and own_model=? and competitor_model in ({placeholders})
+                order by platform, competitor_model, updated_at desc""",
+            (org_id, edition_from(edition), own_model, *competitors),
+        ).fetchall()
+    latest = {}
+    for row in rows:
+        key = (row["platform"], row["competitor_model"])
+        existing = latest.get(key)
+        if existing is None or (period_order(row["period"]), row["updated_at"] or "") > (period_order(existing["period"]), existing["updated_at"] or ""):
+            latest[key] = row
+    output = []
+    for row in sorted(latest.values(), key=lambda item: (item["platform"], item["competitor_model"])):
+        positive = row["positive_rank"] if row["positive_rank"] is not None else "—"
+        negative = row["negative_rank"] if row["negative_rank"] is not None else "—"
+        share = float(row["compare_share"]) if row["compare_share"] is not None else None
+        share_text = f"{share:.1%}" if share is not None else "未提供"
+        claim = f"{row['platform']} {row['period']}：{own_model} 对比 {row['competitor_model']}，正向第 {positive}，反向第 {negative}，对比占比 {share_text}。"
+        output.append({
+            "id": stable_id("opportunity-vertical", row["platform"], row["period"], own_model, row["competitor_model"], row["source_file"], row["updated_at"]),
+            "source_type": "vertical_media",
+            "source_ref": row["source_file"] or "vertical_rank_assets",
+            "platform": row["platform"],
+            "period": row["period"],
+            "model": own_model,
+            "competitor": row["competitor_model"],
+            "claim": claim,
+            "confidence": .7 if row["positive_rank"] is not None and row["negative_rank"] is not None else .55,
+            "payload": {
+                "positiveRank": row["positive_rank"],
+                "negativeRank": row["negative_rank"],
+                "compareShare": share,
+                "sheet": row["sheet"] or "",
+                "parseMode": row["parse_mode"] or "asset-db",
+                "updatedAt": row["updated_at"] or "",
+            },
+        })
+    return output
+
+def remember_vertical_dataset(data, filename, dataset, org_id="local", edition="china"):
     validate_vertical_platform(dataset)
     init_db()
     imported_at = now()
     h = file_hash(data)
     platform = dataset["platform"]
-    periods = sorted(set(dataset.get("periods") or [x.get("period") for x in dataset.get("items", []) if x.get("period")]))
+    edition = edition_from(edition)
+    periods = sorted(set(dataset.get("periods") or [x.get("period") for x in dataset.get("items", []) if x.get("period")]), key=period_order)
     models = set(dataset.get("models") or [])
     for item in dataset.get("items", []):
         if item.get("ownModel"):
@@ -4680,11 +5273,17 @@ def remember_vertical_dataset(data, filename, dataset):
             models.add(item["competitor"])
 
     with db() as conn:
+        # A file import is a snapshot. Re-importing the same named source must
+        # retract rows that disappeared after parser fixes or source updates.
+        conn.execute(
+            "delete from vertical_rank_assets where org_id=? and edition=? and platform=? and (file_hash=? or source_file=?)",
+            (org_id, edition, platform, h, filename),
+        )
         conn.execute("""
             insert into vertical_import_batches
-            (id, platform, filename, file_hash, periods_json, model_count, item_count, imported_at, parser_version)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            on conflict(platform, file_hash) do update set
+            (id, org_id, edition, platform, filename, file_hash, periods_json, model_count, item_count, imported_at, parser_version)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(org_id, edition, platform, file_hash) do update set
               filename=excluded.filename,
               periods_json=excluded.periods_json,
               model_count=excluded.model_count,
@@ -4692,7 +5291,9 @@ def remember_vertical_dataset(data, filename, dataset):
               imported_at=excluded.imported_at,
               parser_version=excluded.parser_version
         """, (
-            stable_id("vertical-batch", platform, h),
+            stable_id("vertical-batch", org_id, edition, platform, h),
+            org_id,
+            edition,
             platform,
             filename,
             h,
@@ -4706,24 +5307,31 @@ def remember_vertical_dataset(data, filename, dataset):
             brand = infer_brand_from_model(model)
             period_first = periods[0] if periods else ""
             period_last = periods[-1] if periods else ""
+            existing_periods = conn.execute(
+                "select period_first, period_last from vehicle_assets where org_id=? and edition=? and platform=? and model_name=?",
+                (org_id, edition, platform, model),
+            ).fetchone()
+            if existing_periods:
+                candidates = [p for p in (existing_periods["period_first"], existing_periods["period_last"], period_first, period_last) if p]
+                if candidates:
+                    period_first = min(candidates, key=period_order)
+                    period_last = max(candidates, key=period_order)
             conn.execute("""
                 insert into vehicle_assets
-                (id, platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source,
+                (id, org_id, edition, platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source,
                  period_first, period_last, import_count, extra_json)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                on conflict(platform, model_name) do update set
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                on conflict(org_id, edition, platform, model_name) do update set
                   brand_name=excluded.brand_name,
                   last_seen_at=excluded.last_seen_at,
                   last_source=excluded.last_source,
-                  period_first=case
-                    when vehicle_assets.period_first='' or excluded.period_first < vehicle_assets.period_first then excluded.period_first
-                    else vehicle_assets.period_first end,
-                  period_last=case
-                    when excluded.period_last > vehicle_assets.period_last then excluded.period_last
-                    else vehicle_assets.period_last end,
+                  period_first=excluded.period_first,
+                  period_last=excluded.period_last,
                   import_count=vehicle_assets.import_count+1
             """, (
-                stable_id("vehicle-asset", platform, model),
+                stable_id("vehicle-asset", org_id, edition, platform, model),
+                org_id,
+                edition,
                 platform,
                 brand,
                 model,
@@ -4741,10 +5349,10 @@ def remember_vertical_dataset(data, filename, dataset):
                 continue
             conn.execute("""
                 insert into vertical_rank_assets
-                (id, platform, period, own_model, competitor_model, positive_rank, negative_rank, compare_share,
+                (id, org_id, edition, platform, period, own_model, competitor_model, positive_rank, negative_rank, compare_share,
                  source_file, file_hash, sheet, parse_mode, first_seen_at, updated_at)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(platform, period, own_model, competitor_model) do update set
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(org_id, edition, platform, period, own_model, competitor_model) do update set
                   positive_rank=excluded.positive_rank,
                   negative_rank=excluded.negative_rank,
                   compare_share=excluded.compare_share,
@@ -4754,7 +5362,9 @@ def remember_vertical_dataset(data, filename, dataset):
                   parse_mode=excluded.parse_mode,
                   updated_at=excluded.updated_at
             """, (
-                stable_id("vertical-rank", item_platform, item.get("period"), item.get("ownModel"), item.get("competitor")),
+                stable_id("vertical-rank", org_id, edition, item_platform, item.get("period"), item.get("ownModel"), item.get("competitor")),
+                org_id,
+                edition,
                 item_platform,
                 item.get("period") or "",
                 item.get("ownModel") or "",
@@ -4769,9 +5379,11 @@ def remember_vertical_dataset(data, filename, dataset):
                 imported_at,
                 imported_at
             ))
-    dataset["assetSummary"] = summarize_vertical_assets(platform)
+    dataset["assetSummary"] = summarize_vertical_assets(platform, org_id, edition)
     dataset["remembered"] = {
         "platform": platform,
+        "orgId": org_id,
+        "edition": edition,
         "fileHash": h,
         "modelCount": len(models),
         "itemCount": len(dataset.get("items", [])),
@@ -5116,9 +5728,16 @@ def save_agent_run_record(run, steps, reviews, evidence):
                 )
             )
 
-def agent_run_payload(run_id):
+def agent_run_payload(run_id, org_id=""):
     with db() as conn:
-        run = conn.execute("select * from agent_runs where id=?", (run_id,)).fetchone()
+        if org_id:
+            run = conn.execute(
+                """select * from agent_runs
+                   where id=? and (org_id=? or (?='local' and coalesce(org_id,'')=''))""",
+                (run_id, org_id, org_id),
+            ).fetchone()
+        else:
+            run = conn.execute("select * from agent_runs where id=?", (run_id,)).fetchone()
         if not run:
             return None
         steps = [rowdict(r) for r in conn.execute("select * from agent_steps where run_id=? order by step_order", (run_id,)).fetchall()]
@@ -5137,10 +5756,860 @@ def agent_run_payload(run_id):
     out.update({"steps": steps, "reviews": reviews, "evidence": evidence})
     return out
 
+
+def save_opportunity_run_review(run_id, label, decision="confirmed", note="", org_id=""):
+    run_id = str(run_id or "").strip()
+    label = str(label or "").strip()
+    decision = str(decision or "confirmed").strip()
+    note = str(note or "").strip()
+    if not run_id or not label:
+        raise ValueError("缺少机会地图运行ID或标签")
+    run = agent_run_payload(run_id, org_id)
+    if not run or run.get("task_type") != "opportunity_map":
+        raise ValueError("未找到同一客户空间的机会地图运行记录")
+    review_id = stable_id("opportunity-human-review", run_id, label, decision, note)
+    stamp = now()
+    with db() as conn:
+        row = conn.execute(
+            "select * from agent_reviews where run_id=? and findings_json like ? order by created_at desc limit 1",
+            (run_id, f'%"label": "{label}"%'),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "update agent_reviews set verdict=?, severity=?, retry_instruction=?, created_at=? where id=?",
+                (decision, "info" if decision == "confirmed" else "high", note, stamp, row["id"]),
+            )
+        else:
+            conn.execute(
+                """insert into agent_reviews
+                   (id, run_id, step_id, reviewer_name, verdict, severity, findings_json,
+                    evidence_json, retry_instruction, created_at)
+                   values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    review_id,
+                    run_id,
+                    "",
+                    "MMN人工确认台",
+                    decision,
+                    "info" if decision == "confirmed" else "high",
+                    json.dumps([{"label": label, "note": note}], ensure_ascii=False),
+                    "[]",
+                    note,
+                    stamp,
+                ),
+            )
+    return {"ok": True, "runId": run_id, "label": label, "decision": decision, "note": note}
+
+
+def _cockpit_execution_cycle_payload(row):
+    item = rowdict(row) if not isinstance(row, dict) else dict(row)
+    plan = json.loads(item.pop("plan_json", "{}") or "{}")
+    monitoring = json.loads(item.pop("monitoring_json", "{}") or "{}")
+    feedback_signal = None
+    if item.get("status") == "feedback_recorded" and monitoring:
+        feedback_signal = {
+            "model": item.get("model", ""),
+            "attribute": item.get("opportunity_label", ""),
+            "label": item.get("opportunity_label", ""),
+            "platform": plan.get("platform", ""),
+            "volume": monitoring.get("volume", 0),
+            "interaction": monitoring.get("interaction", 0),
+            "nsr": monitoring.get("nsr", 0),
+            "purchaseImpact": plan.get("purchaseImpact", 3),
+            "source": "cockpit_execution_monitoring",
+            "cycleId": item.get("id"),
+            "observedAt": monitoring.get("observedAt", ""),
+        }
+    return {
+        **item,
+        "runId": item.get("opportunity_run_id", ""),
+        "label": item.get("opportunity_label", ""),
+        "plan": plan,
+        "monitoring": monitoring,
+        "feedbackSignal": feedback_signal,
+    }
+
+
+def cockpit_execution_cycles_payload(edition, model, *, org_id=""):
+    with db() as conn:
+        rows = conn.execute(
+            """select * from cockpit_execution_cycles
+               where edition=? and model=? and (?='' or org_id=?)
+               order by updated_at desc, created_at desc""",
+            (edition or "china", model or "", org_id or "", org_id or ""),
+        ).fetchall()
+    cycles = [_cockpit_execution_cycle_payload(row) for row in rows]
+    return {"ok": True, "cycles": cycles, "feedbackSignals": [item["feedbackSignal"] for item in cycles if item.get("feedbackSignal")]}
+
+
+def create_cockpit_execution_cycle(body, *, org_id="", user_id="local"):
+    run_id = str(body.get("runId") or "").strip()
+    label = str(body.get("label") or "").strip()
+    option_id = str(body.get("optionId") or "").strip()
+    if not run_id or not label:
+        raise ValueError("缺少机会地图运行ID或已验证属性标签")
+    with db() as conn:
+        if org_id:
+            run = conn.execute(
+                """select * from agent_runs
+                   where id=? and task_type='opportunity_map'
+                     and (org_id=? or (?='local' and coalesce(org_id,'')=''))""",
+                (run_id, org_id, org_id),
+            ).fetchone()
+        else:
+            run = conn.execute("select * from agent_runs where id=? and task_type='opportunity_map'", (run_id,)).fetchone()
+        if not run:
+            raise ValueError("未找到对应的机会地图运行记录")
+        final_output = json.loads(run["final_output_json"] or "{}")
+        verified = next((item for item in final_output.get("opportunities", []) if item.get("label") == label and item.get("evidenceStatus") == "aligned" and item.get("category") in {"repair", "seize", "amplify"}), None)
+        if not verified:
+            raise ValueError("仅双旗舰模型验证通过的标签可以纳入传播执行")
+        recommendation = next((item for item in final_output.get("executionRecommendations", []) if item.get("label") == label), None)
+        if not recommendation:
+            recommendation = (derive_execution_recommendations([verified], final_output.get("marketSignals", [])) or [None])[0]
+        if not recommendation:
+            raise ValueError("该标签尚未形成可执行的传播建议")
+        options = [dict(option) for option in recommendation.get("options") or [] if str(option.get("id") or "").strip()]
+        if not options:
+            options = [{
+                "id": "legacy_default",
+                "title": recommendation.get("action") or "既有策略",
+                "action": recommendation.get("action") or "既有策略",
+                "competitorModel": recommendation.get("competitorModel") or verified.get("leadCompetitorModel") or "待补充竞品",
+                "platform": recommendation.get("platform") or "待补充平台",
+                "contentScenario": recommendation.get("contentScenario") or f"{label}真实使用场景",
+                "description": "历史单一策略记录，沿用原执行方案。",
+            }]
+        if not option_id:
+            raise ValueError("请选择策略选项后再纳入传播执行")
+        selected_option = next((option for option in options if option.get("id") == option_id), None)
+        if not selected_option:
+            raise ValueError("所选策略选项不存在或不属于该属性标签")
+        existing = conn.execute(
+            """select * from cockpit_execution_cycles
+               where opportunity_run_id=? and opportunity_label=? and org_id=?
+               order by created_at desc limit 1""",
+            (run_id, label, org_id or run["org_id"] or "local"),
+        ).fetchone()
+        if existing:
+            return _cockpit_execution_cycle_payload(existing)
+        cycle_id = str(uuid.uuid4())
+        created_at = now()
+        plan = {
+            **recommendation,
+            "options": options,
+            "selectedOptionId": option_id,
+            "selectedOption": {
+                **selected_option,
+                "competitorModel": selected_option.get("competitorModel") or recommendation.get("competitorModel") or verified.get("leadCompetitorModel") or "待补充竞品",
+                "platform": selected_option.get("platform") or recommendation.get("platform") or "待补充平台",
+                "action": selected_option.get("action") or recommendation.get("action") or "既有策略",
+                "contentScenario": selected_option.get("contentScenario") or recommendation.get("contentScenario") or f"{label}真实使用场景",
+            },
+            "competitorModel": selected_option.get("competitorModel") or recommendation.get("competitorModel") or verified.get("leadCompetitorModel") or "待补充竞品",
+            "platform": selected_option.get("platform") or recommendation.get("platform") or "待补充平台",
+            "action": selected_option.get("action") or recommendation.get("action") or "既有策略",
+            "contentScenario": selected_option.get("contentScenario") or recommendation.get("contentScenario") or f"{label}真实使用场景",
+            "purchaseImpact": verified.get("purchaseImpact", 3),
+            "opportunityScore": verified.get("opportunityScore"),
+        }
+        conn.execute(
+            """insert into cockpit_execution_cycles
+               (id, org_id, user_id, edition, model, opportunity_run_id, opportunity_label, status, plan_json, monitoring_json, created_at, updated_at)
+               values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cycle_id, org_id or run["org_id"] or "local", user_id or run["user_id"] or "local", run["edition"], run["model"], run_id, label, "planned", json.dumps(plan, ensure_ascii=False), "{}", created_at, created_at),
+        )
+        row = conn.execute("select * from cockpit_execution_cycles where id=?", (cycle_id,)).fetchone()
+    return _cockpit_execution_cycle_payload(row)
+
+
+def record_cockpit_execution_monitoring(body, *, org_id=""):
+    cycle_id = str(body.get("cycleId") or "").strip()
+    if not cycle_id:
+        raise ValueError("缺少传播执行记录ID")
+    try:
+        volume = float(body.get("volume") or 0)
+        interaction = float(body.get("interaction") or 0)
+        nsr = float(body.get("nsr"))
+    except (TypeError, ValueError):
+        raise ValueError("请填写有效的声量、互动和NSR结果")
+    if volume < 0 or interaction < 0 or not -1 <= nsr <= 1:
+        raise ValueError("声量和互动不能为负，NSR需介于 -1 与 1")
+    with db() as conn:
+        if org_id:
+            row = conn.execute(
+                "select * from cockpit_execution_cycles where id=? and org_id=?",
+                (cycle_id, org_id),
+            ).fetchone()
+        else:
+            row = conn.execute("select * from cockpit_execution_cycles where id=?", (cycle_id,)).fetchone()
+        if not row:
+            raise ValueError("未找到传播执行记录")
+        monitoring = {
+            "volume": round(volume, 4),
+            "interaction": round(interaction, 4),
+            "nsr": round(nsr, 6),
+            "observation": str(body.get("observation") or "").strip(),
+            "observedAt": now(),
+            "source": "cockpit_execution_monitoring",
+        }
+        conn.execute(
+            "update cockpit_execution_cycles set status=?, monitoring_json=?, updated_at=? where id=?",
+            ("feedback_recorded", json.dumps(monitoring, ensure_ascii=False), monitoring["observedAt"], cycle_id),
+        )
+        updated = conn.execute("select * from cockpit_execution_cycles where id=?", (cycle_id,)).fetchone()
+    return _cockpit_execution_cycle_payload(updated)
+
+
+OPPORTUNITY_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx"}
+OPPORTUNITY_MAX_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _opportunity_document_path(document_id, filename):
+    safe_name = sanitize_filename(filename) or "product_material"
+    root = DATA_DIR / "opportunity" / "documents"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{document_id}_{safe_name}"
+
+
+def ingest_opportunity_product_document(data, filename, *, org_id="", user_id="local", brand="", model="", version="", edition="china"):
+    info = validate_upload(filename, data)
+    if info["extension"] not in OPPORTUNITY_DOCUMENT_EXTENSIONS:
+        raise BFParseError("机会地图本品资料仅支持 PDF、DOC、DOCX、PPT、PPTX")
+    parsed = parse_document(filename, data)
+    digest = hashlib.sha256(data).hexdigest()
+    document_id = stable_id("opportunity-document", org_id, digest)
+    storage_path = _opportunity_document_path(document_id, info["filename"])
+    if not storage_path.exists():
+        storage_path.write_bytes(data)
+    payload = build_product_document(
+        parsed,
+        document_id=document_id,
+        filename=info["filename"],
+        sha256=digest,
+        brand=brand,
+        model=model,
+        version=version,
+    )
+    created = now()
+    with db() as conn:
+        conn.execute(
+            """insert or replace into product_fact_documents
+            (id, org_id, user_id, edition, brand, model, version, filename, sha256, storage_path, payload_json, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (document_id, org_id, user_id, edition, brand, model, payload.get("version") or version, info["filename"], digest,
+             str(storage_path), json.dumps(payload, ensure_ascii=False), created),
+        )
+    return payload
+
+
+def latest_opportunity_product_document(edition="china", model="", org_id=""):
+    clauses = ["edition=?"]
+    params = [edition_from(edition)]
+    if model:
+        clauses.append("model=?")
+        params.append(str(model).strip())
+    if org_id:
+        clauses.append("org_id=?")
+        params.append(str(org_id).strip())
+    with db() as conn:
+        row = conn.execute(
+            f"select * from product_fact_documents where {' and '.join(clauses)} order by created_at desc limit 1",
+            tuple(params),
+        ).fetchone()
+    if not row:
+        return None
+    payload = json.loads(row["payload_json"] or "{}")
+    return {
+        "documentId": payload.get("documentId") or row["id"],
+        "filename": payload.get("filename") or row["filename"],
+        "brand": payload.get("brand") or row["brand"] or "",
+        "model": payload.get("model") or row["model"] or "",
+        "version": payload.get("version") or row["version"] or "",
+        "factCount": len(payload.get("facts") or []),
+        "manualReviewCount": len(payload.get("manualReviewItems") or []),
+    }
+
+
+def _opportunity_document_payload(document_id, org_id=""):
+    with db() as conn:
+        if org_id:
+            row = conn.execute(
+                """select * from product_fact_documents
+                   where id=? and (org_id=? or (?='local' and coalesce(org_id,'')=''))""",
+                (str(document_id or ""), org_id, org_id),
+            ).fetchone()
+        else:
+            row = conn.execute("select * from product_fact_documents where id=?", (str(document_id or ""),)).fetchone()
+    return json.loads(row["payload_json"] or "{}") if row else None
+
+
+def _opportunity_document_review_items(document):
+    document_id = document.get("documentId") or ""
+    facts_by_claim = {str(item.get("claim") or ""): item for item in document.get("facts") or [] if item.get("claim")}
+    items = []
+    for index, source in enumerate(document.get("manualReviewItems") or []):
+        claim = str(source.get("claim") or source.get("reason") or "").strip()
+        fact = facts_by_claim.get(claim) or {}
+        evidence = fact.get("evidence") or {}
+        item_id = stable_id("opportunity-manual-item", document_id, index, source.get("type"), claim)
+        if source.get("type") == "fact_alignment":
+            reasons = ["该段同时命中多个统一标签，需要人工选择主标签"]
+        elif source.get("type") == "version_conflict":
+            reasons = ["文件名、封面或正文出现多个车型版本，需要确认适用版本"]
+        else:
+            reasons = [source.get("reason") or "证据不足，需要人工确认"]
+        items.append({
+            "id": item_id,
+            "source": "own_document",
+            "type": source.get("type") or "manual_review",
+            "title": claim[:80] or f"待确认项 {index + 1}",
+            "claim": claim,
+            "candidateLabels": list(source.get("labels") or fact.get("labels") or source.get("candidates") or []),
+            "reasons": reasons,
+            "evidence": {
+                "pageNo": evidence.get("pageNo"),
+                "sourceRef": evidence.get("sourceRef") or document.get("filename") or "",
+                "excerpt": evidence.get("excerpt") or claim,
+            },
+            "factId": fact.get("id") or "",
+            "status": "pending",
+            "decision": None,
+        })
+    return items
+
+
+def _opportunity_manual_decisions(document_id):
+    review_run_id = f"document:{document_id}"
+    with db() as conn:
+        rows = conn.execute(
+            "select * from agent_reviews where run_id=? and step_id<>'' order by created_at",
+            (review_run_id,),
+        ).fetchall()
+    decisions = {}
+    for row in rows:
+        findings = json.loads(row["findings_json"] or "[]")
+        decision = findings[0] if findings else {"action": row["verdict"], "note": row["retry_instruction"] or ""}
+        decisions[row["step_id"]] = {**decision, "status": row["verdict"], "updatedAt": row["created_at"]}
+    return decisions
+
+
+def opportunity_manual_review_payload(document_id, run_id="", org_id=""):
+    document = _opportunity_document_payload(document_id, org_id)
+    if not document:
+        raise ValueError("未找到本品产品资料")
+    if run_id and not agent_run_payload(run_id, org_id):
+        raise ValueError("未找到同一客户空间的机会地图运行记录")
+    items = _opportunity_document_review_items(document)
+    decisions = _opportunity_manual_decisions(document_id)
+    for item in items:
+        if item["id"] in decisions:
+            item["decision"] = decisions[item["id"]]
+            item["status"] = decisions[item["id"]]["status"]
+    counts = {
+        "total": len(items),
+        "pending": sum(item["status"] == "pending" for item in items),
+        "pendingRecheck": sum(item["status"].endswith("_pending_recheck") for item in items),
+        "needsEvidence": sum(item["status"] == "needs_evidence" for item in items),
+        "processed": sum(item["status"] in {"verified", "rejected"} for item in items),
+    }
+    counts["blocking"] = counts["pending"] + counts["pendingRecheck"] + counts["needsEvidence"]
+    return {
+        "ok": True,
+        "document": {
+            "documentId": document.get("documentId"),
+            "filename": document.get("filename"),
+            "brand": document.get("brand"),
+            "model": document.get("model"),
+            "version": document.get("version"),
+        },
+        "runId": run_id or "",
+        "counts": counts,
+        "items": items,
+        "actions": ["accepted", "corrected", "rejected", "needs_evidence"],
+    }
+
+
+def save_opportunity_manual_review(body, *, user_id="local", org_id=""):
+    document_id = str(body.get("documentId") or "").strip()
+    action = str(body.get("action") or "").strip()
+    selected_label = str(body.get("selectedLabel") or body.get("correctedLabel") or "").strip()
+    note = str(body.get("note") or "").strip()
+    if action not in {"accepted", "corrected", "rejected", "needs_evidence"}:
+        raise ValueError("请选择采纳、修正、驳回或待补证")
+    queue = opportunity_manual_review_payload(document_id, str(body.get("runId") or ""), org_id)
+    requested_ids = body.get("itemIds") or [body.get("itemId")]
+    requested_ids = [str(item_id or "").strip() for item_id in requested_ids if str(item_id or "").strip()]
+    items_by_id = {item["id"]: item for item in queue["items"]}
+    selected_items = [items_by_id[item_id] for item_id in requested_ids if item_id in items_by_id]
+    if not selected_items or len(selected_items) != len(requested_ids):
+        raise ValueError("请选择至少一个待确认项")
+    if len(selected_items) > 1 and action != "needs_evidence":
+        raise ValueError("批量操作仅支持待补证，采纳、修正和驳回请逐项确认")
+    if action in {"accepted", "corrected"} and any(not item.get("factId") for item in selected_items):
+        raise ValueError("该汇总项不对应单一产品事实，不能直接采纳或修正标签；请选择待补证或逐条补充")
+    if action in {"accepted", "corrected"} and len(selected_items) == 1 and selected_items[0].get("candidateLabels") and not selected_label:
+        raise ValueError("请先选择或输入正确的统一标签")
+    if action in {"accepted", "corrected"} and selected_label not in UNIFIED_LABELS:
+        raise ValueError("请选择MMN统一标签")
+    if action in {"corrected", "rejected", "needs_evidence"} and not note:
+        raise ValueError("修正、驳回或待补证时请填写人工依据")
+    verdict = {
+        "accepted": "accepted_pending_recheck",
+        "corrected": "corrected_pending_recheck",
+        "rejected": "rejected",
+        "needs_evidence": "needs_evidence",
+    }[action]
+    review_run_id = f"document:{document_id}"
+    stamp = now()
+    saved = []
+    with db() as conn:
+        for item in selected_items:
+            decision = {
+                "itemId": item["id"],
+                "action": action,
+                "selectedLabel": selected_label,
+                "note": note,
+                "decidedBy": user_id,
+                "decidedAt": stamp,
+                "sourceRunId": str(body.get("runId") or ""),
+            }
+            review_id = stable_id("opportunity-manual-decision", review_run_id, item["id"])
+            conn.execute(
+                """insert or replace into agent_reviews
+                (id, run_id, step_id, reviewer_name, verdict, severity, findings_json, evidence_json, retry_instruction, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    review_id,
+                    review_run_id,
+                    item["id"],
+                    user_id or "MMN人工确认台",
+                    verdict,
+                    "info" if action in {"accepted", "corrected"} else "warning",
+                    json.dumps([decision], ensure_ascii=False),
+                    json.dumps([item.get("evidence") or {}], ensure_ascii=False),
+                    note,
+                    stamp,
+                ),
+            )
+            saved.append(decision)
+    return {"ok": True, "savedCount": len(saved), "decision": saved[0] if len(saved) == 1 else None, "decisions": saved, "recheckRequired": verdict.endswith("_pending_recheck")}
+
+
+def apply_opportunity_manual_decisions(document, org_id=""):
+    if not document or not document.get("documentId"):
+        return document
+    updated = json.loads(json.dumps(document, ensure_ascii=False))
+    stored = _opportunity_document_payload(updated["documentId"], org_id) or {}
+    # Review item IDs include their position in the original document queue. Always
+    # rebuild from that canonical queue so removing an earlier item cannot shift a
+    # later item's ID between the pre-model and post-model passes.
+    if stored.get("manualReviewItems") is not None:
+        updated["manualReviewItems"] = json.loads(json.dumps(stored.get("manualReviewItems") or [], ensure_ascii=False))
+    elif not updated.get("manualReviewItems"):
+        updated["manualReviewItems"] = []
+    if not updated.get("facts"):
+        updated["facts"] = list(stored.get("facts") or [])
+    review_items = _opportunity_document_review_items(updated)
+    source_by_id = {item["id"]: source for item, source in zip(review_items, updated.get("manualReviewItems") or [])}
+    decisions = _opportunity_manual_decisions(updated["documentId"])
+    facts_by_claim = {str(item.get("claim") or ""): item for item in updated.get("facts") or [] if item.get("claim")}
+    remaining = []
+    rejected_fact_ids = set()
+    for item in review_items:
+        source = source_by_id[item["id"]]
+        decision = decisions.get(item["id"])
+        if not decision:
+            remaining.append(source)
+            continue
+        fact = facts_by_claim.get(item.get("claim") or "")
+        status = decision.get("status") or "pending"
+        selected_label = decision.get("selectedLabel") or ""
+        if status == "rejected":
+            if fact and fact.get("id"):
+                rejected_fact_ids.add(fact["id"])
+            continue
+        if fact and selected_label:
+            fact["label"] = selected_label
+            fact["labels"] = [selected_label]
+            fact["alignmentStatus"] = "human_verified" if status == "verified" else "human_corrected_pending_recheck"
+        if status == "verified":
+            continue
+        remaining.append({**source, "reviewStatus": status, "selectedLabel": selected_label, "reviewNote": decision.get("note") or ""})
+    updated["facts"] = [fact for fact in updated.get("facts") or [] if fact.get("id") not in rejected_fact_ids]
+    updated["manualReviewItems"] = remaining
+    updated["status"] = "manual_required" if remaining else "parsed"
+    return updated
+
+
+def finalize_opportunity_manual_rechecks(document_id, validation, *, models_verified=False, org_id=""):
+    if not models_verified:
+        return 0
+    document = _opportunity_document_payload(document_id, org_id) or {}
+    review_items = {item["id"]: item for item in _opportunity_document_review_items(document)}
+    aligned_items = {
+        str(item.get("label") or "").strip(): item
+        for item in validation.get("items") or []
+        if item.get("evidenceStatus") == "aligned"
+    }
+    review_run_id = f"document:{document_id}"
+    updated_count = 0
+    with db() as conn:
+        rows = conn.execute(
+            "select * from agent_reviews where run_id=? and verdict in ('accepted_pending_recheck','corrected_pending_recheck')",
+            (review_run_id,),
+        ).fetchall()
+        for row in rows:
+            findings = json.loads(row["findings_json"] or "[]")
+            decision = findings[0] if findings else {}
+            selected_label = str(decision.get("selectedLabel") or "").strip()
+            review_item = review_items.get(row["step_id"]) or {}
+            fact_id = str(review_item.get("factId") or "").strip()
+            aligned_item = aligned_items.get(selected_label) or {}
+            common_evidence_ids = set(aligned_item.get("commonEvidenceIds") or [])
+            if not selected_label or not fact_id or fact_id not in common_evidence_ids:
+                continue
+            decision.update({"verifiedAt": now(), "verificationStatus": "aligned"})
+            conn.execute(
+                "update agent_reviews set verdict='verified', findings_json=?, created_at=? where id=?",
+                (json.dumps([decision], ensure_ascii=False), now(), row["id"]),
+            )
+            updated_count += 1
+    return updated_count
+
+
+class _OpportunityNoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch_opportunity_official_page(url, *, allowed_domains=None, max_bytes=OPPORTUNITY_MAX_SOURCE_BYTES):
+    current = str(url or "").strip()
+    if not is_public_official_url(current, allowed_domains=allowed_domains):
+        raise ValueError("官网地址不是允许的公网 HTTP(S) 来源")
+    opener = build_opener(_OpportunityNoRedirect)
+    for _ in range(4):
+        if not is_public_official_url(current, allowed_domains=allowed_domains):
+            raise ValueError("官网重定向目标未通过公网来源门禁")
+        if not robots_allowed(current, user_agent="MMNOpportunityCrawler/1.0"):
+            raise ValueError("robots.txt 不允许抓取或无法确认权限")
+        request = Request(current, headers={"User-Agent": "MMNOpportunityCrawler/1.0 (+local compliant research)", "Accept": "text/html,application/xhtml+xml"})
+        try:
+            with opener.open(request, timeout=20) as response:
+                content_type = (response.headers.get("Content-Type") or "").lower()
+                if content_type and not any(kind in content_type for kind in ("text/html", "application/xhtml", "text/plain")):
+                    raise ValueError("官网响应不是 HTML/文本产品页")
+                body = response.read(max_bytes + 1)
+                if len(body) > max_bytes:
+                    raise ValueError("官网响应超过大小限制")
+                final_url = response.geturl() or current
+                if not is_public_official_url(final_url, allowed_domains=allowed_domains):
+                    raise ValueError("官网最终地址未通过公网来源门禁")
+                return {"url": current, "finalUrl": final_url, "contentType": content_type, "body": body.decode("utf-8", errors="replace"), "fetchedAt": now(), "sha256": hashlib.sha256(body).hexdigest(), "status": "verified"}
+        except HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308}:
+                location = exc.headers.get("Location")
+                if not location:
+                    break
+                current = urlparse(current)._replace(path=location).geturl() if not location.startswith("http") else location
+                continue
+            if exc.code in {401, 403, 429}:
+                raise ValueError(f"官网页面需要人工确认（HTTP {exc.code}）") from exc
+            raise
+    raise ValueError("官网重定向次数超过限制")
+
+
+def _opportunity_fallback_analysis(facts):
+    output = []
+    seen = set()
+    for fact in facts:
+        label = fact.get("label")
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        output.append({"label": label, "factStrength": min(0.95, max(0.35, float(fact.get("confidence") or 0.45))), "direction": "seize", "reason": fact.get("claim", ""), "evidenceIds": [fact.get("id")], "confidence": float(fact.get("confidence") or 0.45)})
+    return output
+
+
+def _opportunity_model_analysis(provider, evidence_packet, facts):
+    facts = list(facts or [])
+    pending_facts = [fact for fact in facts if fact.get("alignmentStatus") == "human_corrected_pending_recheck"]
+    remaining_facts = [fact for fact in facts if fact.get("alignmentStatus") != "human_corrected_pending_recheck"]
+    own_document = evidence_packet.get("own") if isinstance(evidence_packet.get("own"), dict) else {}
+    pending_reviews = [
+        item for item in own_document.get("manualReviewItems") or []
+        if str(item.get("reviewStatus") or "").endswith("_pending_recheck")
+    ]
+    # The source document can contain thousands of extracted facts. Keep pending
+    # human corrections and the three evidence dimensions ahead of general facts
+    # so the 60k request guard can never truncate the very items being rechecked.
+    model_payload = {
+        "待复核人工修正": {"facts": pending_facts, "reviews": pending_reviews},
+        "市场信号": evidence_packet.get("marketSignals") or [],
+        "垂媒正反向交叉验证": evidence_packet.get("verticalEvidence") or [],
+        "竞品官网来源": evidence_packet.get("competitorSources") or [],
+        "竞品官网事实": evidence_packet.get("competitorFacts") or [],
+        "本品资料": {key: own_document.get(key) for key in ("documentId", "filename", "brand", "model", "version")},
+        "产品事实": pending_facts + remaining_facts,
+    }
+    prompt = [
+        {"role": "system", "content": "你是MMN机会地图事实分析模型。只依据给定证据，独立输出合法JSON数组；不得补写未出现的车型版本、参数或市场数据。垂媒正反向交叉验证仅用于支撑本品与竞品的关系强弱，不能单独推导某个产品属性；如引用垂媒证据，仍须同时有对应属性的市场信号或产品事实。对 alignmentStatus 为 human_corrected_pending_recheck 的事实必须逐条复核：仅在采信该人工标签时，把该事实 id 写入对应标签的 evidenceIds；证据不足时不要引用。每项字段为label、factStrength(0-1)、direction(repair|seize|amplify)、reason、evidenceIds、confidence(0-1)。"},
+        {"role": "user", "content": json.dumps(model_payload, ensure_ascii=False)[:60000]},
+    ]
+    if os.getenv("MMN_OPPORTUNITY_MODELS_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
+        return _opportunity_fallback_analysis(facts), "rule_fallback", "机会地图模型调用已由运行配置关闭"
+    configured = qwen_config("deep")["configured"] if provider == "qwen" else deepseek_config("deep")["configured"]
+    if not configured:
+        return _opportunity_fallback_analysis(facts), "rule_fallback", f"{provider}未配置"
+    try:
+        raw = call_qwen(prompt, temperature=.1, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT) if provider == "qwen" else call_deepseek(prompt, temperature=.1, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT, max_tokens=4000)
+        parsed = parse_json_object(raw)
+        items = parsed.get("items") if isinstance(parsed, dict) else parsed
+        if not isinstance(items, list):
+            raise ValueError("模型未返回机会数组")
+        return items, "model", ""
+    except Exception as exc:
+        return _opportunity_fallback_analysis(facts), "rule_fallback", str(exc)
+
+
+def collect_opportunity_official_sources(sources, fetcher=None, progress_callback=None):
+    fetcher = fetcher or fetch_opportunity_official_page
+    facts = []
+    results = []
+    source_list = list(sources or [])
+    total = len(source_list)
+    for index, source in enumerate(source_list, start=1):
+        url = str(source.get("url") or "").strip()
+        if not url:
+            continue
+        try:
+            snapshot = fetcher(url, allowed_domains=source.get("allowedDomains") or None)
+            page = build_official_page_evidence(snapshot["body"], source_id=stable_id("official-page", url, snapshot["sha256"]), url=snapshot["finalUrl"], brand=source.get("brand", ""), model=source.get("model", ""), version=source.get("version", ""))
+            for fact in page.get("facts") or []:
+                fact["sourceBrand"] = source.get("brand", "")
+                fact["sourceModel"] = source.get("model", "")
+                fact["sourceUrl"] = snapshot["finalUrl"]
+                facts.append(fact)
+            results.append({**{key: snapshot[key] for key in ("url", "finalUrl", "fetchedAt", "sha256", "status")}, "brand": source.get("brand", ""), "model": source.get("model", ""), "version": source.get("version", "")})
+        except Exception as exc:
+            results.append({"url": url, "finalUrl": url, "brand": source.get("brand", ""), "model": source.get("model", ""), "version": source.get("version", ""), "status": "manual_required", "failureReason": str(exc)})
+        if progress_callback:
+            progress_callback(index, total, results[-1])
+    return facts, results
+
+
+def run_opportunity_map_pipeline(body, *, org_id="", user_id="local", run_id=None, progress_callback=None):
+    def report(stage, progress, message):
+        if progress_callback:
+            progress_callback(stage, progress, message)
+
+    report("official_sources", 5, "正在读取本品产品事实并准备官网核验")
+    document_id = str(body.get("documentId") or "").strip()
+    if not document_id:
+        raise ValueError("请先上传本品产品资料")
+    source_document = _opportunity_document_payload(document_id, org_id)
+    if not source_document:
+        raise ValueError("未找到本品产品资料")
+    document = apply_opportunity_manual_decisions(source_document, org_id)
+    run_id = run_id or str(uuid.uuid4())
+    evidence = []
+    own_facts = document.get("facts") or []
+    evidence_facts = [fact for fact in own_facts if fact.get("alignmentStatus") == "aligned"] + [fact for fact in own_facts if fact.get("alignmentStatus") != "aligned"][:80]
+    for fact in evidence_facts:
+        evidence.append({"id": fact.get("id"), "source_type": "own_document", "source_ref": document.get("filename"), "brand": document.get("brand"), "model": document.get("model"), "claim": fact.get("claim", ""), "confidence": fact.get("confidence", .45), "payload": fact})
+    source_count = len(body.get("competitorSources") or [])
+    report("official_sources", 10, f"正在核验 {source_count} 个竞品官网产品页")
+
+    def report_source(current, total, source_result):
+        progress = 10 + round((current / max(total, 1)) * 25)
+        suffix = "已核验" if source_result.get("status") == "verified" else "需人工确认"
+        report("official_sources", progress, f"竞品官网 {current}/{total}：{source_result.get('model') or '竞品'} {suffix}")
+
+    competitor_facts, source_results = collect_opportunity_official_sources(
+        body.get("competitorSources") or [],
+        progress_callback=report_source,
+    )
+    for fact in competitor_facts:
+        evidence.append({"id": fact.get("id"), "source_type": "competitor_official", "source_ref": fact.get("sourceUrl", ""), "brand": fact.get("sourceBrand", ""), "model": fact.get("sourceModel", ""), "competitor": fact.get("sourceModel", ""), "claim": fact.get("claim", ""), "confidence": fact.get("confidence", .45), "payload": fact})
+    competitor_models = [source.get("model", "") for source in body.get("competitorSources") or []]
+    vertical_evidence = build_opportunity_vertical_evidence(document.get("model", ""), competitor_models, org_id, body.get("edition", "china"))
+    evidence.extend(vertical_evidence)
+    signals = normalize_market_signals(body.get("marketSignals") or [])
+    heat = heat_scores(signals)
+    evidence_ids = {item["id"] for item in evidence if item.get("id")}
+    packet = {"own": document, "competitorSources": source_results, "competitorFacts": competitor_facts, "verticalEvidence": vertical_evidence, "marketSignals": signals}
+    report("alignment", 40, "官网事实、垂媒正反向关系、属性NSR与传播热度已按统一标签对齐")
+    report("primary_model", 45, "MMN旗舰模型 A 正在独立分析")
+    qwen_items, qwen_mode, qwen_error = _opportunity_model_analysis("qwen", packet, own_facts)
+    report("primary_model", 62, "MMN旗舰模型 A 已完成独立分析")
+    report("review_model", 66, "MMN旗舰模型 B 正在独立复核")
+    deepseek_items, deepseek_mode, deepseek_error = _opportunity_model_analysis("deepseek", packet, own_facts)
+    report("review_model", 82, "MMN旗舰模型 B 已完成独立复核")
+    report("cross_validation", 86, "正在交叉验证双模型结论与证据引用")
+    validation = cross_validate_model_analyses({"qwen": qwen_items, "deepseek": deepseek_items}, evidence_ids)
+    models_verified = qwen_mode == "model" and deepseek_mode == "model"
+    finalize_opportunity_manual_rechecks(document_id, validation, models_verified=models_verified, org_id=org_id)
+    document = apply_opportunity_manual_decisions(source_document, org_id)
+    if not source_results:
+        validation.setdefault("manualItems", []).append({"label": "竞品官网事实", "reasons": ["未提供可核验的竞品官方产品页"]})
+    for source_result in source_results:
+        if source_result.get("status") != "verified":
+            validation.setdefault("manualItems", []).append({"label": source_result.get("model") or "竞品官网事实", "reasons": [source_result.get("failureReason") or "竞品官网证据不足"]})
+    if not signals:
+        validation.setdefault("manualItems", []).append({"label": "属性级市场信号", "reasons": ["未提供属性级NSR、声量或互动数据"]})
+    if validation.get("manualItems"):
+        validation["status"] = "manual_required"
+    competitor_products = build_competitor_product_summaries(source_results, competitor_facts, validation)
+    signal_by_label = {}
+    for row in signals:
+        if row.get("label"):
+            signal_by_label.setdefault(row["label"], []).append(row)
+    vertical_by_competitor = {}
+    for item in vertical_evidence:
+        vertical_by_competitor.setdefault(item.get("competitor"), []).append(item)
+    map_rows = []
+    for item in validation.get("items", []):
+        label = item["label"]
+        own = [row for row in signal_by_label.get(label, []) if not row.get("model") or row.get("model") == document.get("model")]
+        competitors = [row for row in signal_by_label.get(label, []) if row not in own]
+        missing_reasons = []
+        if not own:
+            missing_reasons.append("缺少本品属性NSR")
+        if not competitors:
+            missing_reasons.append("缺少竞品属性NSR")
+        if missing_reasons:
+            validation.setdefault("manualItems", []).append({"label": label, "reasons": missing_reasons})
+            continue
+        own_nsr = sum(float(row.get("nsr") or 0) for row in own) / len(own) if own else 0.0
+        lead_competitor = max(competitors, key=lambda row: float(row.get("nsr") or 0))
+        competitor_nsr = float(lead_competitor.get("nsr") or 0)
+        impact_rows = own or signal_by_label.get(label, [])
+        purchase_impact = sum(float(row.get("purchaseImpact") or row.get("impact") or 3) for row in impact_rows) / len(impact_rows) if impact_rows else 3.0
+        competitor_lead = competitor_nsr - own_nsr
+        lead_competitor_model = lead_competitor.get("model", "")
+        lead_vertical_evidence = vertical_by_competitor.get(lead_competitor_model, [])
+        map_rows.append({**item, "recognition": max(0.0, min(1.0, (own_nsr + 1) / 2)), "heat": heat.get(label, 0.0), "competitorPressure": max(0.0, competitor_lead), "competitorLead": competitor_lead, "leadCompetitorModel": lead_competitor_model, "verticalEvidenceIds": [row.get("id") for row in lead_vertical_evidence if row.get("id")], "verticalEvidence": lead_vertical_evidence, "purchaseImpact": purchase_impact, "evidenceStatus": "aligned"})
+    if validation.get("manualItems"):
+        validation["status"] = "manual_required"
+    map_rows.extend({"label": item["label"], "evidenceStatus": "manual_required", "manualReasons": item["reasons"], "competitorLead": 0.0, "purchaseImpact": 3.0} for item in validation.get("manualItems", []))
+    opportunities = build_opportunity_map(map_rows, validated=models_verified)
+    verified_opportunities = [
+        item for item in opportunities
+        if item.get("evidenceStatus") == "aligned" and item.get("category") != "manual_required"
+    ]
+    execution_recommendations = derive_execution_recommendations(verified_opportunities, signals)
+    has_remaining_review = bool(validation.get("manualItems") or document.get("manualReviewItems"))
+    if models_verified and validation.get("status") == "aligned" and not document.get("manualReviewItems"):
+        status = "completed"
+    elif models_verified and verified_opportunities and has_remaining_review:
+        status = "partial_completed"
+    else:
+        status = "manual_required"
+    run = {"id": run_id, "org_id": org_id, "user_id": user_id, "edition": body.get("edition", "china"), "task_type": "opportunity_map", "brand": document.get("brand", ""), "model": document.get("model", ""), "competitors": competitor_models, "platforms": sorted({row.get("platform") for row in signals if row.get("platform")}), "status": status, "final_output": {"status": status, "document": document, "competitorSources": source_results, "competitorProducts": competitor_products, "verticalEvidence": vertical_evidence, "marketSignals": signals, "opportunities": opportunities, "executionRecommendations": execution_recommendations, "validation": validation, "modelModes": {"qwen": qwen_mode, "deepseek": deepseek_mode}, "errors": {"qwen": qwen_error, "deepseek": deepseek_error}}, "qa_summary": {"manualCount": len(validation.get("manualItems", [])) + len(document.get("manualReviewItems", [])), "verifiedLabelCount": len(verified_opportunities), "evidenceCount": len(evidence)}, "created_at": now(), "updated_at": now()}
+    steps = [{"id": stable_id("opportunity-step", run_id, "qwen"), "agent_name": "MMN双模型-Qwen", "step_order": 1, "status": qwen_mode, "input_summary": "冻结产品事实、官网快照和市场信号", "output": {"items": qwen_items, "error": qwen_error}, "confidence": .8 if qwen_mode == "model" else .45}, {"id": stable_id("opportunity-step", run_id, "deepseek"), "agent_name": "MMN双模型-DeepSeek", "step_order": 2, "status": deepseek_mode, "input_summary": "冻结产品事实、官网快照和市场信号", "output": {"items": deepseek_items, "error": deepseek_error}, "confidence": .8 if deepseek_mode == "model" else .45}, {"id": stable_id("opportunity-step", run_id, "cross-validation"), "agent_name": "MMN交叉验证", "step_order": 3, "status": validation.get("status"), "input_summary": "比较标签、方向、事实强度与证据引用", "output": validation, "confidence": 1.0 if validation.get("status") == "aligned" else .4}]
+    reviews = [{"id": stable_id("opportunity-review", run_id, item.get("label"), json.dumps(item, ensure_ascii=False)), "reviewer_name": "MMN人工确认台", "verdict": "pending", "severity": "high", "findings": [item], "evidence": item.get("evidenceIds", []), "retry_instruction": "请确认车型版本、事实证据和统一标签后再发布"} for item in validation.get("manualItems", [])]
+    for evidence_item in evidence:
+        evidence_item["id"] = stable_id("opportunity-evidence", run_id, evidence_item.get("id"), evidence_item.get("source_ref"))
+    report("saving", 96, "正在更新机会地图并保存证据链")
+    save_agent_run_record(run, steps, reviews, evidence)
+    return {"ok": True, "runId": run_id, **run["final_output"], "qa": run["qa_summary"]}
+
+
+def _opportunity_job_snapshot(job):
+    snapshot = {key: value for key, value in job.items() if not key.startswith("_")}
+    started = job.get("_started_monotonic")
+    if started is not None:
+        snapshot["elapsedSeconds"] = max(0, round(time.monotonic() - started))
+    return snapshot
+
+
+def get_opportunity_map_job(job_id, org_id=""):
+    with OPPORTUNITY_JOB_LOCK:
+        job = OPPORTUNITY_JOB_TASKS.get(str(job_id or ""))
+        if job and org_id and job.get("_org_id") != org_id:
+            return None
+        return _opportunity_job_snapshot(job) if job else None
+
+
+def start_opportunity_map_job(body, *, org_id="", user_id="local", runner=None):
+    runner = runner or run_opportunity_map_pipeline
+    job_id = str(uuid.uuid4())
+    created_at = now()
+    job = {
+        "jobId": job_id,
+        "runId": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "message": "机会地图任务已提交，正在准备证据链",
+        "createdAt": created_at,
+        "updatedAt": created_at,
+        "result": None,
+        "error": "",
+        "_org_id": org_id,
+        "_user_id": user_id,
+        "_started_monotonic": time.monotonic(),
+    }
+    with OPPORTUNITY_JOB_LOCK:
+        OPPORTUNITY_JOB_TASKS[job_id] = job
+
+    def update(stage, progress, message):
+        with OPPORTUNITY_JOB_LOCK:
+            current = OPPORTUNITY_JOB_TASKS.get(job_id)
+            if not current:
+                return
+            current.update({
+                "status": "running",
+                "stage": str(stage or "running"),
+                "progress": max(0, min(99, int(progress or 0))),
+                "message": str(message or "机会地图正在生成"),
+                "updatedAt": now(),
+            })
+
+    def work():
+        update("official_sources", 2, "正在启动官网核验与双旗舰模型链路")
+        print(f"[opportunity-job] {job_id} started", flush=True)
+        try:
+            result = runner(
+                body,
+                org_id=org_id,
+                user_id=user_id,
+                run_id=job_id,
+                progress_callback=update,
+            )
+            with OPPORTUNITY_JOB_LOCK:
+                current = OPPORTUNITY_JOB_TASKS[job_id]
+                current.update({
+                    "status": "completed",
+                    "stage": "completed",
+                    "progress": 100,
+                    "message": "机会地图已完成双模型交叉验证",
+                    "result": result,
+                    "updatedAt": now(),
+                })
+            print(f"[opportunity-job] {job_id} completed", flush=True)
+        except Exception as exc:
+            with OPPORTUNITY_JOB_LOCK:
+                current = OPPORTUNITY_JOB_TASKS[job_id]
+                current.update({
+                    "status": "failed",
+                    "stage": "failed",
+                    "progress": 100,
+                    "message": "机会地图生成失败",
+                    "error": str(exc),
+                    "updatedAt": now(),
+                })
+            print(f"[opportunity-job] {job_id} failed: {exc}", flush=True)
+
+    Thread(target=work, daemon=True, name=f"opportunity-map-{job_id[:8]}").start()
+    return get_opportunity_map_job(job_id)
+
 def run_mmn_marketing_agent(body):
     started = now()
     run_id = str(uuid.uuid4())
-    project = body.get("project") or {}
+    project = dict(body.get("project") or {})
+    if body.get("org_id"):
+        project["_org_id"] = str(body.get("org_id"))
     question = str(body.get("question") or "").strip()
     references = body.get("references") or []
     mode = "deep" if body.get("mode") == "deep" else "fast"
@@ -5284,13 +6753,13 @@ def run_mmn_marketing_agent(body):
         "deepseek": deepseek_config(mode)
     }
 
-def save_vertical_ai_learning(context, summary_text):
+def save_vertical_ai_learning(context, summary_text, org_id="local", edition="china"):
     platform = context.get("platform") or ""
     model = context.get("model") or ""
     period = context.get("period") or ""
     source_file = context.get("source") or ""
     knowledge = {
-        "id": stable_id("vertical-ai-learning", platform, model, period),
+        "id": stable_id("vertical-ai-learning", org_id, edition_from(edition), platform, model, period),
         "type": "MMN智能体学习",
         "title": f"{model}｜正反向竞争格局AI学习｜{period}",
         "body": summary_text[:1600],
@@ -5313,15 +6782,15 @@ def save_vertical_ai_learning(context, summary_text):
     with db() as conn:
         conn.execute("""
             insert into vertical_ai_learnings
-            (id, platform, model_name, period, source_file, summary_text, knowledge_json, created_at)
-            values (?, ?, ?, ?, ?, ?, ?, ?)
-            on conflict(platform, model_name, period) do update set
+            (id, org_id, edition, platform, model_name, period, source_file, summary_text, knowledge_json, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(org_id, edition, platform, model_name, period) do update set
               source_file=excluded.source_file,
               summary_text=excluded.summary_text,
               knowledge_json=excluded.knowledge_json,
               created_at=excluded.created_at
         """, (
-            knowledge["id"], platform, model, period, source_file,
+            knowledge["id"], org_id, edition_from(edition), platform, model, period, source_file,
             summary_text, json.dumps(knowledge, ensure_ascii=False), now()
         ))
     return knowledge
@@ -7330,12 +8799,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def current_auth(self):
         auth = self.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
-            return parse_auth_token(auth.split(" ", 1)[1].strip())
+            payload = parse_auth_token(auth.split(" ", 1)[1].strip())
+            if payload and (not payload.get("org_id") or not payload.get("user_id")):
+                payload.update(resolve_cloud_auth_scope(payload.get("username")))
+            if payload and payload.get("role") == "admin" and payload.get("org_id"):
+                ensure_legacy_vertical_claim(payload["org_id"])
+            return payload
         return None
 
     def require_cloud_auth(self, roles=None):
         if not cloud_login_required():
-            return {"username": "local", "role": "admin", "local": True}
+            return {"username": "local", "role": "admin", "org_id": "local", "user_id": "local", "local": True}
         payload = self.current_auth()
         if not payload:
             self.send_json({"ok": False, "error": "请先登录 MMN 云端演示系统。"}, 401)
@@ -7348,20 +8822,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def bf_org_id(self, requested=""):
         requested = str(requested or "").strip()
         if not cloud_login_required():
-            if not requested:
-                raise BFPermissionError("缺少 orgId")
-            return requested
+            return requested or "local"
         auth = self.current_auth() or {}
-        account = cloud_accounts().get(auth.get("username"))
-        if not account:
+        org_id = str(auth.get("org_id") or "").strip()
+        if not org_id:
             raise BFPermissionError("当前账号没有可用的BF客户空间")
-        with db() as conn:
-            org = conn.execute("select id from organizations where name=?", (account["org"],)).fetchone()
-        if not org:
-            raise BFPermissionError("当前账号的客户空间尚未初始化")
-        if requested and requested != org["id"]:
+        if requested and requested != org_id:
             raise BFPermissionError("不能访问其他客户的BF资产")
-        return org["id"]
+        return org_id
+
+    def request_org_id(self, requested=""):
+        auth = self.current_auth() or {}
+        org_id = str(auth.get("org_id") or ("local" if not cloud_login_required() else "")).strip()
+        if not org_id:
+            raise PermissionError("当前账号未绑定客户空间")
+        requested = str(requested or "").strip()
+        if cloud_login_required() and requested and requested != org_id:
+            raise PermissionError("不能访问其他客户空间的数据")
+        return org_id
 
     def _bf_project_org(self, project_id):
         with db() as conn:
@@ -7409,9 +8887,84 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "user": {"username": auth_payload.get("username"), "role": auth_payload.get("role")} if auth_payload else None
             })
             return
+        opportunity_run_match = re.fullmatch(r"/api/opportunity-map/runs/([^/]+)", parsed.path)
+        if opportunity_run_match:
+            auth = self.require_cloud_auth()
+            if not auth:
+                return
+            try:
+                payload = agent_run_payload(opportunity_run_match.group(1), auth.get("org_id", "local"))
+                if not payload or payload.get("task_type") != "opportunity_map":
+                    raise ValueError("未找到机会地图运行记录")
+                self.send_json({"ok": True, "run": payload})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            return
         if parsed.path.startswith("/api/") and parsed.path not in {"/api/sales-marquee", "/api/global-sales-marquee"}:
             if not self.require_cloud_auth():
                 return
+        if parsed.path.startswith("/api/creator-distillation/"):
+            try:
+                auth = self.current_auth() or {}
+                payload = creator_distillation_service().handle_get(parsed.path, parse_qs(parsed.query), auth.get("org_id", "local"))
+                self.send_json(payload or {"ok": False, "error": "达人蒸馏接口不存在"}, 200 if payload else 404)
+            except KeyError as exc:
+                self.send_json(creator_distillation_api_error(exc), 404)
+            except Exception as exc:
+                self.send_json(creator_distillation_api_error(exc), 400)
+            return
+        if parsed.path == "/api/asset-library":
+            query = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            self.send_json(durable_asset_library(query.get("edition", ["china"])[0], auth.get("org_id", "local")))
+            return
+        if parsed.path == "/api/social-trends/latest":
+            query = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            with db() as conn:
+                result = latest_social_trend_snapshot(conn, query.get("keyword", [""])[0], auth.get("org_id", "local"), edition_from(query.get("edition", ["china"])[0]))
+            self.send_json({"ok": True, "result": result})
+            return
+        opportunity_job_match = re.fullmatch(r"/api/opportunity-map/jobs/([^/]+)", parsed.path)
+        if opportunity_job_match:
+            auth = self.current_auth() or {}
+            job = get_opportunity_map_job(opportunity_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "机会地图任务不存在或服务已重启"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
+        if parsed.path == "/api/cockpit/execution-cycles":
+            query = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            self.send_json(cockpit_execution_cycles_payload(
+                query.get("edition", ["china"])[0],
+                query.get("model", [""])[0],
+                org_id=auth.get("org_id", "local"),
+            ))
+            return
+        if parsed.path == "/api/opportunity-map/own-document/latest":
+            query = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            document = latest_opportunity_product_document(
+                query.get("edition", ["china"])[0],
+                query.get("model", [""])[0],
+                auth.get("org_id", "local"),
+            )
+            self.send_json({"ok": True, "document": document})
+            return
+        if parsed.path == "/api/opportunity-map/manual-reviews":
+            try:
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                self.send_json(opportunity_manual_review_payload(
+                    query.get("documentId", [""])[0],
+                    query.get("runId", [""])[0],
+                    auth.get("org_id", "local"),
+                ))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/ai/status":
             qcfg = qwen_config()
             dcfg = deepseek_config()
@@ -7426,6 +8979,49 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "openai": {"configured": ocfg["configured"], "model": ocfg["model"], "baseUrl": ocfg["base_url"]},
                 "rules": {"configured": True, "model": "MMN规则引擎"}
             })
+            return
+        if parsed.path == "/api/opportunity-map/own-document":
+            try:
+                query = parse_qs(parsed.query)
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length > MAX_UPLOAD_BYTES:
+                    raise BFParseError(f"本品资料超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制")
+                data = self.rfile.read(length)
+                payload = ingest_opportunity_product_document(
+                    data,
+                    query.get("filename", ["本品产品资料"])[0],
+                    org_id=(self.current_auth() or {}).get("org_id", "local"),
+                    user_id=query.get("userId", [(self.current_auth() or {}).get("username") or "local"])[0],
+                    brand=query.get("brand", [""])[0],
+                    model=query.get("model", [""])[0],
+                    version=query.get("version", [""])[0],
+                    edition=query.get("edition", ["china"])[0],
+                )
+                self.send_json({"ok": True, "document": payload}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/generate":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                self.send_json(run_opportunity_map_pipeline(body, org_id=auth.get("org_id", "local"), user_id=auth.get("username", "local")), 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                self.send_json(save_opportunity_run_review(
+                    body.get("runId"),
+                    body.get("label"),
+                    body.get("decision"),
+                    body.get("note"),
+                    auth.get("org_id", "local"),
+                ))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
             return
         if parsed.path == "/api/bf/projects":
             try:
@@ -7553,15 +9149,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "正反向车型资产只支持汽车之家和懂车帝"}, 400)
                 return
             limit = int(q.get("limit", ["5000"])[0] or 5000)
-            self.send_json({"ok": True, **vertical_assets_payload(platform, limit)})
+            auth = self.require_cloud_auth()
+            if not auth:
+                return
+            self.send_json({"ok": True, **vertical_assets_payload(platform, limit, auth.get("org_id", "local"), q.get("edition", ["china"])[0])})
             return
         if parsed.path == "/api/learnings":
             q = parse_qs(parsed.query)
-            org_id = q.get("org_id", [""])[0]
-            edition = edition_from(q.get("edition", ["china"])[0])
-            if not org_id:
-                self.send_json({"ok": False, "error": "缺少 org_id"}, 400)
+            try:
+                org_id = self.request_org_id(q.get("org_id", [""])[0])
+            except PermissionError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 403)
                 return
+            edition = edition_from(q.get("edition", ["china"])[0])
             with db() as conn:
                 rows = conn.execute(
                     "select * from learning_cases where org_id=? and edition=? order by saved_at desc",
@@ -7571,11 +9171,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/workspace":
             q = parse_qs(parsed.query)
-            org_id = q.get("org_id", [""])[0]
-            edition = edition_from(q.get("edition", ["china"])[0])
-            if not org_id:
-                self.send_json({"ok": False, "error": "缺少 org_id"}, 400)
+            try:
+                org_id = self.request_org_id(q.get("org_id", [""])[0])
+            except PermissionError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 403)
                 return
+            edition = edition_from(q.get("edition", ["china"])[0])
             with db() as conn:
                 org = conn.execute("select * from organizations where id=?", (org_id,)).fetchone()
                 scoped_id = scoped_org_id(org_id, edition)
@@ -7602,7 +9203,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not run_id:
                 self.send_json({"ok": False, "error": "缺少 agent run id"}, 400)
                 return
-            payload = agent_run_payload(run_id)
+            auth = self.current_auth() or {}
+            payload = agent_run_payload(run_id, auth.get("org_id", "local"))
             if not payload:
                 self.send_json({"ok": False, "error": "未找到该 agent run"}, 404)
                 return
@@ -7614,7 +9216,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if not decision_id:
                 self.send_json({"ok": False, "error": "缺少路由决策ID"}, 400)
                 return
-            payload = router_decision_payload(decision_id)
+            auth = self.current_auth() or {}
+            payload = router_decision_payload(decision_id, auth.get("org_id", "local"))
             if not payload:
                 self.send_json({"ok": False, "error": "未找到该路由结果"}, 404)
                 return
@@ -7626,15 +9229,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
+        if not self.require_cloud_auth({"admin"} if cloud_login_required() else None):
+            return
         if parsed.path != "/api/learnings":
             self.send_error(404)
             return
         q = parse_qs(parsed.query)
-        org_id = q.get("org_id", [""])[0]
-        edition = edition_from(q.get("edition", ["china"])[0])
-        if not org_id:
-            self.send_json({"ok": False, "error": "缺少 org_id"}, 400)
+        try:
+            org_id = self.request_org_id(q.get("org_id", [""])[0])
+        except PermissionError as exc:
+            self.send_json({"ok": False, "error": str(exc)}, 403)
             return
+        edition = edition_from(q.get("edition", ["china"])[0])
         with db() as conn:
             conn.execute("delete from learning_cases where org_id=? and edition=?", (org_id, edition))
         self.send_json({"ok": True})
@@ -7654,21 +9260,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     created = now()
                     org_name = account["org"]
                     email = f"{username.lower()}@mmn.local"
+                    resolved_scope = resolve_cloud_auth_scope(username)
                     with db() as conn:
-                        org = conn.execute("select * from organizations where name=?", (org_name,)).fetchone()
-                        if not org:
-                            org_id = str(uuid.uuid4())
-                            conn.execute("insert into organizations values (?,?,?)", (org_id, org_name, created))
+                        if resolved_scope:
+                            org_id = resolved_scope["org_id"]
+                            user_id = resolved_scope["user_id"]
                         else:
-                            org_id = org["id"]
-                        user = conn.execute("select * from users where org_id=? and email=?", (org_id, email)).fetchone()
-                        if not user:
-                            user_id = str(uuid.uuid4())
-                            conn.execute("insert into users values (?,?,?,?,?)", (user_id, org_id, email, account["name"], created))
-                        else:
-                            user_id = user["id"]
+                            org = conn.execute("select * from organizations where name=? order by created_at desc limit 1", (org_name,)).fetchone()
+                            if not org:
+                                org_id = str(uuid.uuid4())
+                                conn.execute("insert into organizations values (?,?,?)", (org_id, org_name, created))
+                            else:
+                                org_id = org["id"]
+                            user = conn.execute("select * from users where org_id=? and email=?", (org_id, email)).fetchone()
+                            if not user:
+                                user_id = str(uuid.uuid4())
+                                conn.execute("insert into users values (?,?,?,?,?)", (user_id, org_id, email, account["name"], created))
+                            else:
+                                user_id = user["id"]
                         ensure_workspace(conn, scoped_org_id(org_id, "china"), org_name)
                         ensure_workspace(conn, scoped_org_id(org_id, "global"), org_name)
+                    if account["role"] == "admin":
+                        ensure_legacy_vertical_claim(org_id)
                     self.send_json({"ok": True, "session": {
                         "org_id": org_id,
                         "org": org_name,
@@ -7678,7 +9291,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         "username": username,
                         "role": account["role"],
                         "permissions": account["permissions"],
-                        "token": make_auth_token(username, account["role"])
+                        "token": make_auth_token(username, account["role"], org_id, user_id)
                     }})
                     return
                 if cloud_login_required():
@@ -7721,10 +9334,177 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/topic-planning/run",
                 "/api/content-capability-kb/distill-account",
                 "/api/content-capability-kb/collect-public",
+                "/api/opportunity-map/own-document",
+                "/api/opportunity-map/generate",
+                "/api/opportunity-map/review",
+                "/api/opportunity-map/manual-reviews",
+                "/api/cockpit/execution-cycles",
+                "/api/cockpit/execution-cycles/monitoring",
+                "/api/social-trends/collect",
+                "/api/social-trends/import",
             }
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path.startswith("/api/creator-distillation/"):
+            try:
+                auth = self.current_auth() or {}
+                payload = creator_distillation_service().handle_post(parsed.path, self.read_json(), auth.get("org_id", "local"))
+                self.send_json(payload or {"ok": False, "error": "达人蒸馏接口不存在"}, 201 if parsed.path == "/api/creator-distillation/tasks" else (200 if payload else 404))
+            except Exception as exc:
+                self.send_json(creator_distillation_api_error(exc), 400)
+            return
+        if parsed.path == "/api/asset-library":
+            try:
+                body = self.read_json()
+                edition = edition_from(body.get("edition") or "china")
+                org_id = self.request_org_id(body.get("org_id"))
+                saved = 0
+                stamp = now()
+                with db() as conn:
+                    for item in body.get("strategyAssets") or []:
+                        if not isinstance(item, dict) or not item.get("id"):
+                            continue
+                        asset_row_id = strategy_asset_row_id(conn, item["id"], org_id, edition)
+                        conn.execute(
+                            """insert into strategy_knowledge_assets
+                            (id, org_id, edition, asset_json, source_snapshot_id, created_at, updated_at)
+                            values (?, ?, ?, ?, null, ?, ?)
+                            on conflict(id) do update set
+                              asset_json=excluded.asset_json,
+                              updated_at=excluded.updated_at""",
+                            (asset_row_id, org_id, edition, json.dumps(item, ensure_ascii=False), stamp, stamp)
+                        )
+                        saved += 1
+                self.send_json({"ok": True, "saved": saved, "updatedAt": stamp})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-trends/collect":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                platforms = body.get("platforms") or ["douyin", "xiaohongshu", "weibo"]
+                edition = edition_from(body.get("edition", "china"))
+                org_id = auth.get("org_id", "local")
+                time_range = body.get("timeRange", "30d")
+                thresholds = body.get("thresholds") or {"douyin": 8000, "xiaohongshu": 500, "weibo": 500}
+                with db() as conn:
+                    previous = latest_social_trend_snapshot(conn, str(body.get("keyword") or "").strip(), org_id, edition)
+                result = collect_social_trends(body.get("keyword"), platforms, body.get("pages", 1), body.get("count", 20), time_range, True, thresholds)
+                competitors = list(dict.fromkeys(str(x or "").strip() for x in (body.get("competitors") or []) if str(x or "").strip()))[:3]
+                competitor_results = [collect_social_trends(model, platforms, 1, body.get("count", 20), time_range, False, thresholds) for model in competitors]
+                result = attach_competitor_rankings(result, competitor_results)
+                result = apply_social_trend_history(result, previous)
+                result = validate_social_trends_with_models(result)
+                with db() as conn:
+                    snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {"platforms": platforms, "timeRange": time_range, "competitors": competitors, "thresholds": thresholds})
+                result["snapshot"] = snapshot
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-trends/import":
+            try:
+                query = parse_qs(parsed.query)
+                filename = query.get("filename", ["社媒助手数据.xlsx"])[0]
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length <= 0 or length > MAX_UPLOAD_BYTES:
+                    raise ValueError(f"导入文件必须小于 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
+                data = self.rfile.read(length)
+                records = generic_rows_from_file(data, filename)
+                keyword = query.get("keyword", [""])[0]
+                platforms = [x for x in query.get("platforms", ["douyin,xiaohongshu,weibo"])[0].split(",") if x]
+                thresholds = {"douyin": query.get("douyinMinLikes", [8000])[0], "xiaohongshu": query.get("xiaohongshuMinLikes", [500])[0], "weibo": query.get("weiboMinLikes", [500])[0]}
+                result = import_social_trend_records(records, keyword, platforms, thresholds, query.get("timeRange", ["30d"])[0], query.get("startDate", [""])[0], query.get("endDate", [""])[0], filename)
+                result = validate_social_trends_with_models(result)
+                auth = self.current_auth() or {}; edition = edition_from(query.get("edition", ["china"])[0]); org_id = auth.get("org_id", "local")
+                with db() as conn:
+                    snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {"platforms": platforms, "timeRange": query.get("timeRange", ["30d"])[0], "thresholds": thresholds, "source": "social_assistant_import", "filename": filename})
+                result["snapshot"] = snapshot
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/own-document":
+            try:
+                query = parse_qs(parsed.query)
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length > MAX_UPLOAD_BYTES:
+                    raise BFParseError(f"本品资料超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制")
+                data = self.rfile.read(length)
+                auth = self.current_auth() or {}
+                payload = ingest_opportunity_product_document(data, query.get("filename", ["本品产品资料"])[0], org_id=auth.get("org_id", "local"), user_id=query.get("userId", [auth.get("username") or "local"])[0], brand=query.get("brand", [""])[0], model=query.get("model", [""])[0], version=query.get("version", [""])[0], edition=query.get("edition", ["china"])[0])
+                self.send_json({"ok": True, "document": payload}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/generate":
+            try:
+                auth = self.current_auth() or {}
+                job = start_opportunity_map_job(
+                    self.read_json(),
+                    org_id=auth.get("org_id", "local"),
+                    user_id=auth.get("username", "local"),
+                )
+                self.send_json({"ok": True, "jobId": job["jobId"], "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/cockpit/execution-cycles":
+            try:
+                auth = self.current_auth() or {}
+                cycle = create_cockpit_execution_cycle(
+                    self.read_json(),
+                    org_id=auth.get("org_id", "") if cloud_login_required() else "local",
+                    user_id=auth.get("username", "local"),
+                )
+                self.send_json({"ok": True, "cycle": cycle}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/cockpit/execution-cycles/monitoring":
+            try:
+                auth = self.current_auth() or {}
+                cycle = record_cockpit_execution_monitoring(
+                    self.read_json(),
+                    org_id=auth.get("org_id", "") if cloud_login_required() else "local",
+                )
+                self.send_json({"ok": True, "cycle": cycle})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/manual-reviews":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = auth.get("org_id", "local")
+                saved = save_opportunity_manual_review(
+                    body,
+                    user_id=auth.get("username") or body.get("userId") or "local",
+                    org_id=org_id,
+                )
+                saved["queue"] = opportunity_manual_review_payload(
+                    body.get("documentId"), body.get("runId", ""), org_id
+                )
+                self.send_json(saved)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/opportunity-map/review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                self.send_json(save_opportunity_run_review(
+                    body.get("runId"),
+                    body.get("label"),
+                    body.get("decision"),
+                    body.get("note"),
+                    auth.get("org_id", "local"),
+                ))
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/bf/projects":
             try:
                 body = self.read_json()
@@ -7838,7 +9618,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/workspace":
             try:
                 body = self.read_json()
-                org_id = body["org_id"]
+                org_id = self.request_org_id(body.get("org_id"))
                 edition = edition_from(body.get("edition", "china"))
                 scoped_id = scoped_org_id(org_id, edition)
                 updated = now()
@@ -7867,20 +9647,30 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/project-state":
             try:
                 body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = self.request_org_id(body.get("org_id"))
+                user_id = auth.get("user_id") or auth.get("username") or "local"
                 payload = body.get("payload") or {}
                 edition = edition_from(body.get("edition") or payload.get("edition") or "china")
                 config = payload.get("state", {}).get("config", {})
                 item_id = str(uuid.uuid4())
                 created = now()
                 with db() as conn:
+                    incoming_strategy = payload.get("strategyKb") or []
+                    if not incoming_strategy:
+                        recovered = conn.execute(
+                            "select asset_json from strategy_knowledge_assets where org_id=? and edition=? order by updated_at desc",
+                            (org_id, edition)
+                        ).fetchall()
+                        payload["strategyKb"] = [json.loads(row["asset_json"]) for row in recovered]
                     conn.execute(
                         """insert into project_snapshots
                         (id, org_id, user_id, edition, brand, model, project, data_version, payload_json, created_at)
                         values (?,?,?,?,?,?,?,?,?,?)""",
                         (
                             item_id,
-                            body["org_id"],
-                            body["user_id"],
+                            org_id,
+                            user_id,
                             edition,
                             config.get("brand", ""),
                             config.get("model", ""),
@@ -7890,6 +9680,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             created
                         )
                     )
+                    for item in payload.get("strategyKb") or []:
+                        if not isinstance(item, dict) or not item.get("id"):
+                            continue
+                        asset_row_id = strategy_asset_row_id(conn, item["id"], org_id, edition)
+                        conn.execute(
+                            """insert into strategy_knowledge_assets
+                            (id, org_id, edition, asset_json, source_snapshot_id, created_at, updated_at)
+                            values (?, ?, ?, ?, ?, ?, ?)
+                            on conflict(id) do update set
+                              asset_json=excluded.asset_json,
+                              source_snapshot_id=excluded.source_snapshot_id,
+                              updated_at=excluded.updated_at""",
+                            (asset_row_id, org_id, edition, json.dumps(item, ensure_ascii=False), item_id, created, created)
+                        )
                 self.send_json({"ok": True, "id": item_id, "createdAt": created})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -7897,6 +9701,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/learnings":
             try:
                 body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = self.request_org_id(body.get("org_id"))
+                user_id = auth.get("user_id") or auth.get("username") or "local"
                 item_id = str(uuid.uuid4())
                 saved_at = now()
                 edition = edition_from(body.get("edition", "china"))
@@ -7906,7 +9713,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         (id, org_id, user_id, edition, model, label, conclusion, recommendation, evidence, platform, kpi, stage, saved_at)
                         values (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
-                            item_id, body["org_id"], body["user_id"], edition, body.get("model",""), body.get("label",""),
+                            item_id, org_id, user_id, edition, body.get("model",""), body.get("label",""),
                             body.get("conclusion",""), body.get("recommendation",""), body.get("evidence",""),
                             body.get("platform",""), body.get("kpi",""), body.get("stage",""), saved_at
                         )
@@ -7998,11 +9805,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/import-vertical-xlsx":
             length = int(self.headers.get("Content-Length", "0"))
-            filename = parse_qs(parsed.query).get("filename", ["垂媒正反向排名.xlsx"])[0]
+            query = parse_qs(parsed.query)
+            filename = query.get("filename", ["垂媒正反向排名.xlsx"])[0]
             try:
                 data = self.rfile.read(length)
                 result = build_vertical_media_dataset_from_workbook(data, filename)
-                result = remember_vertical_dataset(data, filename, result)
+                auth = self.current_auth() or {}
+                result = remember_vertical_dataset(data, filename, result, auth.get("org_id", "local"), query.get("edition", ["china"])[0])
                 self.send_json({"ok": True, "dataset": result})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -8037,6 +9846,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/agents/run":
             try:
                 body = self.read_json()
+                auth = self.current_auth() or {}
+                body["org_id"] = auth.get("org_id", "local")
+                body["user_id"] = auth.get("user_id") or auth.get("username", "local")
                 self.send_json(run_mmn_marketing_agent(body))
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -8235,7 +10047,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     except Exception as exc:
                         errors["deepseek"] = str(exc)
                 text = fuse_vertical_learning(context, qwen_text=qwen_text, deepseek_text=deepseek_text, rule_text=rule_text)
-                knowledge = save_vertical_ai_learning(context, text)
+                auth = self.current_auth() or {}
+                knowledge = save_vertical_ai_learning(context, text, auth.get("org_id", "local"), body.get("edition", "china"))
                 self.send_json({
                     "ok": True,
                     "text": text,
@@ -8252,7 +10065,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 question = str(body.get("question") or "").strip()
-                project = body.get("project") or {}
+                project = dict(body.get("project") or {})
+                project["_org_id"] = (self.current_auth() or {}).get("org_id", "local")
                 references = body.get("references") or []
                 mode = "deep" if body.get("mode") == "deep" else "fast"
                 if not question:
@@ -8297,8 +10111,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 decision_id = str(body.get("id") or "").strip()
                 if not decision_id:
                     raise ValueError("缺少路由决策ID。")
-                with db() as conn:
-                    row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+                auth = self.current_auth() or {}
+                row = router_decision_row(decision_id, auth.get("org_id", "local"))
                 if not row:
                     raise ValueError("未找到该路由结果。")
                 current = rowdict(row)
@@ -8311,7 +10125,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 queued = enqueue_router_review(decision_id, current.get("question") or "", project, references, task_type, route, mode, reviewer, force=True)
                 if not queued:
                     raise ValueError("当前任务没有可用的后台复核模型。")
-                self.send_json({"ok": True, "id": decision_id, "reviewStatus": "queued", "decision": router_decision_payload(decision_id)})
+                self.send_json({"ok": True, "id": decision_id, "reviewStatus": "queued", "decision": router_decision_payload(decision_id, auth.get("org_id", "local"))})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -8323,8 +10137,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 final_text = str(body.get("finalText") or body.get("final_text") or "").strip()
                 if not decision_id:
                     raise ValueError("缺少路由决策ID。")
-                with db() as conn:
-                    row = conn.execute("select * from model_router_decisions where id=?", (decision_id,)).fetchone()
+                auth = self.current_auth() or {}
+                row = router_decision_row(decision_id, auth.get("org_id", "local"))
                 if not row:
                     raise ValueError("未找到需要确认的路由结果。")
                 current = rowdict(row)
@@ -8353,7 +10167,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         (id, org_id, user_id, edition, model, label, conclusion, recommendation, evidence, platform, kpi, stage, saved_at)
                         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        knowledge["id"], body.get("org_id") or "router-feedback", body.get("user_id") or "manual",
+                        knowledge["id"], (self.current_auth() or {}).get("org_id", "local"), (self.current_auth() or {}).get("user_id") or (self.current_auth() or {}).get("username", "manual"),
                         current.get("edition") or "china", (json.loads(current.get("project_json") or "{}")).get("model", ""),
                         "MMN任务路由人工复核", final_text, "已回流至MMN策略知识库", current.get("references_json") or "[]",
                         "MMN多模型引擎", current.get("conflict_status") or "", current.get("task_type") or "", stamp
@@ -8500,8 +10314,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-class Server(socketserver.TCPServer):
+class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    daemon_threads = True
 
 if __name__ == "__main__":
     init_db()

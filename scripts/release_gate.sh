@@ -30,6 +30,8 @@ fi
 echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check app.js
 "$NODE_BIN" --check bf-factory.js
+"$NODE_BIN" tests/test_nsr_map.js
+"$NODE_BIN" tests/test_data_first_cockpit_ui.js
 python3 -m py_compile server.py bf_factory/*.py
 python3 -m unittest tests.test_product_summary_import -v
 
@@ -67,6 +69,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "MMN release gate: browser checks"
-MMN_URL="$URL" "$NODE_BIN" scripts/release_gate.js
+MMN_URL="$URL" "$NODE_BIN" scripts/release_gate_data_first.js
 
 echo "MMN release gate: passed"

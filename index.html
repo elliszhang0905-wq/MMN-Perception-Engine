@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.01-platform-nsr-split-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-system-iteration-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
 </head>
 <body>
@@ -41,13 +41,16 @@
     <nav id="nav" aria-label="MMN主导航">
       <div class="nav-section primary-nav">
         <span>核心工作流</span>
-        <button class="active" data-page="dashboard">决策驾驶舱</button>
+        <details class="nav-subsection cockpit-nav" open>
+          <summary><button class="active nav-parent-link" data-page="dashboard">决策驾驶舱</button></summary>
+          <button data-page="brandpenetration">品牌传播穿透</button>
+          <button data-page="socialtrends">社媒趋势中心</button>
+        </details>
         <details class="nav-subsection" open>
           <summary>MMN策略输出</summary>
           <button data-page="contentstrategy">策略输出总览</button>
           <button data-page="bffactory" data-bf-tab="new">BF工厂</button>
         </details>
-        <button data-page="strategykb">RAG策略台</button>
         <button data-page="videos">内容资产</button>
       </div>
       <details class="nav-section" open>
@@ -59,6 +62,12 @@
       </details>
       <details class="nav-section">
         <summary>资产沉淀</summary>
+        <details class="nav-subsection" open>
+          <summary>达人资产库</summary>
+          <button data-page="creatorassets">达人蒸馏与档案</button>
+          <button data-page="bloggerskill">博主策略卡与脚本</button>
+        </details>
+        <button data-page="strategykb">RAG资产库</button>
         <button data-page="bflibrary">BF资产库</button>
         <button data-page="knowhow">打法知识库</button>
         <button data-page="learning">人工结论</button>
@@ -101,8 +110,8 @@
       </div>
       <div class="dashboard-import">
         <div>
-          <span>数据导入工作台</span>
-          <b>导入声量数据后，驾驶舱会自动刷新诊断结果</b>
+          <span>产品评价数据入口</span>
+          <b>导入产品评价数据后，驾驶舱会自动刷新 NSR 竞争力地图</b>
         </div>
         <div>
           <button type="button" class="primary file-button" data-file-target="xlsx-file">导入数据</button>
@@ -110,11 +119,14 @@
         </div>
       </div>
       <div class="dashboard-flow">
-        <div><span>01</span><b>导入数据</b><small>声量、竞品、内容资产</small></div>
-        <div><span>02</span><b>看诊断</b><small>资产、负债、机会排序</small></div>
-        <div><span>03</span><b>看证据</b><small>RAG依据与人工结论</small></div>
-        <div><span>04</span><b>出策略</b><small>初版输出与后台复核</small></div>
+        <div><span>01</span><b>导入数据</b><small>产品评价 × 属性 NSR</small></div>
+        <div><span>02</span><b>看地图</b><small>多车型优势、风险与缺口</small></div>
+        <div><span>03</span><b>找机会</b><small>本品领先与竞品威胁</small></div>
+        <div><span>04</span><b>出策略</b><small>基于地图生成内容策略</small></div>
       </div>
+      <nav id="dashboard-anchor-nav" class="dashboard-anchor-nav" aria-label="决策数据链">
+        <a href="#dashboard-data-summary">01 NSR现状</a><a href="#dashboard-competitor-intelligence">02 竞品占位</a><a href="#opportunity-map">03 机会判断</a><a href="#dashboard-strategy-choice">04 策略动作</a><a href="#dashboard-learning-loop">05 资产沉淀</a>
+      </nav>
       <div class="kpis dashboard-kpis" hidden>
         <article class="kpi">
           <span class="metric-label">口碑健康 NSR <button type="button" class="metric-help" aria-label="了解口碑健康 NSR" aria-describedby="tip-kpi-nsr">?</button><span class="metric-tooltip" id="tip-kpi-nsr" role="tooltip">看品牌口碑基本盘。高位说明正向认知可支撑传播放大；低位说明购买疑虑正在拖累转化，应先修复核心阻力。</span></span>
@@ -145,16 +157,21 @@
           <div class="table-wrap mini"><table id="dashboard-cognition-table"></table></div>
         </article>
       </div>
-      <div class="grid two dashboard-insight-grid">
-        <article class="panel">
-          <div class="panel-title"><div><span>认知格局</span><h2>资产与负债</h2></div><em>正向 / 负向</em></div>
-          <div id="asset-chart" class="asset-benchmark-chart"></div>
-        </article>
-        <article class="panel">
-          <div class="panel-title"><div><span>决策建议</span><h2>本周期应优先做什么</h2></div></div>
-          <div id="top-actions" class="action-cards"></div>
-        </article>
-      </div>
+      <article id="dashboard-competitor-intelligence" class="panel dashboard-competitor-intelligence">
+        <div class="panel-title"><div><span>垂媒正反向验证 × 竞品占位</span><h2>谁正在被共同比较，关系在增强还是减弱</h2></div><em>与上方NSR使用同一车型集合</em></div>
+        <div id="dashboard-competitor-trend" class="dashboard-competitor-trend"></div>
+      </article>
+      <article class="panel dashboard-opportunity-panel data-first-map-panel">
+        <div class="panel-title"><div><span>机会地图</span><h2>多车型 NSR 竞争力分布</h2></div><em>数据优先 · 自动更新</em></div>
+        <div id="nsr-map-models" class="nsr-map-models" aria-label="选择本品基准与对比车型"></div>
+        <div id="nsr-map-legend" class="nsr-map-legend" aria-label="竞争力状态图例"></div>
+        <div id="opportunity-map" class="opportunity-map" aria-label="NSR 竞争力机会地图"></div>
+        <div class="map-summary" id="map-summary"></div>
+        <div id="nsr-map-insights" class="nsr-map-insights" aria-label="自动地图解读"></div>
+      </article>
+      <article id="dashboard-product-proof" class="panel dashboard-product-proof" aria-label="产品证据验证"></article>
+      <article id="dashboard-strategy-choice" class="panel dashboard-strategy-choice" aria-label="策略选择"></article>
+      <section id="dashboard-learning-loop" class="dashboard-learning-loop" aria-label="Learning与Know-how沉淀"></section>
       <article class="panel dashboard-topic-planner">
         <div class="panel-title">
           <div><span>MMN深度选题规划</span><h2>旗舰策略模型生成分阶段选题、达人匹配与内容排期</h2></div>
@@ -182,21 +199,7 @@
           <button type="button" class="primary" id="dashboard-topic-run">MMN深度生成</button>
         </div>
         <div id="dashboard-topic-plan" class="dashboard-topic-plan"></div>
-      </article>
-      <article class="panel dashboard-opportunity-panel">
-        <div class="panel-title"><div><span>机会地图</span><h2>认知赛道优先级</h2></div><em>横轴：竞品领先度 · 纵轴：购买影响</em></div>
-        <div class="map-toolbar">
-          <div id="map-filters" class="segmented">
-            <button class="active" data-filter="all">全部</button>
-            <button data-filter="优先修复">优先修复</button>
-            <button data-filter="抢占空位">抢占空位</button>
-            <button data-filter="持续放大">持续放大</button>
-          </div>
-          <label>地图显示 <select id="map-limit"><option>8</option><option selected>12</option><option>16</option><option>20</option></select> 个</label>
-        </div>
-        <div id="opportunity-map" class="opportunity-map"></div>
-        <div class="map-summary" id="map-summary"></div>
-        <div class="table-wrap mini opportunity-detail-table" hidden><table id="opportunity-table"></table></div>
+        <section id="cockpit-decision-loop" class="cockpit-decision-loop" aria-label="传播执行与结果监测"></section>
       </article>
       <article class="panel model-judgment-panel compact-judgment">
         <div class="panel-title">
@@ -211,6 +214,39 @@
           </div>
         </form>
         <div id="model-judgment-result" class="model-judgment-result"></div>
+      </article>
+    </section>
+
+    <section class="page" id="socialtrends">
+      <div class="section-intro">
+        <div><p class="eyebrow">SOCIAL TREND INTELLIGENCE</p><h2>社媒趋势中心</h2><p>以车型名跨平台采集、归一化、热度计算、正负向复核与证据追溯。</p></div>
+        <div class="legend"><i class="green"></i>正向 <i class="red"></i>负向 <i class="amber"></i>证据待复核</div>
+      </div>
+      <article class="panel social-trend-query">
+        <form id="social-trend-form">
+          <label>车型关键词<input id="social-trend-keyword" required placeholder="例如：智己 L6"></label>
+          <div class="social-primary-actions"><button type="submit" class="primary" id="social-trend-run">开始分析</button><button type="button" class="ghost" id="social-trend-import">导入数据</button><input id="social-trend-import-file" type="file" accept=".xlsx,.csv" hidden></div>
+          <div class="social-segment-row">
+            <fieldset class="social-platform-segments"><legend>平台范围</legend><button type="button" data-social-platform="all" class="active">全部</button><button type="button" data-social-platform="douyin"><i class="platform-logo douyin">♪</i>抖音</button><button type="button" data-social-platform="xiaohongshu"><i class="platform-logo xiaohongshu">RED</i>小红书</button><button type="button" data-social-platform="weibo"><i class="platform-logo weibo">◉</i>微博</button><input type="checkbox" name="social-platform" value="douyin" checked hidden><input type="checkbox" name="social-platform" value="xiaohongshu" checked hidden><input type="checkbox" name="social-platform" value="weibo" checked hidden></fieldset>
+            <fieldset class="social-time-segments"><legend>时间范围</legend><button type="button" data-social-time="1d">1天</button><button type="button" data-social-time="3d">3天</button><button type="button" data-social-time="7d" class="active">7天</button><button type="button" data-social-time="30d">30天</button><button type="button" data-social-time="custom" aria-controls="social-custom-dates">▣ 自定义</button><input id="social-trend-time" type="hidden" value="7d"></fieldset>
+            <div id="social-custom-dates" class="social-custom-dates" hidden><label>开始日期<input type="date" id="social-start-date"></label><span>至</span><label>结束日期<input type="date" id="social-end-date"></label></div>
+          </div>
+          <div class="social-competitor-picker"><label>竞品选择 <small>最多选择 3 台</small><select id="social-trend-competitor-add"><option value="">添加竞品车型</option></select></label><div id="social-trend-competitors" aria-label="已选竞品"></div></div>
+          <details class="social-thresholds"><summary>热门内容门槛</summary><div><label>抖音最低点赞<input id="social-threshold-douyin" type="number" min="0" step="100" value="8000"></label><label>小红书最低点赞<input id="social-threshold-xiaohongshu" type="number" min="0" step="100" value="500"></label><label>微博最低点赞<input id="social-threshold-weibo" type="number" min="0" step="100" value="500"></label><button type="button" id="social-threshold-reset">恢复默认门槛</button></div></details>
+        </form>
+        <div id="social-trend-status" class="social-trend-progress" role="status" aria-live="polite" hidden></div>
+      </article>
+      <div id="social-trend-dashboard" class="social-trend-dashboard"></div>
+    </section>
+
+    <section class="page" id="brandpenetration">
+      <div class="section-intro brand-penetration-intro">
+        <div><p class="eyebrow">BRAND COMMUNICATION PENETRATION</p><h2>品牌传播穿透</h2><p>以客户项目为边界，穿透本品与竞品近30天的品牌动作、平台事件、热度证据与传播关系。</p></div>
+        <div class="brand-penetration-status"><span id="brand-penetration-snapshot-state">正在读取真实快照</span><b>上汽奥迪 × 5个竞品</b><small id="brand-penetration-snapshot-meta">MMN 三平台 · 数据库快照</small></div>
+      </div>
+      <article class="panel brand-penetration-frame-panel">
+        <div class="brand-penetration-frame-head"><div><span>项目快照</span><b>上汽奥迪近30天竞争传播验证</b></div><p>真实快照只增不覆盖；平台原文可下钻，事件分类仍保留人工复核标记。</p></div>
+        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html" title="上汽奥迪品牌传播穿透真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
       </article>
     </section>
 
@@ -355,17 +391,17 @@
         <button type="button" data-content-view="contentCapability">内容能力蒸馏库</button>
       </div>
       <article class="panel social-plugin-panel" id="social-plugin-panel">
-        <div class="panel-title"><div><span>CHROME PLUGIN BRIDGE</span><h2>抖音 / 小红书采集插件控制台</h2></div><em id="social-plugin-status">检测中</em></div>
+        <div class="panel-title"><div><span>MMN COLLECTION BRIDGE</span><h2>抖音 / 小红书 MMN采集控制台</h2></div><em id="social-plugin-status">检测中</em></div>
         <div class="social-plugin-grid">
           <div class="social-plugin-card">
-            <div><b>抖音采集</b><span id="douyin-plugin-note">等待插件状态</span></div>
+            <div><b>抖音采集</b><span id="douyin-plugin-note">等待MMN采集状态</span></div>
             <div class="social-plugin-actions">
               <button type="button" class="primary" data-plugin-open="douyin">打开采集页</button>
               <button type="button" class="ghost" data-plugin-sync="douyin">同步最新导出</button>
             </div>
           </div>
           <div class="social-plugin-card">
-            <div><b>小红书采集</b><span id="xhs-plugin-note">等待插件状态</span></div>
+            <div><b>小红书采集</b><span id="xhs-plugin-note">等待MMN采集状态</span></div>
             <div class="social-plugin-actions">
               <button type="button" class="primary" data-plugin-open="xiaohongshu">打开采集页</button>
               <button type="button" class="ghost" data-plugin-sync="xiaohongshu">同步最新导出</button>
@@ -631,6 +667,22 @@
           </div>
           <div id="bf-library-list" class="bf-library-list"><p class="empty">选择项目后加载BF资产。</p></div>
         </article>
+      </div>
+    </section>
+
+    <section class="page" id="creatorassets">
+      <div class="creator-assets-shell">
+        <article class="panel creator-assets-hero">
+          <div><p class="eyebrow">MMN CREATOR ASSET LIBRARY</p><h2>达人账号蒸馏</h2><p>把公开达人账号持续沉淀为可检索、可验证、可复用的内容资产。支持抖音与小红书，平台字段缺失会明确标记，不以 0 代替。</p></div>
+          <div class="creator-policy-note">原创生成仅参考内容方法论、结构与用户洞察，不复制原作品，不模仿特定真人身份或固定表达。</div>
+        </article>
+        <div class="creator-asset-tabs" role="tablist">
+          <button class="active" data-creator-asset-tab="distill">达人蒸馏</button>
+          <button data-creator-asset-tab="profiles">达人档案</button>
+          <button data-creator-asset-tab="breakdowns">视频/笔记拆解资产</button>
+          <button data-creator-asset-tab="methods">内容方法论库</button>
+        </div>
+        <div id="creator-asset-workspace"></div>
       </div>
     </section>
 
@@ -985,10 +1037,6 @@
     <div class="dialog-head"><h2 id="trend-dialog-title">竞争趋势详情</h2><button id="trend-dialog-close">×</button></div>
     <div id="trend-dialog-body"></div>
   </dialog>
-  <dialog id="asset-benchmark-dialog" class="wide-dialog">
-    <div class="dialog-head"><h2 id="asset-benchmark-dialog-title">标签竞品对比</h2><button id="asset-benchmark-dialog-close" aria-label="关闭标签竞品对比">×</button></div>
-    <div id="asset-benchmark-dialog-body"></div>
-  </dialog>
   <dialog id="emotion-label-dialog" class="wide-dialog">
     <div class="dialog-head"><h2 id="emotion-label-dialog-title">情绪标签竞品表现</h2><button id="emotion-label-dialog-close" aria-label="关闭情绪标签竞品表现">×</button></div>
     <div id="emotion-label-dialog-body"></div>
@@ -1019,9 +1067,36 @@
       <div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button type="submit" class="primary">保存达人画像</button></div>
     </form>
   </dialog>
+  <dialog id="opportunity-review-dialog" class="wide-dialog opportunity-review-dialog" aria-labelledby="opportunity-review-title" aria-describedby="opportunity-review-description">
+    <div class="dialog-head">
+      <div><span>机会地图证据治理</span><h2 id="opportunity-review-title">人工确认台</h2></div>
+      <button type="button" id="opportunity-review-dialog-close" aria-label="关闭人工确认台">×</button>
+    </div>
+    <p id="opportunity-review-description" class="opportunity-review-description">逐项核对产品事实、统一标签和证据定位。人工修正需再次通过双旗舰模型交叉验证后才会正式进入机会地图。</p>
+    <div class="opportunity-review-toolbar">
+      <div id="opportunity-review-counts" role="status" aria-live="polite"></div>
+      <label><span>状态</span><select id="opportunity-review-status-filter"><option value="pending">待处理</option><option value="pending_recheck">待模型复核</option><option value="needs_evidence">待补证</option><option value="processed">已处理</option><option value="all">全部</option></select></label>
+      <label><span class="sr-only">搜索待确认事实</span><input id="opportunity-review-search" type="search" placeholder="搜索事实、标签或页码"></label>
+    </div>
+    <div class="opportunity-review-layout">
+      <section class="opportunity-review-queue" aria-label="待确认项目列表">
+        <div class="opportunity-review-bulk"><span id="opportunity-review-selected-count">已选 0 项</span><button type="button" id="opportunity-review-bulk-needs-evidence" class="secondary">批量标记待补证</button></div>
+        <div id="opportunity-review-list"></div>
+      </section>
+      <section id="opportunity-review-detail" class="opportunity-review-detail" aria-label="待确认项目详情"></section>
+    </div>
+    <div class="dialog-actions opportunity-review-footer">
+      <span id="opportunity-review-message" aria-live="polite"></span>
+      <button type="button" id="opportunity-review-recheck" class="secondary" hidden>提交修正并运行双旗舰复核</button>
+      <button type="button" id="opportunity-review-done">完成</button>
+    </div>
+  </dialog>
   <div id="toast"></div>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="app.js?v=beta-1.01-platform-nsr-split-1"></script>
+  <script src="opportunity-source-parser.js?v=beta-1.02-system-iteration-1"></script>
+  <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
+  <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
+  <script src="app.js?v=beta-1.02-system-iteration-1"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>
 </html>

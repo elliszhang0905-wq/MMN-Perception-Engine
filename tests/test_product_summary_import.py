@@ -67,6 +67,18 @@ def product_summary_cells(include_attributes=True):
     return cells
 
 
+def add_attribute_block(cells, start_row, source):
+    cells[(start_row, 22)] = source
+    for offset, model in enumerate(MODELS):
+        cells[(start_row, 23 + offset)] = model
+    for label_offset, label in enumerate(("外观", "价格", "安全")):
+        row = start_row + 1 + label_offset
+        cells[(row, 22)] = label
+        for offset in range(len(MODELS)):
+            cells[(row, 23 + offset)] = 0.42 + label_offset * 0.1 + offset * 0.01
+    return cells
+
+
 class ProductSummaryImportTest(unittest.TestCase):
     def test_summary_import_uses_only_real_blocks_and_preserves_metadata(self):
         dataset = build_dataset_from_summary_workbook(
@@ -115,6 +127,82 @@ class ProductSummaryImportTest(unittest.TestCase):
             },
         )
         self.assertTrue(dataset["importQuality"]["platformVolumeAvailable"])
+
+    def test_summary_import_exposes_any_structurally_valid_attribute_platform(self):
+        cells = add_attribute_block(product_summary_cells(), 60, "微博")
+
+        dataset = build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+        self.assertEqual(
+            dataset["importQuality"]["attributeNsrSources"],
+            ["全网", "垂媒车主口碑", "抖音", "微博"],
+        )
+        self.assertIn("微博", dataset["platforms"])
+        weibo_exterior = next(
+            row for row in dataset["rows"] if row[0] == "奥迪E7X" and row[2] == "微博" and row[4] == "外观"
+        )
+        self.assertAlmostEqual(weibo_exterior[14], 0.45)
+
+    def test_summary_import_keeps_missing_attribute_nsr_as_absent(self):
+        cells = product_summary_cells()
+        q6_col = 27
+        for row in range(30, 33):
+            cells[(row, q6_col)] = "-"
+
+        dataset = build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+        q6_vertical = [
+            row for row in dataset["rows"]
+            if row[0] == "奥迪Q6L e-tron" and row[2] == "垂媒车主口碑"
+        ]
+        self.assertEqual(q6_vertical, [])
+
+    def test_summary_import_preserves_zero_percent_attribute_nsr(self):
+        cells = product_summary_cells()
+        cells[(32, 23)] = 0
+
+        dataset = build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+        xiaomi_vertical_safety = next(
+            row for row in dataset["rows"]
+            if row[0] == "小米YU7" and row[2] == "垂媒车主口碑" and row[4] == "安全"
+        )
+        self.assertEqual(xiaomi_vertical_safety[14], 0)
+
+    def test_summary_import_does_not_mix_adjacent_nsr_blocks_into_overall_nsr(self):
+        cells = product_summary_cells()
+        cells[(19, 13)] = "垂媒车主口碑"
+        cells[(19, 14)] = "正面"
+        cells[(19, 15)] = "中性"
+        cells[(19, 16)] = "负面"
+        cells[(19, 17)] = "NSR"
+        for offset, model in enumerate(MODELS):
+            row = 20 + offset
+            cells[(row, 13)] = model
+            cells[(row, 14)] = 0.8
+            cells[(row, 15)] = 0.1
+            cells[(row, 16)] = 0.1
+            cells[(row, 17)] = 0.95 - offset * 0.05
+
+        dataset = build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+        self.assertAlmostEqual(dataset["summaryMetrics"]["小米YU7"]["overallNsr"], 0.6)
+        self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
+
+    def test_summary_import_rejects_missing_overall_nsr_instead_of_turning_it_into_zero(self):
+        cells = product_summary_cells()
+        cells[(12, 17)] = "—"
+
+        with self.assertRaisesRegex(ValueError, "完整的全网NSR"):
+            build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+    def test_summary_import_preserves_real_zero_overall_nsr(self):
+        cells = product_summary_cells()
+        cells[(12, 17)] = 0
+
+        dataset = build_dataset_from_summary_workbook(cells, "AUDI E7X等5车产品评价_0710_v2.xlsx")
+
+        self.assertEqual(dataset["summaryMetrics"]["小米YU7"]["overallNsr"], 0)
 
     def test_summary_import_rejects_when_attribute_blocks_are_missing(self):
         with self.assertRaisesRegex(ValueError, "属性NSR区块"):
