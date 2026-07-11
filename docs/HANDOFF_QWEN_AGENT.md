@@ -543,3 +543,4 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 决策驾驶舱不再展示“NSR × 垂媒合并判断”区块；该层与后续产品证据和策略选择重复。原始 NSR、垂媒走势、竞争气泡和后续策略计算继续保留。版本码 `beta-1.01-cockpit-hide-evidence-1`，云端代码备份 `backups/code_before_cockpit_hide_evidence_20260712_034654.tar.gz`。
 - 本次仅做展示层热更新，不迁移数据库；公网 HTML / JavaScript 已确认不存在旧区块及渲染函数，六个容器正常，近 5 分钟应用异常 0。
 - 2026-07-11 至 2026-07-12 的驾驶舱、数据读取、租户隔离、社媒趋势、机会地图与决策资产回流变更统一归入 `beta 1.02` 系统级迭代，版本码 `beta-1.02-system-iteration-1`。后续不得再以 beta 1.01 的单点热修名称描述这批能力。
+- beta 1.02 主提交为 `0481374`，已推送 GitHub `main` 并完整同步 ECS；99 个变更文件哈希一致。发布前代码/数据库备份为 `backups/code_before_beta_1_02_20260712_035556.tar.gz`、`backups/commercial_demo_before_beta_1_02_20260712_035556.db`，部署备份为 `backups/mmn_backup_20260712_040139.tar.gz`。公网版本、六个容器、管理员/试用空间隔离和 3,267 条生产关系均验证通过。
