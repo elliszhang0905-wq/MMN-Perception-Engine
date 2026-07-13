@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from social_trends import TikHubClient, _aggregate, _parse_import_date, apply_history, attach_competitor_rankings, collect, import_records, init_schema, latest_snapshot, normalize_item, save_snapshot
+from social_trends import TikHubClient, _aggregate, _parse_import_date, apply_history, attach_competitor_rankings, collect, douyin_next_cursor, ensure_tikhub_success, import_records, init_schema, latest_snapshot, normalize_item, passenger_vehicle_scope_exclusion_reason, save_snapshot
 
 
 class SocialTrendsTest(unittest.TestCase):
@@ -20,11 +20,16 @@ class SocialTrendsTest(unittest.TestCase):
     def test_normalizes_heat_sentiment_matrix_and_evidence(self):
         item = normalize_item("douyin", {"aweme_id": "123", "desc": "智己L6 舒适稳定，官方推荐",
             "author": {"nickname": "智己汽车官方"}, "statistics": {"digg_count": 1000, "comment_count": 100,
-            "share_count": 50, "collect_count": 80, "play_count": 30000}}, "智己L6", "2026-07-11T00:00:00Z")
+            "share_count": 50, "collect_count": 80, "play_count": 30000},
+            "video": {"cover": {"url_list": ["https://p3.example.com/cover.jpeg"]},
+                      "dynamic_cover": {"url_list": ["https://p3.example.com/cover.webp"]}},
+            "share_info": {"share_url": "https://www.douyin.com/video/123"}}, "智己L6", "2026-07-11T00:00:00Z")
         self.assertEqual(item["sentiment"], "positive")
         self.assertTrue(item["matrixContent"])
         self.assertGreater(item["heat"], 0)
         self.assertTrue(item["sourceUrl"].endswith("/123"))
+        self.assertEqual(item["coverUrl"], "https://p3.example.com/cover.jpeg")
+        self.assertEqual(item["dynamicCoverUrl"], "https://p3.example.com/cover.webp")
         self.assertEqual(len(item["evidence"]["contentHash"]), 64)
 
     def test_xiaohongshu_timestamp_is_preserved_as_publish_time(self):
@@ -61,6 +66,125 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(result["items"], [])
         self.assertEqual(result["admission"]["rejectedReasons"]["outside_time_range"], 1)
 
+    def test_collect_honors_custom_dates_after_broad_tikhub_search(self):
+        now = datetime.now(timezone.utc)
+        payload = {"data": [
+            {"aweme_id": "in-window", "desc": "车型A 自定义窗口内容", "create_time": int((now - timedelta(days=4)).timestamp())},
+            {"aweme_id": "out-window", "desc": "车型A 窗口外内容", "create_time": int((now - timedelta(days=1)).timestamp())},
+        ]}
+        search_ranges = []
+        def search(platform, keyword, page, count, time_range, cursor):
+            search_ranges.append(time_range)
+            return payload, {"endpoint": "test", "status": 200}
+        with patch.object(TikHubClient, "search", side_effect=search):
+            result = collect("车型A", platforms=["douyin"], time_range="custom",
+                             start_date=(now - timedelta(days=5)).date().isoformat(),
+                             end_date=(now - timedelta(days=3)).date().isoformat(), include_enrichment=False)
+        self.assertEqual([item["platformItemId"] for item in result["items"]], ["in-window"])
+        self.assertEqual(search_ranges, ["90d"])
+        self.assertTrue(result["admission"]["dateWindow"]["endExclusive"])
+        self.assertEqual(result["admission"]["rejectedReasons"]["outside_time_range"], 1)
+
+    def test_custom_import_date_includes_the_entire_end_day(self):
+        now = datetime.now(timezone.utc)
+        today = now.date().isoformat()
+        result = import_records([{
+            "平台": "微博", "作品ID": "same-day", "作品标题": "车型A 当天内容",
+            "发布时间": f"{today} 18:00:00", "点赞数": 600,
+        }], "车型A", ["weibo"], time_range="custom", start_date=today, end_date=today)
+        self.assertEqual(result["admission"]["admittedCount"], 1)
+        self.assertTrue(result["admission"]["dateWindow"]["endExclusive"])
+
+    def test_commercial_vehicle_entity_is_excluded_from_passenger_vehicle_scope(self):
+        truck_text = "第六代主动制动辅助系统增强版 #梅赛德斯奔驰卡车##奔驰卡车##ABA6Plus#"
+        self.assertEqual(passenger_vehicle_scope_exclusion_reason(truck_text), "commercial_vehicle_entity")
+        self.assertEqual(passenger_vehicle_scope_exclusion_reason("全新奔驰纯电GLC正式上市"), "")
+        now = datetime.now(timezone.utc).isoformat()
+        result = import_records([{
+            "平台": "微博", "作品ID": "truck-1", "作品标题": f"奔驰 {truck_text}",
+            "发布时间": now, "点赞数": 900, "作品链接": "https://weibo.com/detail/truck-1",
+        }], "奔驰", ["weibo"], time_range="7d")
+        self.assertEqual(result["items"], [])
+        self.assertEqual(result["admission"]["rejectedReasons"], {"commercial_vehicle_entity": 1})
+
+    def test_snapshot_write_fails_closed_for_commercial_vehicle_content(self):
+        conn = sqlite3.connect(":memory:"); init_schema(conn)
+        result = _aggregate([normalize_item("weibo", {
+            "mid": "truck-2", "text": "奔驰卡车 ABA6Plus 主动制动系统", "attitudes_count": 900,
+        }, "奔驰", datetime.now(timezone.utc).isoformat())], "奔驰", [], [])
+        with self.assertRaisesRegex(ValueError, "商用车实体内容"):
+            save_snapshot(conn, result)
+
+    def test_collection_progress_reports_real_completed_stages(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        payload = {"data": [{"aweme_id": "p1", "desc": "车型A 推荐", "create_time": now}]}
+        updates = []
+        with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
+            collect("车型A", platforms=["douyin"], include_enrichment=False,
+                    progress_callback=lambda stage, progress, message: updates.append((stage, progress, message)))
+        self.assertEqual([progress for _, progress, _ in updates], [33, 67, 100])
+        self.assertEqual(updates[-1][0], "aggregate")
+
+    def test_douyin_collection_uses_response_cursor_instead_of_an_offset(self):
+        payloads = [
+            {"data": {"business_data": [{"data": {"has_more": 1, "cursor": 8}}]}},
+            {"data": {"business_data": [{"data": {"has_more": 0, "cursor": 16}}]}},
+        ]
+        calls = []
+        def search(platform, keyword, page, count, time_range, cursor):
+            calls.append((page, cursor))
+            return payloads[len(calls) - 1], {"endpoint": "test", "status": 200}
+        with patch.object(TikHubClient, "search", side_effect=search):
+            collect("车型A", platforms=["douyin"], pages=2, include_enrichment=False)
+        self.assertEqual(calls, [(1, ""), (2, "8")])
+        self.assertEqual(douyin_next_cursor(payloads[0]), "8")
+        self.assertEqual(douyin_next_cursor(payloads[1]), "")
+
+    def test_collection_falls_back_to_valid_content_when_popularity_threshold_removes_everything(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        payload = {"data": [{
+            "aweme_id": "fallback-1", "desc": "上汽奥迪 新车体验",
+            "create_time": now, "statistics": {"digg_count": 120},
+        }]}
+        with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
+            result = collect("上汽奥迪", platforms=["douyin"], include_enrichment=False,
+                             thresholds={"douyin": 8000})
+        self.assertEqual(len(result["items"]), 1)
+        self.assertTrue(result["admission"]["thresholdFallback"]["applied"])
+        self.assertEqual(result["admission"]["thresholdFallback"]["admittedCount"], 1)
+        self.assertEqual(result["items"][0]["evidence"]["verificationStatus"],
+                         "tikhub_search_observation_below_popularity_threshold")
+        self.assertNotIn("below_like_threshold", result["admission"]["rejectedReasons"])
+
+    def test_collection_keeps_strict_threshold_when_at_least_one_item_meets_it(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        payload = {"data": [
+            {"aweme_id": "hot-1", "desc": "上汽奥迪 热门发布", "create_time": now,
+             "statistics": {"digg_count": 9000}},
+            {"aweme_id": "cool-1", "desc": "上汽奥迪 普通体验", "create_time": now,
+             "statistics": {"digg_count": 120}},
+        ]}
+        with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
+            result = collect("上汽奥迪", platforms=["douyin"], include_enrichment=False,
+                             thresholds={"douyin": 8000})
+        self.assertEqual([item["platformItemId"] for item in result["items"]], ["hot-1"])
+        self.assertFalse(result["admission"]["thresholdFallback"]["applied"])
+        self.assertEqual(result["admission"]["rejectedReasons"]["below_like_threshold"], 1)
+
+    def test_collection_keeps_low_heat_evidence_for_a_platform_without_any_qualified_sample(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        payloads = {
+            "douyin": {"data": [{"aweme_id": "douyin-low", "desc": "车型A 普通体验", "create_time": now, "statistics": {"digg_count": 120}}]},
+            "weibo": {"data": [{"mid": "weibo-hot", "text": "车型A 热门体验", "created_at": now, "attitudes_count": 900}]},
+        }
+        with patch.object(TikHubClient, "search", side_effect=lambda platform, *_: (payloads[platform], {"endpoint": "test", "status": 200})):
+            result = collect("车型A", platforms=["douyin", "weibo"], include_enrichment=False,
+                             thresholds={"douyin": 8000, "weibo": 500})
+        self.assertEqual({item["platformItemId"] for item in result["items"]}, {"douyin-low", "weibo-hot"})
+        self.assertTrue(result["admission"]["thresholdFallback"]["applied"])
+        self.assertEqual(result["admission"]["thresholdFallback"]["platforms"], ["douyin"])
+        self.assertEqual(result["admission"]["rejectedByPlatform"]["douyin"], {})
+
     def test_weibo_rfc2822_publish_time_is_bucketed_in_timeline(self):
         item = normalize_item("weibo", {
             "mid": "w-time", "text": "上汽奥迪 权益", "created_at": "Sat Jul 11 13:37:51 +0800 2026",
@@ -89,6 +213,11 @@ class SocialTrendsTest(unittest.TestCase):
         with patch.dict(os.environ, {"TIKHUB_API_KEY": "server-secret"}):
             self.assertEqual(TikHubClient().key, "server-secret")
 
+    def test_tikhub_business_error_is_not_silently_treated_as_an_empty_result(self):
+        with self.assertRaisesRegex(RuntimeError, "TikHub API 400"):
+            ensure_tikhub_success({"code": 400, "message": "invalid request"}, "/api/test")
+        self.assertEqual(ensure_tikhub_success({"code": 200, "data": {}}, "/api/test")["code"], 200)
+
     def test_weibo_html_is_cleaned_before_hot_word_analysis(self):
         raw = '<a href="https://weibo.com/x" data-hide=""><span class="surl-text">#奥迪E7X#</span></a> 豪华纯电设计很优秀<br>值得推荐'
         item = normalize_item("weibo", {"mid": "html-1", "text": raw}, "奥迪E7X", "now")
@@ -107,6 +236,18 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual([x["role"] for x in result["modelComparisons"]], ["own", "competitor", "competitor"])
         self.assertEqual(result["modelComparisons"][1]["model"], "Model Y")
         self.assertTrue(result["comparisonEvidence"])
+        self.assertEqual({x["brandName"] for x in result["comparisonItems"]}, {"Model Y", "蔚来ES6"})
+        self.assertTrue(all(x["brandName"] == x["normalizedModel"] for x in result["comparisonItems"]))
+
+    def test_competitor_comparison_preserves_platform_collection_diagnostics(self):
+        own = _aggregate([], "奥迪E7X", [], [])
+        competitor = _aggregate([], "Model Y", [{"platform": "douyin", "itemCount": 4}], [{"platform": "xiaohongshu", "message": "upstream failed"}], selected_platforms=["douyin", "xiaohongshu"])
+        competitor["admission"] = {"rejectedByPlatform": {"douyin": {"below_like_threshold": 4}, "xiaohongshu": {}}}
+        result = attach_competitor_rankings(own, [competitor])
+        collection = result["modelComparisons"][1]["collection"]
+        self.assertEqual(collection["sources"][0]["itemCount"], 4)
+        self.assertEqual(collection["warnings"][0]["platform"], "xiaohongshu")
+        self.assertEqual(collection["admission"]["rejectedByPlatform"]["douyin"]["below_like_threshold"], 4)
 
     def test_dashboard_aggregation_includes_platform_creator_risk_and_comments(self):
         positive = normalize_item("douyin", {"aweme_id": "p1", "desc": "车型A 舒适推荐", "author": {"nickname": "车型A官方"}, "digg_count": 100}, "车型A", "2026-07-11T00:00:00Z")

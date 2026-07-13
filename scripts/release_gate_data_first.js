@@ -47,12 +47,16 @@ async function main() {
   page.on("console", message => { if (message.type() === "error") runtimeErrors.push(message.text()); });
 
   try {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    // The cockpit intentionally starts background API work (including model-backed modules).
+    // Waiting for networkidle makes the release gate depend on those unrelated request durations.
+    await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#dashboard");
     await page.evaluate(state => {
       localStorage.setItem("mmnEngineEdition", "china");
       localStorage.setItem("mmnEngineState:china", JSON.stringify(state));
     }, seedSummaryState());
-    await page.reload({ waitUntil: "networkidle" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#dashboard");
     await page.waitForTimeout(300);
 
     const initial = await page.evaluate(() => ({
@@ -105,6 +109,14 @@ async function main() {
     }));
     add("cockpit remains clickable parent with social trend child and no key leak", socialNav.parent && socialNav.child && socialNav.nested && !socialNav.keyLeak, JSON.stringify(socialNav));
     let socialRequest = {};
+    await page.route("**/api/social-trends/jobs", async route => {
+      socialRequest = route.request().postDataJSON();
+      const ownEvidence={platform:"douyin",platformLabel:"抖音",normalizedModel:"智己L6",text:"智己L6 智能座舱体验",author:"汽车媒体",sourceUrl:"https://www.douyin.com/video/1",matrixContent:true,heat:78,sentiment:"positive",metrics:{likes:1200,comments:80,shares:35,collects:120,views:52000},evidence:{contentHash:"1234567890abcdef"}};
+      const competitorEvidence={platform:"weibo",platformLabel:"微博",normalizedModel:"小米YU7",text:"小米YU7 城市体验",author:"电车观察",sourceUrl:"https://weibo.com/detail/2",matrixContent:false,heat:66,sentiment:"positive",metrics:{likes:820,comments:50,shares:20,collects:0,views:0},evidence:{contentHash:"abcdef1234567890"}};
+      const result={keyword:"智己L6",statusHint:"已形成可识别热度",confidence:.8,confidenceLabel:"高",snapshot:{id:"gate-snapshot"},items:[{id:"e1",sentiment:"positive"}],platforms:[{platform:"douyin",label:"抖音",contentCount:1,heat:78,positive:1,negative:0,share:100}],platformShare:[{platform:"douyin",label:"抖音",contentCount:1,heat:78,positive:1,negative:0,share:100}],timeline:[{date:"2026-07-11",heat:78,contentCount:1,platforms:[{platform:"douyin",label:"抖音",contentCount:1,heat:78}]}],timelineUndated:{contentCount:0,heat:0,platforms:[]},hotWords:[{word:"智能座舱",count:3}],ownModelRanking:[{model:"智己L6",heat:78}],modelHeatRanking:[{model:"智己L6",heat:78},{model:"小米YU7",heat:66}],modelComparisons:[{model:"智己L6",role:"own",heat:78,contentCount:1,positiveRate:100,riskCount:0,confidence:.8,platforms:[{platform:"douyin",label:"抖音",contentCount:1,heat:78}],hotWords:[{word:"智能座舱"}]},{model:"小米YU7",role:"competitor",heat:66,contentCount:1,positiveRate:100,riskCount:0,confidence:.8,platforms:[{platform:"douyin",label:"抖音",contentCount:1,heat:66}],hotWords:[{word:"城市体验"}]}],positiveCompetitorsTop5:[{model:"小米YU7",positiveHeat:66,positiveCount:3,confidence:.8}],contentRanking:[ownEvidence],comparisonEvidence:[ownEvidence,competitorEvidence],creatorRanking:[{author:"汽车媒体",platform:"douyin",heat:78,matrixContent:true}],matrixSummary:{creatorCount:1},commentInsights:{total:12,positive:9,negative:1},contentClusters:[{topic:"智能座舱",contentCount:3,heat:78}],riskTopics:[],hotLists:[{platform:"douyin",platformLabel:"抖音",items:["智能汽车"]}],historyComparison:{available:false,delta:{}},methodology:{heat:"可复算热度口径"},qa:{dualModel:{status:"aligned"},strategyOutput:"基于双模型一致证据形成策略结论"}};
+      result.items=[ownEvidence,{platform:"xiaohongshu",platformLabel:"小红书",normalizedModel:"智己L6",text:"智己L6 车机偶发卡顿体验",author:"真实车主小林",sourceUrl:"https://www.xiaohongshu.com/explore/risk-1",heat:43.5,sentiment:"negative"}];
+      await route.fulfill({status:202,contentType:"application/json",body:JSON.stringify({ok:true,job:{jobId:"gate-snapshot",status:"completed",stage:"completed",progress:100,result}})});
+    });
     await page.route("**/api/social-trends/collect", async route => {
       socialRequest = route.request().postDataJSON();
       const ownEvidence={platform:"douyin",platformLabel:"抖音",normalizedModel:"智己L6",text:"智己L6 智能座舱体验",author:"汽车媒体",sourceUrl:"https://www.douyin.com/video/1",matrixContent:true,heat:78,sentiment:"positive",metrics:{likes:1200,comments:80,shares:35,collects:120,views:52000},evidence:{contentHash:"1234567890abcdef"}};
@@ -115,15 +127,37 @@ async function main() {
     await page.locator("#social-trend-keyword").fill("智己L6");
     const initialCompetitors = await page.locator("#social-trend-competitors button").count();
     if (initialCompetitors < 3) {
-      const option = page.locator('#social-trend-competitor-add option:not([value=""])').first();
-      await page.locator("#social-trend-competitor-add").selectOption(await option.getAttribute("value"));
+      const brandSelect = page.locator("#social-trend-competitor-brand");
+      const preferredBrand = brandSelect.locator('option[value="小米汽车"]');
+      const brandValue = await preferredBrand.count() ? "小米汽车" : await brandSelect.locator('option:not([value=""])').first().getAttribute("value");
+      await brandSelect.selectOption(brandValue);
+      const modelSelect = page.locator("#social-trend-competitor-add");
+      const preferredModel = modelSelect.locator('option[value="小米YU7"]');
+      const modelValue = await preferredModel.count() ? "小米YU7" : await modelSelect.locator('option:not([value=""])').first().getAttribute("value");
+      await modelSelect.selectOption(modelValue);
     }
     await page.locator("#social-trend-run").click();
     await page.waitForSelector(".social-ranking tbody tr");
-    const socialSurface = await page.evaluate(() => ({active:document.querySelector("#socialtrends")?.classList.contains("active"),status:document.querySelector("#social-trend-status")?.textContent||"",rows:document.querySelectorAll(".social-ranking tbody tr").length,source:document.querySelector(".social-ranking a")?.getAttribute("href")||"",kpis:document.querySelectorAll(".social-kpi-grid article").length,boards:document.querySelectorAll(".social-board-grid .panel").length,comparisonModels:document.querySelectorAll(".social-model-comparison").length,evidenceModels:[...document.querySelectorAll(".social-model-tag")].map(x=>x.textContent),rawMetrics:document.querySelectorAll(".social-raw-metrics").length,segments:document.querySelectorAll(".social-segment-row button").length,logos:document.querySelectorAll(".platform-logo,.social-platform-badge i").length,progress:document.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow"),competitors:document.querySelectorAll("#social-trend-competitors button").length,competitorBoard:document.querySelector(".social-bar-list.competitors")?.textContent||"",importLabel:document.querySelector("#social-trend-import")?.textContent,thresholds:["douyin","xiaohongshu","weibo"].map(x=>Number(document.querySelector(`#social-threshold-${x}`)?.value)),keyCopy:/密钥|API Key|后端/.test(document.querySelector("#socialtrends")?.textContent||"")}));
+    const socialSurface = await page.evaluate(() => ({active:document.querySelector("#socialtrends")?.classList.contains("active"),status:document.querySelector("#social-trend-status")?.textContent||"",rows:document.querySelectorAll(".social-ranking tbody tr").length,source:document.querySelector(".social-ranking a")?.getAttribute("href")||"",kpis:document.querySelectorAll(".social-kpi-grid article").length,boards:document.querySelectorAll(".social-board-grid .panel").length,comparisonModels:document.querySelectorAll(".social-model-comparison").length,evidenceModels:[...document.querySelectorAll(".social-model-tag")].map(x=>x.textContent),rawMetrics:document.querySelectorAll(".social-raw-metrics").length,segments:document.querySelectorAll(".social-segment-row button").length,logos:document.querySelectorAll(".platform-logo,.social-platform-badge i").length,progress:document.querySelector('#socialtrends [role="progressbar"]')?.getAttribute("aria-valuenow"),competitors:document.querySelectorAll("#social-trend-competitors button").length,competitorBoard:document.querySelector(".social-bar-list.competitors")?.textContent||"",importLabel:document.querySelector("#social-trend-import")?.textContent,thresholds:["douyin","xiaohongshu","weibo"].map(x=>Number(document.querySelector(`#social-threshold-${x}`)?.value)),keyCopy:/密钥|API Key|后端/.test(document.querySelector("#socialtrends")?.textContent||"")}));
     await page.screenshot({path:"output/playwright/social-trend-dashboard.png",fullPage:true});
+    await page.locator(".social-bar-list.competitors").screenshot({path:"output/playwright/social-positive-benchmark.png"});
+    const benchmarkSurface=await page.evaluate(()=>({model:document.querySelector(".social-own-benchmark b")?.textContent||"",heat:document.querySelector(".social-own-benchmark>em")?.textContent||"",firstCompetitorRank:document.querySelector(".social-own-benchmark+li>b>i")?.textContent||""}));
+    await page.locator(".social-risk-trigger").click();
+    await page.waitForSelector(".social-risk-popover:not([hidden])");
+    const riskSurface=await page.evaluate(()=>({expanded:document.querySelector(".social-risk-trigger")?.getAttribute("aria-expanded"),title:document.querySelector(".social-risk-popover li b")?.textContent||"",source:document.querySelector(".social-risk-popover li a")?.getAttribute("href")||""}));
+    await page.locator(".social-risk-trigger").screenshot({path:"output/playwright/social-risk-popover.png"});
+    await page.screenshot({path:"output/playwright/social-risk-popover-full.png",fullPage:true});
+    await page.locator("[data-social-risk-close]").click();
     add("social trend center renders full dashboard progress and evidence drill-down", socialSurface.active && /分析完成/.test(socialSurface.status) && socialSurface.progress === "100" && socialSurface.segments === 9 && socialSurface.logos >= 4 && socialSurface.kpis === 4 && socialSurface.boards === 4 && socialSurface.rows >= 1 && /douyin/.test(socialSurface.source) && !socialSurface.keyCopy, JSON.stringify(socialSurface));
     add("social trend competitor picker uses the model library and submits at most three models", socialSurface.competitors > 0 && socialSurface.competitors <= 3 && socialRequest.competitors?.length === socialSurface.competitors && socialRequest.competitors.length <= 3 && /小米YU7/.test(socialSurface.competitorBoard), JSON.stringify({socialSurface,socialRequest}));
+    add("positive competitor board exposes own-model benchmark on the same scale", /智己L6/.test(benchmarkSurface.model) && benchmarkSurface.heat === "78" && benchmarkSurface.firstCompetitorRank === "1", JSON.stringify(benchmarkSurface));
+    add("risk KPI opens exact negative content with a source link", riskSurface.expanded === "true" && /车机偶发卡顿/.test(riskSurface.title) && /xiaohongshu/.test(riskSurface.source), JSON.stringify(riskSurface));
+    await page.locator('[data-social-time="custom"]').click();
+    await page.locator("#social-start-date").fill("2026-07-01");
+    await page.locator("#social-end-date").fill("2026-07-07");
+    await page.locator("#social-trend-run").click();
+    await page.waitForFunction(() => document.querySelector('#socialtrends [role="progressbar"]')?.getAttribute("aria-valuenow") === "100");
+    add("social trend custom dates are submitted exactly through the background job", socialRequest.timeRange === "custom" && socialRequest.startDate === "2026-07-01" && socialRequest.endDate === "2026-07-07", JSON.stringify(socialRequest));
     add("social trend import uses exact button label and default platform thresholds", socialSurface.importLabel === "导入数据" && JSON.stringify(socialSurface.thresholds) === JSON.stringify([8000,500,500]), JSON.stringify({label:socialSurface.importLabel,thresholds:socialSurface.thresholds}));
     add("selected competitors appear in comparison metrics", socialSurface.comparisonModels === 2 && /小米YU7/.test(socialSurface.competitorBoard), JSON.stringify(socialSurface));
     await page.locator('[data-social-evidence-scope="competitor"]').click();
@@ -140,7 +174,7 @@ async function main() {
     const importSurface=await page.evaluate(()=>({label:document.querySelector("#social-trend-import")?.textContent,summary:document.querySelector(".social-import-summary")?.textContent||"",thresholds:["douyin","xiaohongshu","weibo"].map(x=>Number(document.querySelector(`#social-threshold-${x}`)?.value))}));
     add("social assistant file import renders admission summary with default thresholds",importSurface.label==="导入数据"&&/导入记录4/.test(importSurface.summary)&&/有效入池2/.test(importSurface.summary)&&JSON.stringify(importSurface.thresholds)===JSON.stringify([8000,500,500]),JSON.stringify(importSurface));
     await page.unroute("**/api/social-trends/import?**");
-    await page.unroute("**/api/social-trends/collect");
+    await page.unroute("**/api/social-trends/jobs");
   } finally {
     await browser.close();
   }

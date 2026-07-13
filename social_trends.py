@@ -25,6 +25,11 @@ PLATFORMS = {
 POSITIVE = ("喜欢", "推荐", "领先", "惊喜", "好看", "舒适", "智能", "省油", "续航", "质感", "稳定", "优秀")
 NEGATIVE = ("失望", "问题", "异响", "故障", "吐槽", "贵", "难用", "风险", "投诉", "不足", "差", "垃圾")
 TECHNICAL_WORDS = {"span", "class", "https", "http", "href", "data-hide", "surl-text", "weibo", "containerid", "launchid", "extparam", "status"}
+COMMERCIAL_VEHICLE_ENTITY_PATTERN = re.compile(
+    r"梅赛德斯[·\-\s]*奔驰卡车|奔驰卡车|戴姆勒卡车|Daimler\s*Truck|"
+    r"ABA\s*\d+\s*Plus|重卡|牵引车|半挂车|商用车|客车",
+    re.IGNORECASE,
+)
 TIME_FILTERS = {
     "1d": {"douyin": "1", "xiaohongshu": "一天内", "weibo": "day"},
     "3d": {"douyin": "1", "xiaohongshu": "一周内", "weibo": "day"},
@@ -36,6 +41,7 @@ DEFAULT_LIKE_THRESHOLDS = {"douyin": 8000, "xiaohongshu": 500, "weibo": 500}
 IMPORT_ALIASES = {
     "platform": ("平台", "platform", "来源平台"), "title": ("标题", "内容标题", "作品标题", "笔记标题", "视频标题", "视频描述", "作品描述", "笔记描述", "desc", "content"),
     "author": ("作者", "博主", "达人昵称", "昵称", "author", "nickname"), "url": ("链接", "作品链接", "笔记链接", "视频链接", "url", "share_url"),
+    "cover": ("封面", "封面链接", "视频封面", "cover", "cover_url", "thumbnail"),
     "item_id": ("作品ID", "视频ID", "笔记ID", "内容ID", "aweme_id", "note_id", "mid", "id"), "published": ("发布时间", "发布日期", "发布于", "create_time", "publish_time"),
     "likes": ("点赞", "点赞数", "点赞量", "获赞数", "digg_count", "liked_count", "attitudes_count", "likes"), "comments": ("评论", "评论数", "评论量", "comment_count", "comments_count"),
     "shares": ("分享", "分享数", "分享量", "转发", "转发数", "转发量", "share_count", "reposts_count"), "collects": ("收藏", "收藏数", "收藏量", "collect_count", "collected_count"),
@@ -163,6 +169,42 @@ def _parse_import_date(value):
         return None
 
 
+def _date_only(value):
+    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value or "").strip()))
+
+
+def resolve_date_window(time_range="30d", start_date="", end_date="", now_dt=None):
+    """Return an exact, inclusive user window and the TikHub search preset.
+
+    TikHub exposes coarse presets rather than arbitrary date bounds.  For a
+    custom request we fetch its widest supported window, then enforce the
+    exact user-selected dates locally before a record can enter the snapshot.
+    """
+    now_dt = now_dt or datetime.now(timezone.utc)
+    if time_range == "custom":
+        start = _parse_import_date(start_date)
+        end = _parse_import_date(end_date)
+        if not start or not end:
+            raise ValueError("自定义时间范围必须同时填写开始和结束日期")
+        end_exclusive = _date_only(end_date)
+        if end_exclusive:
+            end += timedelta(days=1)
+        if start >= end:
+            raise ValueError("自定义结束日期必须晚于开始日期")
+        if start < now_dt - timedelta(days=180):
+            raise ValueError("自定义时间范围仅支持最近 180 天")
+        if end > now_dt + timedelta(days=1, minutes=5):
+            raise ValueError("自定义结束日期不能晚于今天")
+        return start, end, end_exclusive, "90d"
+    if time_range in {"1d", "3d", "7d", "30d", "90d"}:
+        return now_dt - timedelta(days=int(time_range[:-1])), now_dt + timedelta(minutes=5), False, time_range
+    raise ValueError("不支持的时间范围")
+
+
+def outside_date_window(published, start, end, end_exclusive=False):
+    return published < start or (published >= end if end_exclusive else published > end)
+
+
 def clean_content_text(value):
     text = html.unescape(str(value or ""))
     text = re.sub(r"<[^>]+>", " ", text)
@@ -201,6 +243,21 @@ def _published_bucket(value, fallback):
     return parsed.date().isoformat() if parsed else ""
 
 
+def _media_url(value):
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.startswith("//"):
+            return f"https:{candidate}"
+        return candidate if candidate.startswith(("http://", "https://")) else ""
+    if isinstance(value, (list, tuple)):
+        return next((url for item in value if (url := _media_url(item))), "")
+    if isinstance(value, dict):
+        for key in ("url_list", "urlList", "urls", "url", "uri"):
+            if url := _media_url(value.get(key)):
+                return url
+    return ""
+
+
 def normalize_item(platform, row, keyword, fetched_at):
     text = clean_content_text(_first(row, "desc", "title", "note_title", "text", "content", "raw_text", default=""))
     item_id = str(_first(row, "aweme_id", "note_id", "mid", "id", "item_id", default="")).strip()
@@ -214,7 +271,15 @@ def normalize_item(platform, row, keyword, fetched_at):
     collects = _number(_first(row, "collect_count", "collected_count", "favorites_count", default=_first(stats, "collect_count", "collected_count", default=0)))
     views = _number(_first(row, "play_count", "view_count", "views", default=_first(stats, "play_count", "view_count", default=0)))
     published = _first(row, "create_time", "timestamp", "time", "created_at", "publish_time", default="")
-    url = str(_first(row, "share_url", "url", "note_url", "detail_url", default=""))
+    video = _first(row, "video", "video_info", default={})
+    video = video if isinstance(video, dict) else {}
+    cover_url = (_media_url(_first(row, "cover_url", "coverUrl", "thumbnail", "cover", "origin_cover", default=""))
+                 or _media_url(_first(video, "cover", "origin_cover", "thumbnail", default="")))
+    dynamic_cover_url = (_media_url(_first(row, "dynamic_cover", "dynamicCover", default=""))
+                         or _media_url(_first(video, "dynamic_cover", "dynamicCover", default="")))
+    share_info = _first(row, "share_info", "shareInfo", default={})
+    share_info = share_info if isinstance(share_info, dict) else {}
+    url = str(_first(row, "share_url", "url", "note_url", "detail_url", default=_first(share_info, "share_url", "url", default="")))
     if not url:
         url = {"douyin": f"https://www.douyin.com/video/{item_id}", "xiaohongshu": f"https://www.xiaohongshu.com/explore/{item_id}", "weibo": f"https://weibo.com/detail/{item_id}"}[platform]
     sentiment, positive, negative = _sentiment(text)
@@ -225,10 +290,39 @@ def normalize_item(platform, row, keyword, fetched_at):
     return {"id": content_hash[:20], "platform": platform, "platformLabel": PLATFORMS[platform]["label"],
             "platformItemId": item_id, "keyword": keyword, "normalizedModel": keyword.strip(), "text": text,
             "author": author_name, "publishedAt": str(published), "sourceUrl": url,
+            "coverUrl": cover_url, "dynamicCoverUrl": dynamic_cover_url,
             "metrics": {"likes": likes, "comments": comments, "shares": shares, "collects": collects, "views": views},
             "sentiment": sentiment, "sentimentEvidence": {"positiveHits": positive, "negativeHits": negative},
             "heat": round(min(100, heat), 2), "matrixContent": bool(re.search(r"官方|旗舰店|品牌|汽车|媒体|矩阵", author_name + text)),
             "evidence": {"source": "TikHub", "fetchedAt": fetched_at, "contentHash": content_hash}}
+
+
+def passenger_vehicle_scope_exclusion_reason(value):
+    """Return a stable rejection code when content belongs to a commercial-vehicle entity."""
+    text = value.get("text", "") if isinstance(value, dict) else value
+    return "commercial_vehicle_entity" if COMMERCIAL_VEHICLE_ENTITY_PATTERN.search(str(text or "")) else ""
+
+
+def douyin_next_cursor(payload):
+    for node in _walk((payload or {}).get("data") or {}):
+        if "cursor" not in node or "has_more" not in node:
+            continue
+        if str(node.get("has_more")).lower() not in {"1", "true"}:
+            return ""
+        cursor = str(node.get("cursor") or "").strip()
+        return cursor
+    return ""
+
+
+def ensure_tikhub_success(payload, path):
+    """Do not turn a provider-level error hidden behind HTTP 200 into zero rows."""
+    if not isinstance(payload, dict) or "code" not in payload:
+        return payload
+    code = str(payload.get("code")).strip()
+    if code in {"0", "200"}:
+        return payload
+    message = str(payload.get("message") or payload.get("msg") or "未知业务错误").strip()
+    raise RuntimeError(f"TikHub API {code}: {path} — {message[:500]}")
 
 
 class TikHubClient:
@@ -252,20 +346,23 @@ class TikHubClient:
         for attempt in range(3):
             try:
                 with urlopen(request, timeout=self.timeout) as response:
-                    return json.loads(response.read().decode("utf-8")), {"endpoint": path, "status": response.status}
+                    payload = ensure_tikhub_success(json.loads(response.read().decode("utf-8")), path)
+                    return payload, {"endpoint": path, "status": response.status}
             except HTTPError as exc:
                 if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
-                    raise RuntimeError(f"TikHub HTTP {exc.code}: {path}") from exc
+                    detail = exc.read().decode("utf-8", errors="replace").strip()
+                    raise RuntimeError(f"TikHub HTTP {exc.code}: {path}{f' — {detail[:500]}' if detail else ''}") from exc
             except (URLError, TimeoutError) as exc:
                 if attempt == 2: raise RuntimeError("TikHub 网络错误") from exc
             time.sleep(2 ** attempt)
 
-    def search(self, platform, keyword, page=1, count=20, time_range="30d"):
+    def search(self, platform, keyword, page=1, count=20, time_range="30d", cursor=""):
         cfg = dict(PLATFORMS[platform])
         override = os.getenv(f"TIKHUB_SOCIAL_{platform.upper()}_ENDPOINT")
         if override:
             cfg["path"] = override
-        params = {cfg["query"]: keyword, cfg["page"]: (page - 1) * count if platform == "douyin" else page}
+        page_value = cursor if platform == "douyin" and cursor else (page - 1) * count if platform == "douyin" else page
+        params = {cfg["query"]: keyword, cfg["page"]: page_value}
         window = TIME_FILTERS.get(time_range, TIME_FILTERS["30d"])[platform]
         if platform == "douyin": params.update({"sort_type": "0", "publish_time": window, "filter_duration": "0", "content_type": "0", "search_id": "", "backtrace": ""})
         if platform == "xiaohongshu": params.update({"sort_type": "general", "note_type": "不限", "time_filter": window, "ai_mode": 0})
@@ -385,47 +482,113 @@ def attach_competitor_rankings(result, competitor_results):
             "hotWords": dataset.get("hotWords", [])[:8],
             "topContent": dataset.get("contentRanking", [])[:5],
             "confidence": dataset.get("confidence", 0),
+            "collection": {
+                "admission": dataset.get("admission", {}),
+                "warnings": dataset.get("warnings", []),
+                "sources": [source for source in dataset.get("sources", []) if not source.get("capability")],
+            },
         })
     result["modelComparisons"] = comparisons
     result["comparisonEvidence"] = sorted([item for dataset in [result] + competitor_results for item in dataset.get("contentRanking", [])[:10]], key=lambda x: -float(x.get("heat") or 0))[:50]
+    comparison_items = []
+    seen_items = set()
+    for dataset in [result] + competitor_results:
+        model = str(dataset.get("keyword") or "").strip()
+        for source_item in dataset.get("items", []):
+            item = dict(source_item)
+            item["normalizedModel"] = str(item.get("normalizedModel") or model).strip()
+            item["brandName"] = str(item.get("brandName") or item["normalizedModel"] or model).strip()
+            identity = (item["brandName"], item.get("id") or item.get("sourceUrl"))
+            if identity in seen_items:
+                continue
+            seen_items.add(identity)
+            comparison_items.append(item)
+    result["comparisonItems"] = sorted(comparison_items, key=lambda x: -float(x.get("heat") or 0))
     return result
 
 
-def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", include_enrichment=True, thresholds=None):
+def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", include_enrichment=True, thresholds=None, progress_callback=None, start_date="", end_date=""):
     keyword = str(keyword or "").strip()
     if not keyword: raise ValueError("请输入车型名")
     platforms = [p for p in (platforms or PLATFORMS) if p in PLATFORMS]
     client, items, sources, warnings = TikHubClient(), [], [], []
     if not client.configured(): raise RuntimeError("服务端未配置 TIKHUB_API_KEY")
+    collected_at = datetime.now(timezone.utc)
+    start, end, end_exclusive, search_time_range = resolve_date_window(time_range, start_date, end_date, collected_at)
+    page_count = max(1, min(int(pages), 3))
+    total_steps = len(platforms) * page_count + 2
+    if include_enrichment: total_steps += len(platforms) * 2
+    completed_steps = 0
+    def advance(stage, message):
+        nonlocal completed_steps
+        completed_steps += 1
+        if progress_callback:
+            progress_callback(stage, round(completed_steps / max(1, total_steps) * 100), message)
     for platform in platforms:
-        for page in range(1, max(1, min(int(pages), 3)) + 1):
+        douyin_cursor = ""
+        for page in range(1, page_count + 1):
             try:
-                payload, source = client.search(platform, keyword, page, min(50, max(1, int(count))), time_range)
+                payload, source = client.search(platform, keyword, page, min(50, max(1, int(count))), search_time_range, douyin_cursor)
                 fetched = utcnow(); rows = _content_rows(payload)
                 items.extend(normalize_item(platform, row, keyword, fetched) for row in rows)
                 sources.append({"platform": platform, **source, "fetchedAt": fetched, "itemCount": len(rows)})
             except Exception as exc:
                 warnings.append({"platform": platform, "message": str(exc)})
+                advance("collect", f"{PLATFORMS[platform]['label']}第{page}页采集失败，已记录原因")
                 break
+            advance("collect", f"已完成{PLATFORMS[platform]['label']}第{page}页采集")
+            if platform == "douyin":
+                douyin_cursor = douyin_next_cursor(payload)
+                if not douyin_cursor:
+                    break
     like_thresholds = ({**DEFAULT_LIKE_THRESHOLDS, **{key: int(float(value)) for key, value in thresholds.items() if key in PLATFORMS}}
                        if thresholds is not None else None)
-    collected_at = datetime.now(timezone.utc)
-    cutoff = collected_at - timedelta(days=int(time_range[:-1])) if time_range in {"1d", "3d", "7d", "30d", "90d"} else None
-    admitted, rejected = [], []
+    admitted, rejected, threshold_candidates = [], [], []
     keyword_key = re.sub(r"[\s·•_-]+", "", keyword.lower())
     for item in items:
         published = _parse_import_date(item.get("publishedAt")); reason = ""
-        if keyword_key not in re.sub(r"[\s·•_-]+", "", item.get("text", "").lower()): reason = "model_not_relevant"
+        if passenger_vehicle_scope_exclusion_reason(item): reason = "commercial_vehicle_entity"
+        elif keyword_key not in re.sub(r"[\s·•_-]+", "", item.get("text", "").lower()): reason = "model_not_relevant"
         elif not published: reason = "publish_time_unverified"
-        elif cutoff and (published < cutoff or published > collected_at + timedelta(minutes=5)): reason = "outside_time_range"
+        elif outside_date_window(published, start, end, end_exclusive): reason = "outside_time_range"
         elif like_thresholds is not None and item["metrics"]["likes"] < like_thresholds[item["platform"]]: reason = "below_like_threshold"
-        if reason: rejected.append({"id": item["id"], "platform": item["platform"], "title": item["text"], "likes": item["metrics"]["likes"], "reason": reason})
+        rejection = {"id": item["id"], "platform": item["platform"], "title": item["text"], "likes": item["metrics"]["likes"], "reason": reason}
+        if reason == "below_like_threshold":
+            threshold_candidates.append((item, rejection))
+        elif reason:
+            rejected.append(rejection)
         else:
             item["evidence"]["verificationStatus"] = "tikhub_search_observation"
             admitted.append(item)
+    threshold_fallback = {"applied": False, "reason": "", "admittedCount": 0, "platforms": [], "requestedThresholds": like_thresholds}
+    admitted_platforms = {item["platform"] for item in admitted}
+    fallback_candidates = []
+    for platform in platforms:
+        platform_candidates = [(item, rejection) for item, rejection in threshold_candidates if item["platform"] == platform]
+        if platform not in admitted_platforms and platform_candidates:
+            fallback_candidates.extend(platform_candidates)
+            threshold_fallback["platforms"].append(platform)
+    if fallback_candidates:
+        for item, _ in fallback_candidates:
+            item["evidence"]["verificationStatus"] = "tikhub_search_observation_below_popularity_threshold"
+            admitted.append(item)
+        threshold_fallback.update({
+            "applied": True,
+            "reason": "no_content_met_like_threshold_on_platform",
+            "admittedCount": len(fallback_candidates),
+        })
+    fallback_identities = {(item["platform"], item["id"]) for item, _ in fallback_candidates}
+    rejected.extend(rejection for item, rejection in threshold_candidates if (item["platform"], item["id"]) not in fallback_identities)
     items = admitted
     admission = {"inputCount": len(admitted) + len(rejected), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": 0, "thresholds": like_thresholds,
-                 "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})}, "rejectedSamples": rejected[:30]}
+                 "dateWindow": {"timeRange": time_range, "start": start.isoformat(), "end": end.isoformat(), "endExclusive": end_exclusive},
+                 "thresholdFallback": threshold_fallback,
+                 "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})},
+                 "rejectedByPlatform": {platform: {reason: sum(x["platform"] == platform and x["reason"] == reason for x in rejected)
+                                                       for reason in sorted({x["reason"] for x in rejected if x["platform"] == platform})}
+                                        for platform in platforms},
+                 "rejectedSamples": rejected[:30]}
+    advance("admission", f"已完成乘用车实体、时间窗与热度门槛校验，通过{len(admitted)}条")
     comment_rows, hot_lists = [], []
     if include_enrichment:
         for platform in platforms:
@@ -434,6 +597,7 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
                     payload, source = client.hot_list(platform); rows = _text_rows(payload)[:20]
                     hot_lists.append({"platform": platform, "platformLabel": PLATFORMS[platform]["label"], "items": [x["text"] for x in rows], **source})
                 except Exception as exc: warnings.append({"platform": platform, "capability": "hot_list", "message": str(exc)})
+            advance("enrichment", f"已完成{PLATFORMS[platform]['label']}热榜补充")
             top = sorted((x for x in items if x["platform"] == platform), key=lambda x: -x["heat"])[:1]
             for item in top:
                 try:
@@ -443,10 +607,12 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
                         comment_rows.append({"platform": platform, "platformLabel": PLATFORMS[platform]["label"], "contentId": item["id"], "text": row["text"], "sentiment": sentiment, "positiveHits": positive, "negativeHits": negative, "sourceUrl": item["sourceUrl"]})
                     sources.append({"platform": platform, "capability": "comments", **source, "fetchedAt": utcnow()})
                 except Exception as exc: warnings.append({"platform": platform, "capability": "comments", "message": str(exc)})
+            advance("enrichment", f"已完成{PLATFORMS[platform]['label']}评论补充")
     result = _aggregate(items, keyword, sources, warnings, comment_rows, hot_lists, platforms)
     if admission:
         result["admission"] = admission; result["rankingMethod"] = "点赞量降序，其次评论量、收藏量、分享量、发布时间"
         result["contentRanking"] = sorted(result["items"], key=lambda x: (-x["metrics"]["likes"], -x["metrics"]["comments"], -x["metrics"]["collects"], -x["metrics"]["shares"], -_number(x["publishedAt"])))[:50]
+    advance("aggregate", "已完成去重与指标聚合")
     return result
 
 
@@ -455,12 +621,7 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
     if not keyword: raise ValueError("请输入车型名后再导入数据")
     platforms = [p for p in (platforms or PLATFORMS) if p in PLATFORMS]
     thresholds = {**DEFAULT_LIKE_THRESHOLDS, **{key: int(float(value)) for key, value in (thresholds or {}).items() if key in PLATFORMS}}
-    now_dt = datetime.now(timezone.utc)
-    start = _parse_import_date(start_date)
-    end = _parse_import_date(end_date)
-    if not start and time_range in {"1d", "3d", "7d", "30d", "90d"}:
-        start = now_dt - timedelta(days=int(time_range[:-1]))
-    if not end: end = now_dt + timedelta(days=1)
+    start, end, end_exclusive, _ = resolve_date_window(time_range, start_date, end_date)
     admitted, rejected, duplicates, seen = [], [], 0, set()
     keyword_key = re.sub(r"[\s·•_-]+", "", keyword.lower())
     for index, row in enumerate(records or []):
@@ -469,11 +630,13 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
         published = _parse_import_date(_import_value(row, "published"))
         likes = _number(_import_value(row, "likes")); item_id = str(_import_value(row, "item_id") or "").strip()
         url = str(_import_value(row, "url") or "").strip()
+        cover_url = str(_import_value(row, "cover") or "").strip()
         reason = ""
         if not platform or platform not in platforms: reason = "platform_not_selected"
+        elif passenger_vehicle_scope_exclusion_reason(text): reason = "commercial_vehicle_entity"
         elif keyword_key not in re.sub(r"[\s·•_-]+", "", text.lower()): reason = "model_not_relevant"
         elif not published: reason = "publish_time_unverified"
-        elif published < start or published > end: reason = "outside_time_range"
+        elif outside_date_window(published, start, end, end_exclusive): reason = "outside_time_range"
         elif likes < thresholds[platform]: reason = "below_like_threshold"
         identity = f"{platform}|{item_id or url or text[:100]}"
         if identity in seen: duplicates += 1; continue
@@ -482,7 +645,7 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
             rejected.append({"row": index + 1, "platform": platform, "title": text, "likes": likes, "reason": reason})
             continue
         raw = {"id": item_id or hashlib.sha1(identity.encode()).hexdigest()[:18], "title": text,
-               "author": {"nickname": _import_value(row, "author")}, "create_time": published.timestamp(), "share_url": url,
+               "author": {"nickname": _import_value(row, "author")}, "create_time": published.timestamp(), "share_url": url, "cover_url": cover_url,
                "statistics": {"digg_count": likes, "comment_count": _number(_import_value(row, "comments")), "share_count": _number(_import_value(row, "shares")),
                               "collect_count": _number(_import_value(row, "collects")), "play_count": _number(_import_value(row, "views"))}}
         item = normalize_item(platform, raw, keyword, utcnow())
@@ -493,6 +656,10 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
     result["contentRanking"] = admitted[:50]; result["items"] = admitted
     result["admission"] = {"inputCount": len(records or []), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": duplicates,
                            "thresholds": thresholds, "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})},
+                           "dateWindow": {"timeRange": time_range, "start": start.isoformat(), "end": end.isoformat(), "endExclusive": end_exclusive},
+                           "rejectedByPlatform": {platform: {reason: sum(x["platform"] == platform and x["reason"] == reason for x in rejected)
+                                                               for reason in sorted({x["reason"] for x in rejected if x["platform"] == platform})}
+                                                for platform in platforms},
                            "rejectedSamples": rejected[:30]}
     result["rankingMethod"] = "点赞量降序，其次评论量、收藏量、分享量、发布时间"
     result["sourceMode"] = "social_assistant_import"
@@ -512,6 +679,9 @@ def apply_history(result, previous):
 
 
 def save_snapshot(conn, result, org_id="local", edition="china", filters=None):
+    blocked = [item for item in result.get("items", []) if passenger_vehicle_scope_exclusion_reason(item)]
+    if blocked:
+        raise ValueError(f"乘用车范围校验未通过：发现{len(blocked)}条商用车实体内容，已阻止快照入库")
     stamp = utcnow(); payload = json.dumps(result, ensure_ascii=False)
     snapshot_id = hashlib.sha256(f"{org_id}|{edition}|{result['keyword']}|{stamp}".encode()).hexdigest()[:24]
     conn.execute("insert into social_trend_snapshots values (?, ?, ?, ?, ?, ?, ?, ?)",

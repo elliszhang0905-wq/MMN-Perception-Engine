@@ -32,8 +32,20 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check bf-factory.js
 "$NODE_BIN" tests/test_nsr_map.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
+"$NODE_BIN" tests/test_social_competitor_picker.js
+"$NODE_BIN" tests/test_social_positive_benchmark.js
+"$NODE_BIN" tests/test_social_risk_popover.js
+"$NODE_BIN" tests/test_vertical_trend_label_layout.js
+"$NODE_BIN" tests/test_douyin_creator_collector.js
+"$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 python3 -m py_compile server.py bf_factory/*.py
-python3 -m unittest tests.test_product_summary_import -v
+python3 -m unittest \
+  tests.test_product_summary_import \
+  tests.test_brand_penetration_module \
+  tests.test_dongchedi_sales_freshness \
+  tests.test_douyin_hot_entities \
+  tests.test_social_trend_jobs \
+  tests.test_social_trends -v
 
 echo "MMN release gate:研发档案检查"
 if rg -n "AI|ChatGPT|Codex|大模型辅助|AI生成|智能编写" "docs/研发档案"; then

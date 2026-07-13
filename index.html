@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.02-system-iteration-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-social-benchmark-risk-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
+  <link rel="stylesheet" href="douyin-hot-demo.css?v=collector-7">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -125,7 +126,7 @@
         <div><span>04</span><b>出策略</b><small>基于地图生成内容策略</small></div>
       </div>
       <nav id="dashboard-anchor-nav" class="dashboard-anchor-nav" aria-label="决策数据链">
-        <a href="#dashboard-data-summary">01 NSR现状</a><a href="#dashboard-competitor-intelligence">02 竞品占位</a><a href="#opportunity-map">03 机会判断</a><a href="#dashboard-strategy-choice">04 策略动作</a><a href="#dashboard-learning-loop">05 资产沉淀</a>
+        <a href="#dashboard-data-summary">01 NSR现状</a><a href="#dashboard-competitor-intelligence">02 竞品占位</a><a href="#opportunity-map">03 机会判断</a><a href="#dashboard-learning-loop">04 资产沉淀</a><a href="#dashboard-douyin-hot">05 抖音热点</a>
       </nav>
       <div class="kpis dashboard-kpis" hidden>
         <article class="kpi">
@@ -169,9 +170,12 @@
         <div class="map-summary" id="map-summary"></div>
         <div id="nsr-map-insights" class="nsr-map-insights" aria-label="自动地图解读"></div>
       </article>
-      <article id="dashboard-product-proof" class="panel dashboard-product-proof" aria-label="产品证据验证"></article>
-      <article id="dashboard-strategy-choice" class="panel dashboard-strategy-choice" aria-label="策略选择"></article>
+      <article id="dashboard-product-proof" class="panel dashboard-product-proof" aria-label="产品证据验证" hidden></article>
+      <article id="dashboard-strategy-choice" class="panel dashboard-strategy-choice" aria-label="策略选择" hidden></article>
       <section id="dashboard-learning-loop" class="dashboard-learning-loop" aria-label="Learning与Know-how沉淀"></section>
+      <section id="dashboard-douyin-hot" class="douyin-hot-module" aria-labelledby="douyin-hot-title">
+        <div class="douyin-hot-module__mount" id="douyin-hot-module-mount"></div>
+      </section>
       <article class="panel dashboard-topic-planner">
         <div class="panel-title">
           <div><span>MMN深度选题规划</span><h2>旗舰策略模型生成分阶段选题、达人匹配与内容排期</h2></div>
@@ -231,7 +235,7 @@
             <fieldset class="social-time-segments"><legend>时间范围</legend><button type="button" data-social-time="1d">1天</button><button type="button" data-social-time="3d">3天</button><button type="button" data-social-time="7d" class="active">7天</button><button type="button" data-social-time="30d">30天</button><button type="button" data-social-time="custom" aria-controls="social-custom-dates">▣ 自定义</button><input id="social-trend-time" type="hidden" value="7d"></fieldset>
             <div id="social-custom-dates" class="social-custom-dates" hidden><label>开始日期<input type="date" id="social-start-date"></label><span>至</span><label>结束日期<input type="date" id="social-end-date"></label></div>
           </div>
-          <div class="social-competitor-picker"><label>竞品选择 <small>最多选择 3 台</small><select id="social-trend-competitor-add"><option value="">添加竞品车型</option></select></label><div id="social-trend-competitors" aria-label="已选竞品"></div></div>
+          <div class="social-competitor-picker"><div class="social-competitor-controls"><label>竞品品牌<select id="social-trend-competitor-brand"><option value="">选择品牌</option></select></label><label>竞品车型 <small>最多选择 3 台</small><select id="social-trend-competitor-add"><option value="">请先选择品牌</option></select></label></div><div id="social-trend-competitors" aria-label="已选竞品" aria-live="polite"></div></div>
           <details class="social-thresholds"><summary>热门内容门槛</summary><div><label>抖音最低点赞<input id="social-threshold-douyin" type="number" min="0" step="100" value="8000"></label><label>小红书最低点赞<input id="social-threshold-xiaohongshu" type="number" min="0" step="100" value="500"></label><label>微博最低点赞<input id="social-threshold-weibo" type="number" min="0" step="100" value="500"></label><button type="button" id="social-threshold-reset">恢复默认门槛</button></div></details>
         </form>
         <div id="social-trend-status" class="social-trend-progress" role="status" aria-live="polite" hidden></div>
@@ -246,7 +250,7 @@
       </div>
       <article class="panel brand-penetration-frame-panel">
         <div class="brand-penetration-frame-head"><div><span>项目快照</span><b>上汽奥迪近30天竞争传播验证</b></div><p>真实快照只增不覆盖；平台原文可下钻，事件分类仍保留人工复核标记。</p></div>
-        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html" title="上汽奥迪品牌传播穿透真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html?v=beta-1.02-dashboard-clarity-12" title="上汽奥迪品牌传播穿透真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
       </article>
     </section>
 
@@ -438,6 +442,37 @@
           <div id="xhs-category-chart" class="video-bars"></div>
         </article>
       </div>
+      <article class="panel xhs-ranking-demo-panel" id="xhs-ranking-demo-panel">
+        <div class="panel-title"><div><span>XIAOHONGSHU CONTENT RANKING · DEMO</span><h2>小红书汽车内容热榜</h2></div><em id="xhs-ranking-source">等待小红书内容</em></div>
+        <section class="xhs-ranking-radar" aria-labelledby="xhs-ranking-radar-title">
+          <div class="xhs-ranking-radar-head"><div><span>BRAND &amp; MODEL RADAR</span><h3 id="xhs-ranking-radar-title">品牌车型上榜雷达</h3><p>基于当前时间范围内的内容样本聚合；仅反映内容热度，不等同于市场声量。</p></div><em id="xhs-ranking-radar-status">等待内容识别</em></div>
+          <div class="xhs-ranking-radar-grid"><section class="xhs-radar-card"><div><b>品牌上榜</b><small>入榜内容数 × 热度分</small></div><div id="xhs-ranking-brand-radar"></div></section><section class="xhs-radar-card"><div><b>车型上榜</b><small>按已标注车型聚合</small></div><div id="xhs-ranking-model-radar"></div></section></div>
+        </section>
+        <div class="xhs-ranking-filter-stack">
+          <div class="xhs-ranking-filter-group"><span>时间</span><div class="segmented" role="group" aria-label="热榜时间范围">
+            <button type="button" class="active" data-xhs-rank-range="7d" aria-pressed="true">近 7 天</button>
+            <button type="button" data-xhs-rank-range="30d" aria-pressed="false">近 30 天</button>
+          </div></div>
+          <div class="xhs-ranking-filter-group"><span>品牌</span><div class="xhs-ranking-filters" id="xhs-ranking-brand-filters" role="group" aria-label="热榜品牌筛选"></div></div>
+          <div class="xhs-ranking-filter-group"><span>车型</span><div class="xhs-ranking-filters" id="xhs-ranking-model-filters" role="group" aria-label="热榜车型筛选"></div></div>
+          <div class="xhs-ranking-filter-group"><span>内容</span><div class="xhs-ranking-filters" role="group" aria-label="热榜内容类型">
+            <button type="button" class="active" data-xhs-rank-category="all" aria-pressed="true">全部</button>
+            <button type="button" data-xhs-rank-category="购车决策" aria-pressed="false">购车决策</button>
+            <button type="button" data-xhs-rank-category="技术科普" aria-pressed="false">技术科普</button>
+            <button type="button" data-xhs-rank-category="用车生活" aria-pressed="false">用车生活</button>
+          </div></div>
+        </div>
+        <section class="xhs-content-board" aria-labelledby="xhs-content-board-title">
+          <div class="xhs-content-board-head"><div><span>CONTENT RANKING BOARD</span><h3 id="xhs-content-board-title">汽车内容热榜</h3></div><small>按热度分排序 · 品牌 / 车型字段可继续人工核验</small></div>
+          <section class="xhs-ranking-list" id="xhs-ranking-list" aria-live="polite"></section>
+        </section>
+        <section class="xhs-ranking-learning" aria-labelledby="xhs-ranking-learning-title">
+          <div class="xhs-ranking-learning-head"><div><span>CONTENT LEARNING LOOP</span><h3 id="xhs-ranking-learning-title">内容学习：从热榜样本沉淀可迁移打法</h3></div><em id="xhs-ranking-learning-status">等待选择内容</em></div>
+          <div class="xhs-ranking-learning-grid" id="xhs-ranking-learning-grid"></div>
+          <div class="xhs-ranking-learn-action"><div><b>沉淀至内容能力库</b><small>仅在真实公开链接可用时写入 MMN 内容蒸馏与 RAG；Demo 只验证信息结构。</small></div><button type="button" data-xhs-ranking-learn>学习当前内容</button></div>
+        </section>
+        <small class="xhs-ranking-boundary">公开内容样本热度，不等同于市场需求；Demo 数据仅用于验证看板交互与信息结构。</small>
+      </article>
       <article class="panel content-strategy-path-panel">
         <div class="panel-title"><div><span>MMN策略链路</span><h2>抓取完成后进入交叉质检与策略输出</h2></div><em id="content-strategy-path-status">等待内容资产</em></div>
         <div id="content-strategy-path" class="content-strategy-path"></div>
@@ -1092,11 +1127,16 @@
     </div>
   </dialog>
   <div id="toast"></div>
+  <button type="button" id="app-home-button" class="app-home-button" aria-label="返回首页顶部">
+    <span aria-hidden="true">⌂</span><b>首页</b>
+  </button>
   <script src="data_20260608.js?v=beta-1.01"></script>
   <script src="opportunity-source-parser.js?v=beta-1.02-system-iteration-1"></script>
   <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
-  <script src="app.js?v=beta-1.02-system-iteration-1"></script>
+  <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
+  <script src="app.js?v=beta-1.02-social-benchmark-risk-1"></script>
+  <script src="douyin-hot-demo.js?v=collector-7"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>
 </html>

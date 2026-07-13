@@ -2,52 +2,37 @@
 set -euo pipefail
 
 PROJECT_DIR="${MMN_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-PYTHON_BIN="${PYTHON_BIN:-$(command -v python3)}"
-if [ ! -x "$PYTHON_BIN" ]; then
-  PYTHON_BIN="$(command -v python3)"
+CRAWLER_DIR="${MMN_DCD_CRAWLER_DIR:-$PROJECT_DIR/../mmn-dcd-sales-crawler}"
+
+if [ ! -f "$CRAWLER_DIR/scripts/install_monthly_schedule.py" ]; then
+  echo "未找到 MMN 懂车帝采集器：$CRAWLER_DIR" >&2
+  exit 1
 fi
 
-LABEL="com.mmn.auto-marketing.dongchedi-sales"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG_DIR="$PROJECT_DIR/data/dongchedi_sales/logs"
+select_python() {
+  local candidates=()
+  [ -n "${PYTHON_BIN:-}" ] && candidates+=("$PYTHON_BIN")
+  candidates+=(
+    "$CRAWLER_DIR/.venv/bin/python3"
+    "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+  )
+  local system_python
+  system_python="$(command -v python3 2>/dev/null || true)"
+  [ -n "$system_python" ] && candidates+=("$system_python")
 
-mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -x "$candidate" ] && "$candidate" -c 'import pydantic' >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
 
-cat > "$PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>$LABEL</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>$PYTHON_BIN</string>
-    <string>$PROJECT_DIR/scripts/crawl_dongchedi_sales.py</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>$PROJECT_DIR</string>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Day</key>
-    <integer>15</integer>
-    <key>Hour</key>
-    <integer>0</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>$LOG_DIR/stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>$LOG_DIR/stderr.log</string>
-  <key>RunAtLoad</key>
-  <false/>
-</dict>
-</plist>
-PLIST
+if ! PYTHON_BIN="$(select_python)"; then
+  echo "未找到包含懂车帝采集依赖的 Python；请先在采集器中安装 requirements.txt" >&2
+  exit 1
+fi
 
-launchctl unload "$PLIST" >/dev/null 2>&1 || true
-launchctl load "$PLIST"
-
-echo "已安装懂车帝销量榜定时采集：每月15日 00:00"
-echo "$PLIST"
+exec "$PYTHON_BIN" "$CRAWLER_DIR/scripts/install_monthly_schedule.py"

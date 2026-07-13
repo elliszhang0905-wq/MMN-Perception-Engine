@@ -1,0 +1,46 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = path.join(__dirname, "..");
+const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+const app = fs.readFileSync(path.join(root, "app.js"), "utf8");
+const css = fs.readFileSync(path.join(root, "style.css"), "utf8");
+const ranking = fs.readFileSync(path.join(root, "xhs-content-ranking-demo.js"), "utf8");
+
+assert.match(html, /id="xhs-ranking-demo-panel"/);
+assert.match(html, /id="xhs-ranking-list"/);
+assert.match(html, /id="xhs-ranking-radar-title"/);
+assert.match(html, /id="xhs-ranking-brand-radar"/);
+assert.match(html, /id="xhs-ranking-model-radar"/);
+assert.match(html, /id="xhs-content-board-title"/);
+assert.match(html, /id="xhs-ranking-brand-filters"/);
+assert.match(html, /id="xhs-ranking-model-filters"/);
+assert.match(html, /CONTENT LEARNING LOOP/);
+assert.match(html, /data-xhs-ranking-learn/);
+assert.match(html, /公开内容样本热度，不等同于市场需求/);
+assert.doesNotMatch(html, /data-content-view="xhsRanking"/, "ranking must stay inside the existing content dashboard");
+assert.match(html, /src="xhs-content-ranking-demo\.js/);
+assert.match(app, /MmnXhsContentRanking\?\.render\(all\)/);
+assert.match(app, /MmnXhsContentRanking\?\.bind\(allVideoItems\)/);
+assert.match(ranking, /function isXhsContent\(/);
+assert.match(ranking, /function safeUrl\(/);
+assert.match(ranking, /function learningFor\(/);
+assert.match(ranking, /function learnCurrent\(/);
+assert.match(ranking, /function renderRadar\(/);
+assert.match(ranking, /function recognitionFor\(/);
+assert.match(ranking, /function signalFor\(/);
+assert.match(ranking, /data-xhs-rank-brand/);
+assert.match(ranking, /data-xhs-rank-model/);
+assert.match(ranking, /content-capability-kb\/collect-public/);
+assert.match(ranking, /function render\(/);
+assert.match(ranking, /demoSamples/);
+assert.match(ranking, /演示样本 · 等待同步小红书内容/);
+assert.match(ranking, /data-xhs-rank-range/);
+assert.match(ranking, /data-xhs-rank-category/);
+assert.match(css, /\.xhs-ranking-demo-panel/);
+assert.match(css, /\.xhs-ranking-row/);
+assert.match(css, /\.xhs-ranking-learning/);
+assert.match(css, /\.xhs-ranking-summary/);
+
+console.log("xhs content ranking demo: ok");

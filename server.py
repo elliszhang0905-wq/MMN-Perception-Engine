@@ -17,16 +17,17 @@ import time
 import base64
 import hmac
 import html as html_lib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread, Timer
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import urllib.robotparser as robotparser
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor
 
 from bf_factory.exporters import export_brief_docx
 from bf_factory.generation import compose_section_plan, generate_internal_strategy, render_adaptive_brief
@@ -54,6 +55,14 @@ from bf_factory.schema import BF_BRIEF_JSON_SCHEMA
 from bf_factory.storage import sanitize_filename
 from creator_distillation import CreatorDistillationService
 from creator_distillation.service import api_error as creator_distillation_api_error
+from douyin_hot_entities import (
+    finalize_manual_review as finalize_douyin_hot_manual_review,
+    init_schema as init_douyin_hot_entity_schema,
+    latest_rank_snapshot as latest_douyin_hot_rank_snapshot,
+    manual_review_queue as douyin_hot_manual_review_queue,
+    recognize_items as recognize_douyin_hot_entities,
+    save_rank_snapshot as save_douyin_hot_rank_snapshot,
+)
 from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, save_snapshot as save_social_trend_snapshot
 try:
     from creator_distillation.tasks import celery_app as creator_celery_app, enqueue_distillation as _enqueue_distillation
@@ -63,7 +72,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-system-iteration-1"
+APP_VERSION_CODE = "beta-1.02-20260714-social-data-1"
 APP_RELEASE_DATE = "2026-07-12"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -92,6 +101,13 @@ ROUTER_REVIEW_LOCK = Lock()
 ROUTER_REVIEW_TASKS = {}
 OPPORTUNITY_JOB_LOCK = Lock()
 OPPORTUNITY_JOB_TASKS = {}
+SOCIAL_TREND_JOB_LOCK = Lock()
+SOCIAL_TREND_JOB_TASKS = {}
+SOCIAL_TREND_JOB_LIMIT = 100
+SOCIAL_TREND_JOB_TTL = timedelta(days=1)
+DOUYIN_COLLECTOR_LOCK = Lock()
+DOUYIN_COLLECTOR_TASKS = {}
+DOUYIN_COLLECTOR_LAST_JOB = {}
 LEGACY_VERTICAL_CLAIM_LOCK = Lock()
 LEGACY_VERTICAL_CLAIM_CHECKED = set()
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -142,12 +158,32 @@ NODE_CANDIDATES = [
     "/usr/local/bin/node",
     "/usr/bin/node"
 ]
+DOUYIN_COLLECTOR_CDP_PORT = int(os.getenv("MMN_DOUYIN_COLLECTOR_CDP_PORT", "9225"))
+DOUYIN_COLLECTOR_PROFILE = Path(os.getenv("MMN_DOUYIN_COLLECTOR_PROFILE", str(Path.home() / ".mmn" / "douyin-hot-collector-profile"))).expanduser().resolve()
+DOUYIN_COLLECTOR_CHROME = Path(os.getenv("MMN_DOUYIN_COLLECTOR_CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
+DOUYIN_COLLECTOR_URL = "https://creator.douyin.com/creator-micro/creative-guidance"
+DOUYIN_COLLECTOR_NODE = Path(os.getenv(
+    "MMN_DOUYIN_COLLECTOR_NODE",
+    str(Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"),
+)).expanduser()
+DOUYIN_COLLECTOR_NODE_MODULES = Path(os.getenv(
+    "MMN_DOUYIN_COLLECTOR_NODE_MODULES",
+    str(Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"),
+)).expanduser()
 
 def db():
     DATA_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+def brand_penetration_snapshot(conn, org_id="local", edition="china"):
+    """Return the shared, verified MMN showcase snapshot without weakening tenant scope elsewhere."""
+    keyword = "上汽奥迪品牌传播穿透"
+    result = latest_social_trend_snapshot(conn, keyword, org_id, edition)
+    if result is None and edition == "china" and org_id != "local":
+        result = latest_social_trend_snapshot(conn, keyword, "local", edition)
+    return result
 
 def bf_repository():
     return BFRepository(db)
@@ -638,6 +674,7 @@ def init_db():
     bf_repository().init_schema()
     with db() as conn:
         init_social_trend_schema(conn)
+        init_douyin_hot_entity_schema(conn)
 
 
 def backfill_strategy_knowledge_assets(conn):
@@ -730,7 +767,11 @@ def durable_asset_library(edition="china", org_id="local"):
     return {"ok": True, "edition": edition, "strategyAssets": strategy, "legacyCreators": list(creators.values()), "counts": counts}
 
 def now():
-    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def cache_expires_at(minutes=30):
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 VERTICAL_PLATFORMS = {"汽车之家", "懂车帝"}
 VERTICAL_ASSET_PARSER_VERSION = "vertical-rank-asset-v3"
@@ -937,6 +978,383 @@ def validate_social_trends_with_models(result):
     conclusions = [str(outputs.get(p, {}).get("strategyConclusion") or "").strip() for p in ("qwen", "deepseek")]
     result["qa"]["strategyOutput"] = "\n".join(x for x in conclusions if x) or "证据不足，暂不输出策略结论"
     return result
+
+
+def run_douyin_hot_entity_recognition(payload, org_id="local"):
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise ValueError("缺少需要识别的抖音榜单内容。")
+    edition = edition_from(payload.get("edition") or "china")
+    qwen_ready = qwen_config("deep")["configured"]
+    deepseek_ready = deepseek_config("deep")["configured"]
+
+    def complete_result(messages, invoke, label):
+        evidence = json.loads(messages[-1]["content"]).get("items") or []
+        expected = {str(item.get("id")) for item in evidence if isinstance(item, dict) and item.get("id") is not None}
+        last_error = ""
+        for attempt in range(2):
+            retry_messages = messages if attempt == 0 else [*messages, {
+                "role": "user",
+                "content": f"上次返回不完整（{last_error}）。请重新输出覆盖全部{len(expected)}个id的完整JSON；无实体也保留id并令mentions=[]。",
+            }]
+            try:
+                result = parse_json_object(invoke(retry_messages))
+                returned = {str(item.get("id")) for item in (result.get("items") or []) if isinstance(item, dict)}
+                missing = sorted(expected - returned)
+                if not missing:
+                    return result
+                last_error = f"缺少{len(missing)}个id：{','.join(missing[:5])}"
+            except Exception as exc:
+                last_error = str(exc)
+        raise ValueError(f"{label}两次调用均未完整返回：{last_error}")
+
+    def primary_runner(messages):
+        return complete_result(messages, lambda prompt: call_qwen(
+            prompt, temperature=.08, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT,
+            max_tokens=3000, enable_thinking=False,
+        ), "千问")
+
+    def reviewer_runner(messages):
+        return complete_result(messages, lambda prompt: call_deepseek(
+            prompt, temperature=.08, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+            max_tokens=8000, response_format={"type": "json_object"},
+        ), "DeepSeek")
+
+    with db() as conn:
+        result = recognize_douyin_hot_entities(
+            conn,
+            items,
+            org_id=org_id,
+            edition=edition,
+            primary_runner=primary_runner,
+            reviewer_runner=reviewer_runner,
+            primary_configured=qwen_ready,
+            reviewer_configured=deepseek_ready,
+            force=payload.get("force") is True,
+        )
+    result["outputLabel"] = "MMN多模态策略输出"
+    result["modelsConfigured"] = bool(qwen_ready and deepseek_ready)
+    return result
+
+
+def douyin_hot_manual_review_payload(*, org_id="local", edition="china", view="videos", range_key="24h"):
+    with db() as conn:
+        snapshot = latest_douyin_hot_rank_snapshot(
+            conn, org_id=org_id, edition=edition, view=view, range_key=range_key,
+        )
+        snapshot_items = snapshot.get("items") or []
+        if snapshot_items:
+            # Ensure every visible ranking item has an editable recognition row,
+            # even when the background dual-model pass has not finished yet.
+            recognize_douyin_hot_entities(conn, snapshot_items, org_id=org_id, edition=edition)
+        items = douyin_hot_manual_review_queue(
+            conn,
+            [item.get("itemId") for item in snapshot_items],
+            org_id=org_id,
+            edition=edition,
+            include_all=True,
+        )
+        items_by_id = {item.get("itemId"): item for item in items}
+        items = [items_by_id[item.get("itemId")] for item in snapshot_items if item.get("itemId") in items_by_id]
+    return {
+        "view": view,
+        "range": range_key,
+        "items": items,
+        "counts": {
+            "total": len(items),
+            "pending": sum(
+                item.get("manualStatus") != "published" and item.get("status") in {"conflict", "pending_configuration"}
+                for item in items
+            ),
+            "auditRejected": sum(item.get("manualStatus") == "audit_rejected" for item in items),
+        },
+    }
+
+
+def audit_douyin_hot_manual_review(body, *, org_id="local", reviewed_by="local"):
+    edition = edition_from(body.get("edition") or "china")
+    item_id = str(body.get("itemId") or "").strip()
+    fingerprint = str(body.get("fingerprint") or "").strip()
+    action = str(body.get("action") or "confirm").strip()
+    brand = str(body.get("brand") or "").strip()
+    model = str(body.get("model") or "").strip()
+    note = str(body.get("note") or "").strip()
+    if not item_id or not fingerprint:
+        raise ValueError("缺少待核验内容标识，请刷新核验队列后重试。")
+    if action not in {"confirm", "exclude"}:
+        raise ValueError("人工核验动作无效。")
+    if action == "confirm" and not brand:
+        raise ValueError("请填写人工确认的品牌。")
+    with db() as conn:
+        queue = douyin_hot_manual_review_queue(
+            conn, [item_id], org_id=org_id, edition=edition, include_all=True,
+        )
+    item = next((row for row in queue if row.get("itemId") == item_id and row.get("fingerprint") == fingerprint), None)
+    if not item:
+        raise ValueError("榜单内容已变化，请刷新后重新进行人工修改。")
+    audit_note = {"skipped": True, "reason": "人工确认具有最高优先级，模型结果仅作参考"}
+    with db() as conn:
+        result = finalize_douyin_hot_manual_review(
+            conn, org_id=org_id, edition=edition, item_id=item_id, fingerprint=fingerprint,
+            action=action, brand=brand, model=model, note=note, reviewed_by=reviewed_by,
+            primary_audit=audit_note, reviewer_audit=audit_note, published=True,
+        )
+    result["message"] = "人工确认已生效并进入品牌车型雷达" if action == "confirm" else "人工确认已生效，该内容已归类为无明确品牌车型"
+    return result
+
+
+def douyin_collector_browser_open():
+    try:
+        request = Request(f"http://127.0.0.1:{DOUYIN_COLLECTOR_CDP_PORT}/json/version", headers={"Accept": "application/json"})
+        with urlopen(request, timeout=1.5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return bool(payload.get("webSocketDebuggerUrl"))
+    except Exception:
+        return False
+
+
+def douyin_collector_page_open():
+    try:
+        request = Request(f"http://127.0.0.1:{DOUYIN_COLLECTOR_CDP_PORT}/json/list", headers={"Accept": "application/json"})
+        with urlopen(request, timeout=1.5) as response:
+            targets = json.loads(response.read().decode("utf-8"))
+        return any(
+            item.get("type") == "page" and "creator.douyin.com" in str(item.get("url") or "")
+            for item in (targets if isinstance(targets, list) else [])
+        )
+    except Exception:
+        return False
+
+
+def launch_douyin_collector_browser():
+    if douyin_collector_browser_open() and douyin_collector_page_open():
+        subprocess.Popen([
+            str(DOUYIN_COLLECTOR_CHROME), f"--remote-debugging-port={DOUYIN_COLLECTOR_CDP_PORT}",
+            f"--user-data-dir={DOUYIN_COLLECTOR_PROFILE}", DOUYIN_COLLECTOR_URL,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return {"browserOpen": True, "loginState": "waiting_verification", "message": "采集器窗口已打开，请完成登录后点击立即同步"}
+    if not DOUYIN_COLLECTOR_CHROME.exists():
+        raise RuntimeError("未找到Google Chrome，无法启动抖音采集器浏览器。")
+    DOUYIN_COLLECTOR_PROFILE.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen([
+        str(DOUYIN_COLLECTOR_CHROME),
+        f"--remote-debugging-port={DOUYIN_COLLECTOR_CDP_PORT}",
+        f"--user-data-dir={DOUYIN_COLLECTOR_PROFILE}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        DOUYIN_COLLECTOR_URL,
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if douyin_collector_browser_open() and douyin_collector_page_open():
+            return {"browserOpen": True, "loginState": "waiting_verification", "message": "采集器窗口已打开，请扫码登录后点击立即同步"}
+        time.sleep(.2)
+    raise RuntimeError("采集器浏览器启动超时，请确认Chrome可以正常打开。")
+
+
+def collect_douyin_creator_snapshots(progress_callback=None):
+    if not douyin_collector_browser_open() or not douyin_collector_page_open():
+        launch_douyin_collector_browser()
+    if not douyin_collector_browser_open() or not douyin_collector_page_open():
+        raise RuntimeError("采集器浏览器没有可用的抖音页面，请重新打开登录窗口。")
+    if not DOUYIN_COLLECTOR_NODE.exists() or not DOUYIN_COLLECTOR_NODE_MODULES.exists():
+        raise RuntimeError("本机缺少抖音采集器所需的Node/Playwright运行环境。")
+    script = ROOT / "scripts" / "douyin_creator_collector.js"
+    env = dict(os.environ)
+    env["NODE_PATH"] = str(DOUYIN_COLLECTOR_NODE_MODULES)
+    process = subprocess.Popen(
+        [str(DOUYIN_COLLECTOR_NODE), str(script), f"http://127.0.0.1:{DOUYIN_COLLECTOR_CDP_PORT}"],
+        cwd=str(ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    snapshots = []
+    for line in process.stdout or []:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "login_verified":
+            if progress_callback:
+                progress_callback("login_verified", 12, "登录成功，已进入抖音汽车榜单")
+            continue
+        if event.get("type") != "snapshot" or not isinstance(event.get("snapshot"), dict):
+            continue
+        snapshots.append(event["snapshot"])
+        if progress_callback:
+            progress_callback("collecting", 15 + round(40 * len(snapshots) / 6), f"已抓取 {len(snapshots)}/6 个真实榜单")
+    error_text = (process.stderr.read() if process.stderr else "").strip()
+    return_code = process.wait(timeout=10)
+    if return_code != 0:
+        error_lines = [line.strip() for line in error_text.splitlines() if line.strip()]
+        error_message = next(
+            (line.removeprefix("Error: ") for line in error_lines if not line.startswith("at ")),
+            "抖音榜单采集失败",
+        )
+        raise RuntimeError(error_message)
+    if len(snapshots) != 6:
+        raise RuntimeError(f"榜单采集不完整：应为6个，实际{len(snapshots)}个。")
+    return snapshots
+
+
+def run_douyin_collector_pipeline(*, org_id="local", edition="china", progress_callback=None,
+                                  collector_runner=None, recognition_runner=None):
+    collector_runner = collector_runner or collect_douyin_creator_snapshots
+    recognition_runner = recognition_runner or run_douyin_hot_entity_recognition
+
+    def report(stage, progress, message):
+        if progress_callback:
+            progress_callback(stage, progress, message)
+
+    report("login", 8, "等待验证抖音创作者中心登录状态")
+    snapshots = collector_runner(progress_callback=report)
+    report("storage", 58, "六个真实榜单已抓取，正在写入快照")
+    saved = []
+    for snapshot in snapshots:
+        with db() as conn:
+            saved.append(save_douyin_hot_rank_snapshot(
+                conn, snapshot.get("items") or [], org_id=org_id, edition=edition,
+                view=snapshot.get("view") or "videos", range_key=snapshot.get("range") or "24h",
+                source_url=snapshot.get("sourceUrl") or DOUYIN_COLLECTOR_URL,
+                captured_at=snapshot.get("capturedAt") or now(),
+            ))
+    report("analysis", 62, "榜单已入库，双旗舰模型开始识别品牌车型")
+    analyses = []
+    for index, snapshot in enumerate(saved):
+        analysis = recognition_runner({
+            "edition": edition, "view": snapshot["view"], "range": snapshot["range"], "items": snapshot["items"],
+        }, org_id)
+        analyses.append(analysis)
+        if analysis.get("errors") or not analysis.get("dualModelReady"):
+            details = "；".join(f"{key}: {value}" for key, value in (analysis.get("errors") or {}).items())
+            raise RuntimeError(
+                f"双模型分析未通过（{snapshot['view']}/{snapshot['range']}）"
+                + (f"：{details}" if details else "：未形成完整双模型结果")
+            )
+        report("analysis", 62 + round(31 * (index + 1) / len(saved)), f"双模型已分析 {index + 1}/6 个榜单")
+    report("delivery", 97, "分析完成，正在刷新看板并生成交付状态")
+    return {
+        "snapshotCount": len(saved),
+        "itemCount": sum(len(snapshot.get("items") or []) for snapshot in saved),
+        "analysisCount": len(analyses),
+        "capturedAt": max((snapshot.get("capturedAt") or "" for snapshot in saved), default=now()),
+    }
+
+
+def get_douyin_collector_job(job_id, org_id=""):
+    with DOUYIN_COLLECTOR_LOCK:
+        job = DOUYIN_COLLECTOR_TASKS.get(str(job_id or ""))
+        if job and org_id and job.get("_org_id") != org_id:
+            return None
+        return {key: value for key, value in job.items() if not key.startswith("_")} if job else None
+
+
+def douyin_collector_freshness(org_id="local", edition="china"):
+    expected = {(view, range_key) for view in ("videos", "topics") for range_key in ("24h", "7d", "30d")}
+    with db() as conn:
+        init_douyin_hot_entity_schema(conn)
+        rows = conn.execute(
+            """select view_key, range_key, max(captured_at) as captured_at
+               from douyin_hot_rank_snapshots
+               where org_id = ? and edition = ?
+               group by view_key, range_key""",
+            (org_id, edition),
+        ).fetchall()
+    captured = {(row["view_key"], row["range_key"]): row["captured_at"] for row in rows}
+    timestamps = []
+    for scope in expected:
+        value = captured.get(scope)
+        if not value:
+            return {"freshToday": False, "capturedAt": "", "snapshotCount": len(captured)}
+        try:
+            timestamps.append(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+        except ValueError:
+            return {"freshToday": False, "capturedAt": "", "snapshotCount": len(captured)}
+    shanghai = ZoneInfo("Asia/Shanghai")
+    today = datetime.now(shanghai).date()
+    fresh_today = all(stamp.astimezone(shanghai).date() == today for stamp in timestamps)
+    return {"freshToday": fresh_today, "capturedAt": max(timestamps).isoformat(), "snapshotCount": 6}
+
+
+def douyin_collector_scope_key(org_id="local", edition="china"):
+    return f"{org_id}::{edition_from(edition)}"
+
+
+def douyin_collector_status(org_id="local", edition="china"):
+    scope_key = douyin_collector_scope_key(org_id, edition)
+    with DOUYIN_COLLECTOR_LOCK:
+        job_id = DOUYIN_COLLECTOR_LAST_JOB.get(scope_key)
+    job = get_douyin_collector_job(job_id, org_id) if job_id else None
+    browser_open = douyin_collector_browser_open()
+    freshness = douyin_collector_freshness(org_id, edition)
+    verified = bool(
+        (job and job.get("stage") not in {"queued", "login", "failed"})
+        or freshness["freshToday"]
+    )
+    return {
+        "browserOpen": browser_open,
+        "loginState": "verified" if verified else ("waiting_verification" if browser_open else "disconnected"),
+        "job": job,
+        "progress": job.get("progress", 0) if job else (100 if freshness["freshToday"] else (5 if browser_open else 0)),
+        "message": job.get("message") if job else ("今日六个榜单已更新" if freshness["freshToday"] else ("采集器窗口已打开，请登录后点击更新今日榜单" if browser_open else "尚未连接抖音采集器")),
+        **freshness,
+    }
+
+
+def start_douyin_collector_job(*, org_id="local", edition="china", runner=None, force=False):
+    runner = runner or run_douyin_collector_pipeline
+    job_id, stamp = str(uuid.uuid4()), now()
+    edition = edition_from(edition)
+    scope_key = douyin_collector_scope_key(org_id, edition)
+    freshness = douyin_collector_freshness(org_id, edition)
+    if freshness["freshToday"] and not force:
+        job = {
+            "jobId": job_id, "status": "completed", "stage": "completed", "progress": 100,
+            "message": "今日六个榜单已更新，无需重复抓取", "createdAt": stamp, "updatedAt": stamp,
+            "result": {"snapshotCount": 6, "capturedAt": freshness["capturedAt"], "skipped": True},
+            "error": "", "_org_id": org_id, "_edition": edition,
+        }
+        with DOUYIN_COLLECTOR_LOCK:
+            DOUYIN_COLLECTOR_TASKS[job_id] = job
+            DOUYIN_COLLECTOR_LAST_JOB[scope_key] = job_id
+        return get_douyin_collector_job(job_id, org_id)
+    job = {
+        "jobId": job_id, "status": "queued", "stage": "queued", "progress": 0,
+        "message": "同步任务已提交", "createdAt": stamp, "updatedAt": stamp,
+        "result": None, "error": "", "_org_id": org_id, "_edition": edition,
+    }
+    with DOUYIN_COLLECTOR_LOCK:
+        active = next((item for item in DOUYIN_COLLECTOR_TASKS.values()
+                       if item.get("_org_id") == org_id and item.get("_edition") == edition
+                       and item.get("status") in {"queued", "running"}), None)
+        if active:
+            return {key: value for key, value in active.items() if not key.startswith("_")}
+        DOUYIN_COLLECTOR_TASKS[job_id] = job
+        DOUYIN_COLLECTOR_LAST_JOB[scope_key] = job_id
+
+    def update(stage, progress, message):
+        with DOUYIN_COLLECTOR_LOCK:
+            DOUYIN_COLLECTOR_TASKS[job_id].update({
+                "status": "running", "stage": str(stage), "progress": max(0, min(99, int(progress))),
+                "message": str(message), "updatedAt": now(),
+            })
+
+    def work():
+        try:
+            result = runner(org_id=org_id, edition=edition, progress_callback=update)
+            with DOUYIN_COLLECTOR_LOCK:
+                DOUYIN_COLLECTOR_TASKS[job_id].update({
+                    "status": "completed", "stage": "completed", "progress": 100,
+                    "message": "榜单抓取、双模型分析与看板交付已完成", "result": result, "updatedAt": now(),
+                })
+        except Exception as exc:
+            with DOUYIN_COLLECTOR_LOCK:
+                current = DOUYIN_COLLECTOR_TASKS[job_id]
+                current.update({
+                    "status": "failed", "stage": "failed", "progress": min(99, current.get("progress", 0)),
+                    "message": "同步失败", "error": str(exc), "updatedAt": now(),
+                })
+
+    Thread(target=work, daemon=True, name=f"douyin-hot-{job_id[:8]}").start()
+    return get_douyin_collector_job(job_id, org_id)
 
 def file_hash(data):
     return hashlib.sha256(data).hexdigest()
@@ -1448,7 +1866,7 @@ def thailand_market_payload():
         "errors": errors[:4]
     }
     GLOBAL_SALES_CACHE["payload"] = payload
-    GLOBAL_SALES_CACHE["expires"] = (datetime.utcnow() + timedelta(minutes=30)).isoformat(timespec="seconds") + "Z"
+    GLOBAL_SALES_CACHE["expires"] = cache_expires_at()
     return payload
 
 def parse_dongchedi_sales_page(path, label):
@@ -1493,30 +1911,109 @@ def parse_dongchedi_sales_page(path, label):
         "text": f"{month} {label}Top10合计 {format_int(top10_total)}｜前三：{top_text}"
     }
 
+def dongchedi_normalize_period(value):
+    match = re.search(r"(\d{4})[年-](\d{1,2})", str(value or ""))
+    if not match:
+        return ""
+    try:
+        return datetime.strptime(f"{match.group(1)}-{int(match.group(2)):02d}", "%Y-%m").strftime("%Y-%m")
+    except ValueError:
+        return ""
+
+
+def dongchedi_sales_count(value):
+    """Normalize crawler counts without letting formatted numbers invalidate the whole feed."""
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    text = str(value).strip().replace(",", "")
+    match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", text)
+    if not match:
+        return 0
+    number = float(match.group(0))
+    suffix = text[match.end():].strip().lower()
+    multiplier = 100_000_000 if suffix.startswith("亿") else 10_000 if suffix.startswith(("万", "w")) else 1_000 if suffix.startswith(("千", "k")) else 1
+    return max(0, int(number * multiplier))
+
+
+def dongchedi_sales_period(payload):
+    periods = []
+    for row in payload.get("items", []):
+        period = dongchedi_normalize_period(row.get("period_start"))
+        if period:
+            periods.append(period)
+    for record in payload.get("records", []):
+        period = dongchedi_normalize_period(record.get("month"))
+        if period:
+            periods.append(period)
+    return max(periods, default="")
+
+
+def dongchedi_latest_period_items(payload):
+    latest_period = dongchedi_sales_period(payload)
+    return [
+        row for row in payload.get("items", [])
+        if dongchedi_normalize_period(row.get("period_start")) == latest_period
+    ]
+
+
+def dongchedi_latest_period_records(payload):
+    latest_period = dongchedi_sales_period(payload)
+    return [
+        record for record in payload.get("records", [])
+        if dongchedi_normalize_period(record.get("month")) == latest_period
+    ]
+
+
+def latest_dongchedi_sales_source(candidates):
+    sources = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+            payload = json.loads(raw)
+            period = dongchedi_sales_period(payload)
+            if not period or not (payload.get("items") or payload.get("records")):
+                continue
+            stat = path.stat()
+            signature = f"{path}:{stat.st_mtime_ns}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
+            sources.append((period, str(payload.get("crawl_at") or ""), stat.st_mtime_ns, path, payload, signature))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    if not sources:
+        return None
+    _, _, _, path, payload, signature = max(sources, key=lambda item: item[:3])
+    return path, payload, signature
+
+
 def dongchedi_sales_payload():
-    cached = SALES_CACHE.get("payload")
-    expires = SALES_CACHE.get("expires") or ""
-    if cached and expires > now():
-        return cached
     latest_candidates = [
         ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
         DATA_DIR / "dongchedi_sales" / "latest.json"
     ]
-    latest_path = next((path for path in latest_candidates if path.exists()), None)
-    if latest_path:
+    selected_source = latest_dongchedi_sales_source(latest_candidates)
+    cached = SALES_CACHE.get("payload")
+    expires = SALES_CACHE.get("expires") or ""
+    source_signature = selected_source[2] if selected_source else ""
+    if cached and expires > now() and SALES_CACHE.get("source_signature", "") == source_signature:
+        return cached
+    if selected_source:
         try:
-            latest = json.loads(latest_path.read_text(encoding="utf-8"))
+            _, latest, source_signature = selected_source
             items = []
-            if latest.get("items"):
+            latest_items = dongchedi_latest_period_items(latest)
+            if latest_items:
                 grouped = {}
-                for row in latest.get("items", []):
+                for row in latest_items:
                     key = row.get("rank_type") or "series"
                     grouped.setdefault(key, []).append(row)
                 for key, rows in list(grouped.items())[:8]:
                     rows = sorted(rows, key=lambda x: x.get("rank") or 999)
                     top = rows[:3]
                     total_rows = rows[:10]
-                    total = sum(int(x.get("sales_volume") or 0) for x in total_rows)
+                    total = sum(dongchedi_sales_count(x.get("sales_volume")) for x in total_rows)
                     total_label = f"Top{len(total_rows)}合计"
                     top_text = "、".join([f"{x.get('series_name','—')} {format_int(x.get('sales_volume'))}" for x in top])
                     label_map = {
@@ -1535,22 +2032,24 @@ def dongchedi_sales_payload():
                         "month": month,
                         "sourceUrl": top[0].get("source_url", DONGCHEDI_SALES_BASE + "/sales"),
                         "top10Total": total,
-                        "top3": [{"rank": x.get("rank"), "name": x.get("series_name", ""), "brand": x.get("brand_name") or "", "sales": int(x.get("sales_volume") or 0)} for x in top],
+                        "top3": [{"rank": x.get("rank"), "name": x.get("series_name", ""), "brand": x.get("brand_name") or "", "sales": dongchedi_sales_count(x.get("sales_volume"))} for x in top],
                         "text": f"{month} {label}{total_label} {format_int(total)}｜前三：{top_text}"
                     })
-            for record in latest.get("records", [])[:8]:
+            for record in dongchedi_latest_period_records(latest)[:8]:
                 rows = record.get("items", [])
                 if not rows:
                     continue
+                if record.get("segment", "") in {item.get("label") for item in items}:
+                    continue
                 top = rows[:3]
-                total = int(record.get("top_n_total") or sum(int(x.get("sales") or 0) for x in rows[:10]))
+                total = dongchedi_sales_count(record.get("top_n_total")) or sum(dongchedi_sales_count(x.get("sales")) for x in rows[:10])
                 top_text = "、".join([f"{x.get('series_name','—')} {format_int(x.get('sales'))}" for x in top])
                 items.append({
                     "label": record.get("segment", ""),
                     "month": record.get("month", ""),
                     "sourceUrl": top[0].get("source_url", DONGCHEDI_SALES_BASE + "/sales"),
                     "top10Total": total,
-                    "top3": [{"rank": x.get("rank"), "name": x.get("series_name", ""), "brand": x.get("sub_brand_name") or x.get("brand_name") or "", "sales": int(x.get("sales") or 0)} for x in top],
+                    "top3": [{"rank": x.get("rank"), "name": x.get("series_name", ""), "brand": x.get("sub_brand_name") or x.get("brand_name") or "", "sales": dongchedi_sales_count(x.get("sales"))} for x in top],
                     "text": f"{record.get('month','最新月份')} {record.get('segment','销量榜')}Top10合计 {format_int(total)}｜前三：{top_text}"
                 })
             if items:
@@ -1564,7 +2063,8 @@ def dongchedi_sales_payload():
                     "errors": []
                 }
                 SALES_CACHE["payload"] = payload
-                SALES_CACHE["expires"] = (datetime.utcnow() + timedelta(minutes=30)).isoformat(timespec="seconds") + "Z"
+                SALES_CACHE["expires"] = cache_expires_at()
+                SALES_CACHE["source_signature"] = source_signature
                 return payload
         except Exception:
             pass
@@ -1597,7 +2097,8 @@ def dongchedi_sales_payload():
         "errors": errors[:4]
     }
     SALES_CACHE["payload"] = payload
-    SALES_CACHE["expires"] = (datetime.utcnow() + timedelta(minutes=30)).isoformat(timespec="seconds") + "Z"
+    SALES_CACHE["expires"] = cache_expires_at()
+    SALES_CACHE["source_signature"] = source_signature
     return payload
 
 def default_workspace(org_name="演示客户"):
@@ -2860,16 +3361,21 @@ def openai_config():
         "model": env_value("OPENAI_MODEL", OPENAI_DEFAULT_MODEL)
     }
 
-def call_qwen(messages, temperature=.35, profile="fast", timeout=None):
+def call_qwen(messages, temperature=.35, profile="fast", timeout=None, max_tokens=None, enable_thinking=None):
     cfg = qwen_config(profile)
     api_key = env_value("DASHSCOPE_API_KEY")
     if not api_key:
         raise ValueError("未配置 DASHSCOPE_API_KEY。请在启动命令或终端环境中配置千问 API Key。")
-    payload = json.dumps({
+    body = {
         "model": cfg["model"],
         "messages": messages,
         "temperature": temperature
-    }, ensure_ascii=False).encode("utf-8")
+    }
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    if enable_thinking is not None:
+        body["enable_thinking"] = bool(enable_thinking)
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = Request(
         cfg["base_url"] + "/chat/completions",
         data=payload,
@@ -2890,9 +3396,11 @@ def call_qwen(messages, temperature=.35, profile="fast", timeout=None):
         if exc.code == 403:
             raise ValueError("千问请求被拒绝：请检查模型权限或阿里云百炼服务开通状态。")
         raise ValueError(f"千问请求失败：HTTP {exc.code} {detail[:300]}")
+    except (TimeoutError, URLError) as exc:
+        raise ValueError(f"千问请求超时或网络不可用：{exc}")
     return data["choices"][0]["message"]["content"]
 
-def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_tokens=None):
+def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_tokens=None, response_format=None):
     cfg = deepseek_config(profile)
     api_key = env_value("DEEPSEEK_API_KEY")
     if not api_key:
@@ -2904,6 +3412,8 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
     }
     if max_tokens:
         body["max_tokens"] = max_tokens
+    if response_format:
+        body["response_format"] = response_format
     payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
     req = Request(
         cfg["base_url"] + "/chat/completions",
@@ -6604,6 +7114,156 @@ def start_opportunity_map_job(body, *, org_id="", user_id="local", runner=None):
     Thread(target=work, daemon=True, name=f"opportunity-map-{job_id[:8]}").start()
     return get_opportunity_map_job(job_id)
 
+
+def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callback=None):
+    platforms = body.get("platforms") or ["douyin", "xiaohongshu", "weibo"]
+    edition = edition_from(body.get("edition", "china"))
+    time_range = body.get("timeRange", "30d")
+    start_date = body.get("startDate", "")
+    end_date = body.get("endDate", "")
+    thresholds = body.get("thresholds") or {"douyin": 8000, "xiaohongshu": 500, "weibo": 500}
+    keyword = str(body.get("keyword") or "").strip()
+    competitors = list(dict.fromkeys(
+        str(value or "").strip() for value in (body.get("competitors") or []) if str(value or "").strip()
+    ))[:5]
+    models = [keyword] + competitors
+    if not keyword:
+        raise ValueError("请输入本品品牌或车型")
+
+    def report(stage, progress, message):
+        if progress_callback:
+            progress_callback(stage, progress, message)
+
+    with db() as conn:
+        previous = latest_social_trend_snapshot(conn, keyword, org_id, edition)
+    report("prepare", 2, "已读取项目配置与历史快照")
+    collected = []
+    collection_span = 78
+    for index, model in enumerate(models):
+        def on_model_progress(stage, local_progress, message, *, index=index, model=model):
+            overall = 2 + round(collection_span * (index + local_progress / 100) / len(models))
+            role = "本品" if index == 0 else "竞品"
+            report(stage, overall, f"{role} {model}：{message}")
+        collected.append(collect_social_trends(
+            model, platforms, body.get("pages", 1),
+            body.get("count", 20), time_range, index == 0, thresholds, on_model_progress, start_date, end_date,
+        ))
+    report("comparison", 82, "已完成本品与竞品样本对齐")
+    result = attach_competitor_rankings(collected[0], collected[1:])
+    result = apply_social_trend_history(result, previous)
+    report("validation", 88, "正在执行MMN实体与双模型交叉校验")
+    result = validate_social_trends_with_models(result)
+    report("storage", 96, "校验通过，正在写入真实数据库快照")
+    with db() as conn:
+        snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
+            "platforms": platforms, "timeRange": time_range, "startDate": start_date, "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
+        })
+    result["snapshot"] = snapshot
+    report("storage", 99, "快照已写入，正在刷新看板")
+    return result
+
+
+def _public_social_trend_job(job):
+    return {key: value for key, value in job.items() if not key.startswith("_")} if job else None
+
+
+def _social_trend_job_request_key(body):
+    return json.dumps({
+        "keyword": str((body or {}).get("keyword") or "").strip(),
+        "platforms": list((body or {}).get("platforms") or []),
+        "competitors": list((body or {}).get("competitors") or []),
+        "thresholds": (body or {}).get("thresholds") or {},
+        "timeRange": (body or {}).get("timeRange") or "30d",
+        "startDate": (body or {}).get("startDate") or "",
+        "endDate": (body or {}).get("endDate") or "",
+        "edition": (body or {}).get("edition") or "china",
+        "pages": (body or {}).get("pages") or 1,
+        "count": (body or {}).get("count") or 20,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _prune_social_trend_jobs(now_dt=None):
+    """Bound completed in-memory jobs without interrupting active collection."""
+    now_dt = now_dt or datetime.now(timezone.utc)
+    terminal = {"completed", "failed"}
+    completed = []
+    for job_id, job in SOCIAL_TREND_JOB_TASKS.items():
+        if job.get("status") not in terminal:
+            continue
+        try:
+            updated = datetime.fromisoformat(str(job.get("updatedAt") or "").replace("Z", "+00:00"))
+        except ValueError:
+            updated = datetime.min.replace(tzinfo=timezone.utc)
+        if updated < now_dt - SOCIAL_TREND_JOB_TTL:
+            completed.append((updated, job_id))
+    for _, job_id in completed:
+        SOCIAL_TREND_JOB_TASKS.pop(job_id, None)
+    overflow = max(0, len(SOCIAL_TREND_JOB_TASKS) - SOCIAL_TREND_JOB_LIMIT)
+    if overflow:
+        finished = sorted(
+            ((str(job.get("updatedAt") or ""), job_id) for job_id, job in SOCIAL_TREND_JOB_TASKS.items() if job.get("status") in terminal),
+        )
+        for _, job_id in finished[:overflow]:
+            SOCIAL_TREND_JOB_TASKS.pop(job_id, None)
+
+
+def get_social_trend_job(job_id, org_id=""):
+    with SOCIAL_TREND_JOB_LOCK:
+        job = SOCIAL_TREND_JOB_TASKS.get(str(job_id or ""))
+        if job and org_id and job.get("_org_id") != org_id:
+            return None
+        return _public_social_trend_job(job)
+
+
+def start_social_trend_job(body, *, org_id="local", runner=None):
+    runner = runner or run_social_trend_collection_pipeline
+    job_id = str(uuid.uuid4())
+    stamp = now()
+    request_key = _social_trend_job_request_key(body)
+    job = {
+        "jobId": job_id, "status": "queued", "stage": "queued", "progress": 0,
+        "message": "采集任务已提交，正在准备数据源", "createdAt": stamp, "updatedAt": stamp,
+        "result": None, "error": "", "_org_id": org_id, "_request_key": request_key,
+    }
+    with SOCIAL_TREND_JOB_LOCK:
+        _prune_social_trend_jobs()
+        active = next((active_job for active_job in SOCIAL_TREND_JOB_TASKS.values()
+                       if active_job.get("_org_id") == org_id and active_job.get("status") in {"queued", "running"}), None)
+        if active:
+            if active.get("_request_key") != request_key:
+                raise ValueError("当前项目已有不同条件的社媒趋势分析在运行，请完成后再发起新的分析")
+            return _public_social_trend_job(active)
+        SOCIAL_TREND_JOB_TASKS[job_id] = job
+
+    def update(stage, progress, message):
+        with SOCIAL_TREND_JOB_LOCK:
+            current = SOCIAL_TREND_JOB_TASKS.get(job_id)
+            if current:
+                current.update({
+                    "status": "running", "stage": str(stage or "running"),
+                    "progress": max(0, min(99, int(progress or 0))),
+                    "message": str(message or "正在采集"), "updatedAt": now(),
+                })
+
+    def work():
+        update("prepare", 1, "正在连接社媒数据源")
+        try:
+            result = runner(body, org_id=org_id, progress_callback=update)
+            with SOCIAL_TREND_JOB_LOCK:
+                SOCIAL_TREND_JOB_TASKS[job_id].update({
+                    "status": "completed", "stage": "completed", "progress": 100,
+                    "message": "采集、校验与快照入库已完成", "result": result, "updatedAt": now(),
+                })
+        except Exception as exc:
+            with SOCIAL_TREND_JOB_LOCK:
+                SOCIAL_TREND_JOB_TASKS[job_id].update({
+                    "status": "failed", "stage": "failed", "progress": 100,
+                    "message": "采集任务失败", "error": str(exc), "updatedAt": now(),
+                })
+
+    Thread(target=work, daemon=True, name=f"social-trend-{job_id[:8]}").start()
+    return get_social_trend_job(job_id, org_id)
+
 def run_mmn_marketing_agent(body):
     started = now()
     run_id = str(uuid.uuid4())
@@ -8922,8 +9582,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             query = parse_qs(parsed.query)
             auth = self.current_auth() or {}
             with db() as conn:
-                result = latest_social_trend_snapshot(conn, query.get("keyword", [""])[0], auth.get("org_id", "local"), edition_from(query.get("edition", ["china"])[0]))
+                keyword = query.get("keyword", [""])[0]
+                edition = edition_from(query.get("edition", ["china"])[0])
+                if keyword == "上汽奥迪品牌传播穿透":
+                    result = brand_penetration_snapshot(conn, auth.get("org_id", "local"), edition)
+                else:
+                    result = latest_social_trend_snapshot(conn, keyword, auth.get("org_id", "local"), edition)
             self.send_json({"ok": True, "result": result})
+            return
+        social_trend_job_match = re.fullmatch(r"/api/social-trends/jobs/([^/]+)", parsed.path)
+        if social_trend_job_match:
+            auth = self.current_auth() or {}
+            job = get_social_trend_job(social_trend_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "采集任务不存在或服务已重启"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
             return
         opportunity_job_match = re.fullmatch(r"/api/opportunity-map/jobs/([^/]+)", parsed.path)
         if opportunity_job_match:
@@ -9169,6 +9843,52 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 ).fetchall()
             self.send_json({"ok": True, "items": [rowdict(r) for r in rows]})
             return
+        if parsed.path == "/api/douyin-hot/rankings":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    result = latest_douyin_hot_rank_snapshot(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(q.get("edition", ["china"])[0]),
+                        view=q.get("view", ["videos"])[0],
+                        range_key=q.get("range", ["24h"])[0],
+                    )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/manual-reviews":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                result = douyin_hot_manual_review_payload(
+                    org_id=auth.get("org_id", "local"),
+                    edition=edition_from(q.get("edition", ["china"])[0]),
+                    view=q.get("view", ["videos"])[0],
+                    range_key=q.get("range", ["24h"])[0],
+                )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/collector/status":
+            q = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            self.send_json({"ok": True, "collector": douyin_collector_status(
+                auth.get("org_id", "local"), edition_from(q.get("edition", ["china"])[0]),
+            )})
+            return
+        douyin_collector_job_match = re.fullmatch(r"/api/douyin-hot/collector/jobs/([^/]+)", parsed.path)
+        if douyin_collector_job_match:
+            auth = self.current_auth() or {}
+            job = get_douyin_collector_job(douyin_collector_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "同步任务不存在或服务已重启"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
         if parsed.path == "/api/workspace":
             q = parse_qs(parsed.query)
             try:
@@ -9340,7 +10060,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/opportunity-map/manual-reviews",
                 "/api/cockpit/execution-cycles",
                 "/api/cockpit/execution-cycles/monitoring",
+                "/api/douyin-hot/recognize",
                 "/api/social-trends/collect",
+                "/api/social-trends/jobs",
                 "/api/social-trends/import",
             }
             roles = None if parsed.path in trial_post_allowed else {"admin"}
@@ -9353,6 +10075,72 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(payload or {"ok": False, "error": "达人蒸馏接口不存在"}, 201 if parsed.path == "/api/creator-distillation/tasks" else (200 if payload else 404))
             except Exception as exc:
                 self.send_json(creator_distillation_api_error(exc), 400)
+            return
+        if parsed.path == "/api/douyin-hot/recognize":
+            try:
+                auth = self.current_auth() or {}
+                result = run_douyin_hot_entity_recognition(self.read_json(), auth.get("org_id", "local"))
+                if result.get("modelsConfigured") and (result.get("errors") or not result.get("dualModelReady")):
+                    details = "；".join(f"{key}: {value}" for key, value in (result.get("errors") or {}).items())
+                    raise RuntimeError("双模型识别未完整返回" + (f"：{details}" if details else ""))
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/manual-reviews/submit":
+            try:
+                auth = self.current_auth() or {}
+                result = audit_douyin_hot_manual_review(
+                    self.read_json(),
+                    org_id=auth.get("org_id", "local"),
+                    reviewed_by=auth.get("user_id") or auth.get("username") or "local",
+                )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/rankings":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                source_payload = body.get("sourcePayload") if isinstance(body.get("sourcePayload"), dict) else {}
+                items = body.get("items") or source_payload.get("item_list") or []
+                with db() as conn:
+                    result = save_douyin_hot_rank_snapshot(
+                        conn,
+                        items,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(body.get("edition") or "china"),
+                        view=body.get("view") or "videos",
+                        range_key=body.get("range") or "24h",
+                        source_url=body.get("sourceUrl") or "https://creator.douyin.com/creator-micro/creative-guidance",
+                        captured_at=body.get("capturedAt") or "",
+                    )
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/collector/connect":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                edition = edition_from(body.get("edition") or "china")
+                status = launch_douyin_collector_browser()
+                self.send_json({"ok": True, "collector": {**douyin_collector_status(auth.get("org_id", "local"), edition), **status}})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/collector/sync":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                job = start_douyin_collector_job(
+                    org_id=auth.get("org_id", "local"), edition=edition_from(body.get("edition") or "china"),
+                    force=body.get("force") is True,
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
             return
         if parsed.path == "/api/asset-library":
             try:
@@ -9384,23 +10172,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 auth = self.current_auth() or {}
-                platforms = body.get("platforms") or ["douyin", "xiaohongshu", "weibo"]
-                edition = edition_from(body.get("edition", "china"))
-                org_id = auth.get("org_id", "local")
-                time_range = body.get("timeRange", "30d")
-                thresholds = body.get("thresholds") or {"douyin": 8000, "xiaohongshu": 500, "weibo": 500}
-                with db() as conn:
-                    previous = latest_social_trend_snapshot(conn, str(body.get("keyword") or "").strip(), org_id, edition)
-                result = collect_social_trends(body.get("keyword"), platforms, body.get("pages", 1), body.get("count", 20), time_range, True, thresholds)
-                competitors = list(dict.fromkeys(str(x or "").strip() for x in (body.get("competitors") or []) if str(x or "").strip()))[:3]
-                competitor_results = [collect_social_trends(model, platforms, 1, body.get("count", 20), time_range, False, thresholds) for model in competitors]
-                result = attach_competitor_rankings(result, competitor_results)
-                result = apply_social_trend_history(result, previous)
-                result = validate_social_trends_with_models(result)
-                with db() as conn:
-                    snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {"platforms": platforms, "timeRange": time_range, "competitors": competitors, "thresholds": thresholds})
-                result["snapshot"] = snapshot
+                result = run_social_trend_collection_pipeline(body, org_id=auth.get("org_id", "local"))
                 self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-trends/jobs":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                self.send_json({"ok": True, "job": start_social_trend_job(body, org_id=auth.get("org_id", "local"))}, 202)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -9420,7 +10201,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 result = validate_social_trends_with_models(result)
                 auth = self.current_auth() or {}; edition = edition_from(query.get("edition", ["china"])[0]); org_id = auth.get("org_id", "local")
                 with db() as conn:
-                    snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {"platforms": platforms, "timeRange": query.get("timeRange", ["30d"])[0], "thresholds": thresholds, "source": "social_assistant_import", "filename": filename})
+                    snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {"platforms": platforms, "timeRange": query.get("timeRange", ["30d"])[0], "startDate": query.get("startDate", [""])[0], "endDate": query.get("endDate", [""])[0], "thresholds": thresholds, "source": "social_assistant_import", "filename": filename})
                 result["snapshot"] = snapshot
                 self.send_json({"ok": True, "result": result}, 201)
             except Exception as exc:
