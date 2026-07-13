@@ -1,5 +1,19 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-14｜beta 1.02 社媒与数据智能增量整包发布
+
+- 发布范围：品牌传播采集进度与商用车隔离、平台 NSR 指纹矩阵、社媒趋势后台任务及竞品品牌车型选择、本品正向热度基准、风险内容气泡、懂车帝销量新鲜度、抖音热点实体识别、小红书内容排名与雷达、趋势数字避让和对应发布门禁。
+- GitHub：主功能提交 `23a7f8e`；销量持久化卷热修提交 `28a9ba2`；均已推送 `main`。
+- 本地验证：JavaScript 11/11、Python 175/175、最终发布门禁专项 85/85；真实浏览器 `failed: []`、`runtimeErrors: []`。
+- 版本：`beta 1.02`；健康版本码：`beta-1.02-20260714-social-data-1`。
+- ECS 发布目录：`/opt/mmn-perception-engine`；使用提交归档同步并执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`。
+- 第一轮备份：`backups/code_before_23a7f8e_20260714_022425.tar.gz`、`backups/mmn_backup_20260714_022531.tar.gz`。
+- 上线验收发现 Docker 持久化卷遮挡镜像内销量 feed，公网仍显示 2026 年 5 月；未隐瞒该问题，增加发布脚本的数据资产同步与回归测试后重新发布。
+- 最终备份：`backups/code_before_28a9ba2_20260714_022900.tar.gz`、`backups/mmn_backup_20260714_022931.tar.gz`。
+- 最终验收：公网首页和 `/api/health` 通过，版本化 `app.js`、抖音/小红书新增资源和竞品品牌选择器已生效；`/api/sales-marquee` 仅返回 `2026-06`；本地与服务器关键文件哈希一致。
+- 运行状态：`mmn-app`、`mmn-creator-worker`、`mmn-db`、`mmn-scheduler`、`mmn-web`、`redis` 共 6 个服务运行，近 10 分钟错误日志 0。
+- 回滚：恢复 `code_before_28a9ba2_20260714_022900.tar.gz` 与同时间点 `mmn_backup_20260714_022931.tar.gz`，再执行 `MMN_SKIP_GIT_PULL=true bash deploy.sh`；若需回到本批次前，使用第一轮代码归档和数据备份。
+
 ## 2026-07-12｜beta 1.02 系统级迭代
 
 - 迭代范围：2026-07-11 至 2026-07-12 连续开发成果，统一作为一次系统级版本发布，不再拆成零散页面热修。
