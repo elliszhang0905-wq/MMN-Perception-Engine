@@ -44,6 +44,15 @@ docker compose --env-file .env build
 
 echo "启动新版本服务。"
 docker compose --env-file .env up -d
+
+echo "同步随版本发布的销量与 RAG 数据资产到持久化卷。"
+docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales
+if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
+  docker compose --env-file .env cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json
+fi
+if [[ -f data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl ]]; then
+  docker compose --env-file .env cp data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl mmn-app:/app/data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl
+fi
 docker compose --env-file .env ps
 
 echo "部署完成。测试地址：${MMN_PUBLIC_BASE_URL:-http://服务器公网IP:${MMN_HTTP_PORT:-8765}/}"

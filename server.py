@@ -1991,7 +1991,8 @@ def latest_dongchedi_sales_source(candidates):
 def dongchedi_sales_payload():
     latest_candidates = [
         ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
-        DATA_DIR / "dongchedi_sales" / "latest.json"
+        DATA_DIR / "dongchedi_sales" / "latest.json",
+        DATA_DIR / "dongchedi_sales" / "latest_mmn_perception_feed.json",
     ]
     selected_source = latest_dongchedi_sales_source(latest_candidates)
     cached = SALES_CACHE.get("payload")

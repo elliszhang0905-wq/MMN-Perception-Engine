@@ -63,6 +63,31 @@ class DongchediSalesFreshnessTest(unittest.TestCase):
                 self.assertEqual(selected[0], fresh)
                 self.assertEqual(selected[1]["records"][0]["month"], "2026年06月")
 
+    def test_payload_reads_the_published_mmn_feed_from_the_data_volume(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        with TemporaryDirectory() as tmp:
+            data_dir = Path(tmp) / "data"
+            sales_dir = data_dir / "dongchedi_sales"
+            sales_dir.mkdir(parents=True)
+            _write_feed(sales_dir / "latest.json", "2026年05月", crawl_at="2026-06-25T01:00:00")
+            published = {
+                "crawl_at": "2026-07-13T21:48:00",
+                "items": [{
+                    "period_start": "2026-06-01", "rank_type": "series", "rank": 1,
+                    "series_name": "六月车型", "sales_volume": 12345, "brand_name": "测试品牌",
+                    "source_url": "https://www.dongchedi.com/sales",
+                }],
+            }
+            (sales_dir / "latest_mmn_perception_feed.json").write_text(
+                json.dumps(published, ensure_ascii=False), encoding="utf-8",
+            )
+            with patch.object(server, "DATA_DIR", data_dir), patch.object(server, "ROOT", Path(tmp) / "repo"):
+                payload = server.dongchedi_sales_payload()
+
+            self.assertEqual(payload["items"][0]["month"], "2026-06")
+            self.assertEqual(payload["items"][0]["top3"][0]["name"], "六月车型")
+
     def test_sales_source_signature_changes_when_file_is_replaced(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
