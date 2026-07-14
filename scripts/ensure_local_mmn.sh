@@ -8,6 +8,7 @@ LOCAL_URL="http://127.0.0.1:${PORT}"
 LOG_DIR="${PROJECT_DIR}/logs"
 LOG_FILE="${LOG_DIR}/local_mmn.log"
 PID_FILE="${LOG_DIR}/local_mmn.pid"
+WATCHDOG_PID_FILE="${LOG_DIR}/local_mmn_watchdog.pid"
 
 mkdir -p "${LOG_DIR}"
 cd "${PROJECT_DIR}"
@@ -17,7 +18,16 @@ is_healthy() {
 }
 
 server_pid() {
-  lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -n 1
+  lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+}
+
+watchdog_pid() {
+  local pid
+  pid=$(cat "${WATCHDOG_PID_FILE}" 2>/dev/null || true)
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+    echo "${pid}"
+  fi
+  return 0
 }
 
 backend_code_is_newer() {
@@ -40,15 +50,21 @@ stop_stale_server() {
     done
     kill -9 "${pid}" 2>/dev/null || true
   fi
+  return 0
 }
 
 stop_stuck_server() {
-  local pids
+  local pids watcher
   pids=$(lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)
   if [[ -n "${pids}" ]]; then
     echo "检测到 ${PORT} 端口已有服务，正在确认是否为卡住的 MMN 服务..."
     if ! is_healthy; then
       echo "服务无响应，正在重启 MMN 本地服务..."
+      watcher=$(watchdog_pid)
+      if [[ -n "${watcher}" ]]; then
+        kill "${watcher}" 2>/dev/null || true
+        rm -f "${WATCHDOG_PID_FILE}"
+      fi
       echo "${pids}" | xargs kill 2>/dev/null || true
       sleep 1
       pids=$(lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)
@@ -57,6 +73,7 @@ stop_stuck_server() {
       fi
     fi
   fi
+  return 0
 }
 
 start_server() {
@@ -70,13 +87,16 @@ start_server() {
   stop_stuck_server
 
   if ! is_healthy; then
-    echo "正在启动 MMN 本地服务..."
-    MMN_HOST="${HOST}" \
-    MMN_PORT="${PORT}" \
-    MMN_CLOUD_LOGIN_REQUIRED="false" \
-    MMN_AUTO_OPEN_BROWSER="false" \
-    nohup python3 server.py >>"${LOG_FILE}" 2>&1 &
-    echo $! >"${PID_FILE}"
+    if [[ -z "$(watchdog_pid)" ]]; then
+      echo "正在启动 MMN 本地服务守护进程..."
+      MMN_HOST="${HOST}" \
+      MMN_PORT="${PORT}" \
+      MMN_CLOUD_LOGIN_REQUIRED="false" \
+      MMN_AUTO_OPEN_BROWSER="false" \
+      screen -dmS mmn_local_watchdog zsh scripts/run_local_mmn_watchdog.sh
+    else
+      echo "MMN 守护进程已运行，正在等待服务恢复..."
+    fi
   fi
 
   for _ in {1..30}; do
