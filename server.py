@@ -73,8 +73,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260714-social-data-1"
-APP_RELEASE_DATE = "2026-07-12"
+APP_VERSION_CODE = "beta-1.02-20260716-executive-qc-3"
+APP_RELEASE_DATE = "2026-07-16"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -106,6 +106,8 @@ SOCIAL_TREND_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_TASKS = {}
 SOCIAL_TREND_JOB_LIMIT = 100
 SOCIAL_TREND_JOB_TTL = timedelta(days=1)
+EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
+EXECUTIVE_BRIEF_REVIEW_TASKS = {}
 DOUYIN_COLLECTOR_LOCK = Lock()
 DOUYIN_COLLECTOR_TASKS = {}
 DOUYIN_COLLECTOR_LAST_JOB = {}
@@ -3441,6 +3443,178 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
     if not choices:
         raise ValueError("DeepSeek 模型无响应。")
     return choices[0]["message"]["content"]
+
+def executive_brief_evidence_packet():
+    facts = [
+        {"id": "retail", "label": "乘用车零售", "value": 44.3, "unit": "万辆", "yoy": -0.15, "priorValue": 52.1},
+        {"id": "wholesale", "label": "乘用车厂商批发", "value": 37.9, "unit": "万辆", "yoy": -0.26, "priorValue": 51.2},
+        {"id": "nev_retail", "label": "新能源零售", "value": 28.0, "unit": "万辆", "yoy": -0.08, "priorValue": 30.4},
+        {"id": "nev_penetration", "label": "新能源零售渗透率", "value": 63.1, "unit": "%"},
+    ]
+    source = {
+        "label": "乘联会《周度分析｜车市扫描（20260706—0712）》",
+        "url": "https://www.cpcaauto.com/newslist.php?types=csjd&id=4272",
+        "period": "2026年7月1—12日",
+    }
+    inferences = [
+        {"id": "retail_pressure", "title": "终端零售承压", "detail": "乘用车零售44.3万辆，同比下降15%"},
+        {"id": "wholesale_pressure", "title": "批发端承压更明显", "detail": "厂商批发37.9万辆，同比下降26%，降幅大于零售"},
+        {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
+        {"id": "penetration_buffer", "title": "结构托底", "detail": "新能源零售渗透率为63.1%"},
+    ]
+    candidate = "终端需求偏弱，渠道补库同步收缩；新能源以63.1%零售渗透率继续托住市场基本盘。"
+    fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences}, ensure_ascii=False, sort_keys=True)
+    return {
+        "facts": facts,
+        "source": source,
+        "candidate": candidate,
+        "inferences": inferences,
+        "fingerprint": hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest(),
+    }
+
+def executive_brief_review_prompt(packet):
+    payload = {
+        "factsFingerprint": packet["fingerprint"],
+        "lockedFacts": packet["facts"],
+        "source": packet["source"],
+        "candidateSummary": packet["candidate"],
+        "mmnInferences": packet["inferences"],
+        "requiredEvidenceIds": ["retail", "wholesale", "nev_retail", "nev_penetration"],
+        "requiredInferenceIds": ["retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"],
+    }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN集团管理摘要的独立质检模型。只检查给定摘要是否被锁定事实支持，不得修改数字、出处或摘要文本。"
+                "重点检查数字一致性、推理边界、因果是否过度、管理层表述是否准确。"
+                "只输出JSON对象：approved(boolean)、summary(必须原样返回candidateSummary)、factsFingerprint、"
+                "evidenceIds(string数组)、inferenceIds(string数组)、issues(string数组)。"
+                "summary和mmnInferences必须分别被lockedFacts支持；任何证据不足或措辞越界都必须approved=false。"
+            ),
+        },
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+    ]
+
+def normalize_executive_brief_review(raw, packet):
+    parsed = parse_json_object(raw)
+    if not isinstance(parsed, dict):
+        return False
+    evidence_ids = {str(item) for item in parsed.get("evidenceIds") or []}
+    inference_ids = {str(item) for item in parsed.get("inferenceIds") or []}
+    required_ids = {"retail", "wholesale", "nev_retail", "nev_penetration"}
+    required_inference_ids = {"retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"}
+    return bool(
+        parsed.get("approved") is True
+        and str(parsed.get("summary") or "").strip() == packet["candidate"]
+        and str(parsed.get("factsFingerprint") or "") == packet["fingerprint"]
+        and required_ids.issubset(evidence_ids)
+        and required_inference_ids.issubset(inference_ids)
+        and not (parsed.get("issues") or [])
+    )
+
+def executive_brief_cache_path():
+    return DATA_DIR / "executive_brief_review.json"
+
+def load_executive_brief_cache(packet):
+    path = executive_brief_cache_path()
+    if not path.exists():
+        return None
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if cached.get("factsFingerprint") != packet["fingerprint"]:
+        return None
+    return cached
+
+def save_executive_brief_cache(payload):
+    path = executive_brief_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+def public_executive_brief_state(packet, cached=None):
+    cached = cached or {}
+    status = cached.get("status") if cached.get("status") in {"verified", "pending_review"} else "pending_review"
+    return {
+        "status": status,
+        "statusLabel": "双旗舰模型交叉验证已通过" if status == "verified" else "双旗舰模型交叉验证中 · 暂不发布",
+        "summary": packet["candidate"] if status == "verified" else "",
+        "facts": packet["facts"],
+        "inferences": packet["inferences"] if status == "verified" else [],
+        "source": packet["source"],
+        "factsFingerprint": packet["fingerprint"],
+        "providerChecks": cached.get("providerChecks") or {"qwen": "pending", "deepseek": "pending"},
+        "reviewedAt": cached.get("reviewedAt") or "",
+        "priorValueMethod": "按本期值 ÷（1＋同比）反算，显示至0.1万辆",
+    }
+
+def run_executive_brief_dual_review(packet=None):
+    packet = packet or executive_brief_evidence_packet()
+    prompt = executive_brief_review_prompt(packet)
+
+    def review(provider):
+        try:
+            if provider == "qwen":
+                raw = call_qwen(prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1200, enable_thinking=False)
+            else:
+                raw = call_deepseek(
+                    prompt,
+                    temperature=.05,
+                    profile="deep",
+                    timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=1200,
+                    response_format={"type": "json_object"},
+                )
+            return "verified" if normalize_executive_brief_review(raw, packet) else "rejected"
+        except Exception:
+            return "unavailable"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        qwen_future = executor.submit(review, "qwen")
+        deepseek_future = executor.submit(review, "deepseek")
+        checks = {"qwen": qwen_future.result(), "deepseek": deepseek_future.result()}
+    status = "verified" if all(value == "verified" for value in checks.values()) else "pending_review"
+    result = {
+        "status": status,
+        "factsFingerprint": packet["fingerprint"],
+        "providerChecks": checks,
+        "reviewedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    save_executive_brief_cache(result)
+    return public_executive_brief_state(packet, result)
+
+def enqueue_executive_brief_review(packet=None, force=False):
+    packet = packet or executive_brief_evidence_packet()
+    if os.getenv("MMN_EXECUTIVE_BRIEF_MODELS_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
+        return False
+    if not (qwen_config("deep")["configured"] and deepseek_config("deep")["configured"]):
+        return False
+    with EXECUTIVE_BRIEF_REVIEW_LOCK:
+        task = EXECUTIVE_BRIEF_REVIEW_TASKS.get(packet["fingerprint"]) or {}
+        if task.get("status") == "running":
+            return True
+        EXECUTIVE_BRIEF_REVIEW_TASKS[packet["fingerprint"]] = {"status": "running", "startedAt": now()}
+
+    def work():
+        try:
+            run_executive_brief_dual_review(packet)
+        finally:
+            with EXECUTIVE_BRIEF_REVIEW_LOCK:
+                EXECUTIVE_BRIEF_REVIEW_TASKS[packet["fingerprint"]] = {"status": "done", "finishedAt": now()}
+
+    Thread(target=work, daemon=True, name="executive-brief-review").start()
+    return True
+
+def executive_brief_state(force=False):
+    packet = executive_brief_evidence_packet()
+    cached = load_executive_brief_cache(packet)
+    if cached and cached.get("status") == "verified" and not force:
+        return public_executive_brief_state(packet, cached)
+    enqueue_executive_brief_review(packet, force=force)
+    return public_executive_brief_state(packet, cached)
 
 def node_binary():
     for candidate in NODE_CANDIDATES:
@@ -9801,6 +9975,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         auth.get("org_id", "local"),
                         edition_from(q.get("edition", ["china"])[0]),
                     )
+                payload["executiveBrief"] = executive_brief_state(
+                    force=str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
+                )
                 self.send_json(payload)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 500)
