@@ -85,6 +85,7 @@ git@github.com:elliszhang0905-wq/MMN-Perception-Engine.git
 | `scripts/mmn_ppt_ingest_sources.py` | MarkItDown 资料解析入口 |
 | `scripts/mmn_ppt_inspect.py` | python-pptx PPTX 读取检查入口 |
 | `bf_factory/` | BF领域契约、解析、抽取、生成、版本、学习、脱敏和Word导出 |
+| `product_whitepaper.py` | 产品白皮书页筛选、能力抽取约束、原文定位和双模型一致性校验 |
 | `bf-factory.js` | BF工厂与BF资产库前端交互 |
 | `requirements-bf-factory.txt` | BF文件解析、OCR和Word导出Python依赖 |
 | `deploy.sh` | 服务器部署入口 |
@@ -98,6 +99,16 @@ git@github.com:elliszhang0905-wq/MMN-Perception-Engine.git
 - TikHub 密钥只允许配置在后端 `.env` 的 `TIKHUB_API_KEY`，禁止写入 `index.html`、`app.js`、快照结果或日志。
 - 三平台搜索端点使用 `TIKHUB_SOCIAL_DOUYIN_ENDPOINT`、`TIKHUB_SOCIAL_XIAOHONGSHU_ENDPOINT`、`TIKHUB_SOCIAL_WEIBO_ENDPOINT` 覆盖，升级前先核对 TikHub 端点索引。
 - 真实验收必须同时确认：三平台返回有效来源、原文链接可下钻、证据哈希存在、快照可恢复、Qwen/DeepSeek 交叉复核状态可解释；无 Key 时只能标记“待真实数据验证”。
+
+### T周期卖点市场匹配与产品白皮书（2026-07-16）
+
+- 页面入口：`决策驾驶舱 → 卖点机会决策台 → 五类证据 → 产品能力 → 上传产品白皮书PDF`，不得另建主导航或旁路演示页。
+- T0 固定为正式上市日；首发或预售日独立记录。E7X 默认首发预售日为 2026-05-08，T0 为 2026-05-29。
+- 白皮书处理链：标准 PDF 文本解析 → 千问提取候选 → DeepSeek 复核 → 页码与逐字引句硬校验。解析器不是第三个判断模型。
+- 只有 `dual_model_verified` 且当前穿透标签有匹配能力项时，产品证据才计入10分；扫描件、模型失败、页码错误、引句不存在或模型分歧均保持0分。
+- 结果保存在 `product_whitepaper_evidence`，隔离键为客户空间、版本、车型；`GET /api/product-whitepaper/latest` 用于刷新恢复。
+- 本地守护进程优先使用内置 Python 运行时，确保 `pypdf` 可用。若改用其他运行时，必须先安装 `requirements-bf-factory.txt`。
+- 界面验收必须覆盖 1440、1280 和移动宽度；不得出现页面级横向溢出、文字遮挡、按钮挤压或长引句越界。宽矩阵只能在自身滚动容器内滚动。
 
 ## 5. MMN Strategy Model
 
@@ -150,7 +161,8 @@ git@github.com:elliszhang0905-wq/MMN-Perception-Engine.git
 | 策略推理、竞品拆解、反方观点、逻辑压力测试 | 一个旗舰模型先输出主结论，前台先返回初版；另一个旗舰模型只作为后台 critic 复核 |
 | 中文交付、短视频脚本、PPT 文案、客户报告、长文档归纳 | 优先中文表达快速模型，深度质检按需后台触发 |
 | 参数、销量、价格、配置、上市时间等事实类问题 | 优先结构化数据库、RAG 和官方来源，模型只负责解释 |
-| 双模型结论冲突 | 标记“需人工复核”，保留主结论、critic意见、来源、置信度和人工最终选择 |
+| 车型参数与配置问题 | 在来源门禁之后，由千问、DeepSeek、Kimi 三个旗舰模型独立复核；三者必须全部完成并共同引用同一证据，否则标记“需人工复核” |
+| 多模型结论冲突 | 标记“需人工复核”，保留主结论、复核意见、来源、置信度和人工最终选择 |
 | 模型不可用或超时 | 使用缓存、备用模型；仍失败则使用 MMN 本地规则兜底 |
 
 任何新增模型能力都必须避免把单一模型原始答案直接暴露为最终策略结论。
@@ -373,6 +385,7 @@ YYYY-MM-DD_beta-1.01_功能名称.md
 | 模块 | 状态 | 注意事项 |
 | --- | --- | --- |
 | 决策驾驶舱 | 已具备数据导入、车型选择、诊断结果展示 | 车型切换必须刷新对应车型数据 |
+| T周期卖点市场匹配 | 已具备T周期、战略卖点、NSR竞品、白皮书产品证据和动作建议闭环 | 白皮书只采信双模型一致且可逐页定位的原文；产品证据按车型恢复 |
 | 声量数据中心 | 已有样本预览和标签诊断 | 后续需持续提升可视化和车型筛选 |
 | 垂媒竞争格局 | 支持汽车之家/懂车帝正反向排名导入 | 车型资产需保持品牌归属准确 |
 | 内容资产中心 | 已有内容看板、达人库、蒸馏入口 | 不得混淆车型内容库与达人库 |

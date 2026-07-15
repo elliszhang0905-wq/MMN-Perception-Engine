@@ -32,6 +32,14 @@ from concurrent.futures import ThreadPoolExecutor
 from bf_factory.exporters import export_brief_docx
 from bf_factory.generation import compose_section_plan, generate_internal_strategy, render_adaptive_brief
 from bf_factory.parsers import BFParseError, MAX_UPLOAD_BYTES, parse_document, validate_upload
+from product_whitepaper import (
+    dual_model_consensus,
+    extraction_prompt as product_whitepaper_extraction_prompt,
+    normalize_capabilities as normalize_product_capabilities,
+    readable_pdf_pages,
+    review_prompt as product_whitepaper_review_prompt,
+    select_product_pages,
+)
 from opportunity_pipeline import (
     UNIFIED_LABELS,
     build_competitor_product_summaries,
@@ -44,7 +52,7 @@ from opportunity_pipeline import (
     heat_scores,
 )
 from cockpit_decision_loop import derive_execution_recommendations
-from group_dashboard import build_group_dashboard_payload, merge_sales_payloads
+from group_dashboard import build_group_dashboard_payload, merge_sales_payloads, parse_cpca_ice_market
 from bf_factory.repository import (
     BFConflictError,
     BFNotFoundError,
@@ -73,7 +81,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-3"
+APP_VERSION_CODE = "beta-1.02-20260716-whitepaper-evidence-1"
 APP_RELEASE_DATE = "2026-07-16"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -91,6 +99,10 @@ QWEN_DEFAULT_DEEP_MODEL = "qwen3.7-max"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-reasoner"
+KIMI_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+KIMI_DEFAULT_MODEL = "kimi-k2.5"
+KIMI_DEFAULT_DEEP_MODEL = "kimi-k2.5"
+VEHICLE_CONFIG_VALIDATION_PROVIDERS = ("qwen", "deepseek", "kimi")
 MMN_ROUTER_CACHE_TTL = int(os.getenv("MMN_ROUTER_CACHE_TTL", "1800"))
 MMN_FAST_MODEL_TIMEOUT = int(os.getenv("MMN_FAST_MODEL_TIMEOUT", "35"))
 MMN_DEEP_MODEL_TIMEOUT = int(os.getenv("MMN_DEEP_MODEL_TIMEOUT", "75"))
@@ -122,6 +134,7 @@ MMN_STRATEGY_MODEL = {
         "strategy_reasoning": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN策略推理模型"},
         "content_delivery": {"primary": "qwen", "reviewer": "", "label": "MMN中文交付快速模型"},
         "fact_explanation": {"primary": "rag", "reviewer": "qwen", "label": "MMN事实解释模型"},
+        "vehicle_configuration_fact": {"primary": "rag", "reviewer": "qwen+deepseek+kimi", "label": "MMN汽车配置三模型验证"},
         "data_summary": {"primary": "qwen", "reviewer": "", "label": "MMN标签摘要快速模型"},
         "fast_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN快速策略"},
         "complex_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN深度策略"}
@@ -130,6 +143,7 @@ MMN_STRATEGY_MODEL = {
 DONGCHEDI_SALES_BASE = "https://www.dongchedi.com"
 SALES_CACHE = {"expires": "", "payload": None}
 GLOBAL_SALES_CACHE = {"expires": "", "payload": None}
+CPCA_FUEL_MARKET_CACHE = {"expires": "", "staleUntil": "", "fetchedAt": "", "payload": None}
 THAILAND_DB_PATH = Path(os.getenv("THAILAND_DB_PATH", str(ROOT.parent / "thailand-auto-market-data" / "data" / "sqlite" / "thailand_auto_market.db"))).expanduser().resolve()
 SOCIAL_PLUGIN_ID = os.getenv("SOCIAL_PLUGIN_ID", "dbichmdlbjdeplpkhcejgkakobjbjalc")
 SOCIAL_PLUGIN_EXPORT_DIRS = {
@@ -363,6 +377,7 @@ def init_db():
             evidence_needed text,
             source_text text not null,
             tags_json text not null default '[]',
+            highlights_json text not null default '[]',
             confidence text,
             knowledge_json text not null,
             created_at text not null,
@@ -643,6 +658,16 @@ def init_db():
         );
         create index if not exists idx_cockpit_execution_cycles_scope
         on cockpit_execution_cycles(org_id, edition, model, updated_at desc);
+        create table if not exists product_whitepaper_evidence (
+            org_id text not null,
+            edition text not null,
+            model text not null,
+            filename text not null default '',
+            result_json text not null default '{}',
+            created_at text not null,
+            updated_at text not null,
+            primary key (org_id, edition, model)
+        );
         """)
         migrate_vertical_scope_schema(conn)
         conn.execute("create unique index if not exists idx_vertical_rank_assets_unique on vertical_rank_assets(org_id, edition, platform, period, own_model, competitor_model)")
@@ -650,6 +675,7 @@ def init_db():
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
         ensure_column(conn, "content_capability_chunks", "content_breakdown_json", "text not null default '{}'")
+        ensure_column(conn, "model_judgment_assets", "highlights_json", "text not null default '[]'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
         conn.execute("""
             delete from vertical_rank_assets
@@ -1991,6 +2017,48 @@ def latest_dongchedi_sales_source(candidates):
     return path, payload, signature
 
 
+def cpca_fuel_market_payload():
+    """读取乘联会 FuelMarket 官方 JSON；失败时最多回退 24 小时内的成功结果。"""
+    cached = CPCA_FUEL_MARKET_CACHE.get("payload")
+    expires = CPCA_FUEL_MARKET_CACHE.get("expires") or ""
+    if cached is not None and expires > now():
+        return {
+            "payload": cached,
+            "fetchedAt": CPCA_FUEL_MARKET_CACHE.get("fetchedAt"),
+            "stale": False,
+        }
+    request = Request(
+        "https://data.cpcadata.com/api/chartlist?charttype=6",
+        headers={
+            "Accept": "application/json",
+            "Referer": "https://data.cpcadata.com/FuelMarket",
+            "User-Agent": "MMN-Market-Data/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=6) as response:
+            raw = response.read(2_000_001)
+        if len(raw) > 2_000_000:
+            raise ValueError("乘联会 FuelMarket 响应超过2MB限制")
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, list) or parse_cpca_ice_market(payload) is None:
+            raise ValueError("乘联会 FuelMarket 数据结构不完整")
+        fetched_at = now()
+        CPCA_FUEL_MARKET_CACHE["payload"] = payload
+        CPCA_FUEL_MARKET_CACHE["expires"] = cache_expires_at(30)
+        CPCA_FUEL_MARKET_CACHE["staleUntil"] = cache_expires_at(24 * 60)
+        CPCA_FUEL_MARKET_CACHE["fetchedAt"] = fetched_at
+        return {"payload": payload, "fetchedAt": fetched_at, "stale": False}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, HTTPError, URLError):
+        if cached is not None and (CPCA_FUEL_MARKET_CACHE.get("staleUntil") or "") > now():
+            return {
+                "payload": cached,
+                "fetchedAt": CPCA_FUEL_MARKET_CACHE.get("fetchedAt"),
+                "stale": True,
+            }
+        return None
+
+
 def dongchedi_sales_payload():
     latest_candidates = [
         ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
@@ -2588,6 +2656,23 @@ def deepseek_config(profile="default"):
         "deep_model": deepseek_model_for("deep")
     }
 
+def kimi_model_for(profile="default"):
+    profile = (profile or "default").lower()
+    if profile == "deep":
+        return env_value("KIMI_DEEP_MODEL", env_value("KIMI_MODEL", KIMI_DEFAULT_DEEP_MODEL))
+    return env_value("KIMI_MODEL", KIMI_DEFAULT_MODEL)
+
+def kimi_config(profile="default"):
+    api_key = env_value("KIMI_API_KEY")
+    profile = (profile or "default").lower()
+    return {
+        "configured": bool(api_key),
+        "base_url": env_value("KIMI_BASE_URL", KIMI_DEFAULT_BASE_URL).rstrip("/"),
+        "model": kimi_model_for(profile),
+        "profile": profile,
+        "deep_model": kimi_model_for("deep")
+    }
+
 def mmn_route_for(mode="fast"):
     return MMN_STRATEGY_MODEL["router"]["complex_strategy" if mode == "deep" else "fast_strategy"]
 
@@ -2617,9 +2702,12 @@ def infer_mmn_task_type(question="", mode="fast", explicit=""):
     explicit = str(explicit or "").strip()
     if explicit:
         return explicit
-    fact_terms = ["参数", "销量", "价格", "售价", "配置", "上市时间", "发布时间", "交付", "尺寸", "续航", "电池", "功率", "扭矩"]
+    vehicle_config_terms = ["参数", "配置", "尺寸", "轴距", "续航", "电池", "功率", "扭矩", "座椅", "智驾", "辅助驾驶", "悬架", "底盘", "轮毂", "轮胎", "音响"]
+    fact_terms = ["销量", "价格", "售价", "上市时间", "发布时间", "交付"]
     content_terms = ["短视频", "脚本", "PPT", "文案", "报告", "长文档", "周报", "发布会", "口播", "微博", "小红书"]
     strategy_terms = ["策略", "竞品", "拆解", "压力测试", "反方", "逻辑", "打法", "营销", "怎么打", "规划"]
+    if any(x in text for x in vehicle_config_terms):
+        return "vehicle_configuration_fact"
     if mode == "deep" or any(x in text for x in strategy_terms):
         return "strategy_reasoning"
     if any(x in text for x in fact_terms):
@@ -2635,6 +2723,8 @@ def route_for_task(task_type, mode="fast"):
         return MMN_STRATEGY_MODEL["router"]["content_delivery"]
     if task_type == "fact_explanation":
         return MMN_STRATEGY_MODEL["router"]["fact_explanation"]
+    if task_type == "vehicle_configuration_fact":
+        return MMN_STRATEGY_MODEL["router"]["vehicle_configuration_fact"]
     return MMN_STRATEGY_MODEL["router"]["data_summary"]
 
 TOPIC_PLANNING_TAXONOMY = [
@@ -3113,8 +3203,9 @@ def router_decision_payload(decision_id, org_id=""):
 
 def compact_reference_sources(references):
     items = []
-    for ref in (references or [])[:8]:
+    for index, ref in enumerate((references or [])[:8], 1):
         items.append({
+            "id": ref.get("id") or f"ref-{index}",
             "title": ref.get("title") or "",
             "source": ref.get("source") or "",
             "url": ref.get("metadata", {}).get("source_url") or ref.get("url") or "",
@@ -3129,7 +3220,7 @@ def model_task_prompt(question, project, references, task_type, role):
         if not str(key).startswith("_")
     }
     refs = compact_reference_sources(references)
-    if task_type == "fact_explanation":
+    if task_type in {"fact_explanation", "vehicle_configuration_fact"}:
         system = "你是MMN事实解释助手。事实只能来自给定结构化数据、RAG引用或官方来源；不得把模型常识当事实裁判。引用不足时必须明确写“需人工复核”。"
     elif task_type == "content_delivery":
         system = "你是MMN中文业务交付助手。输出要符合汽车营销咨询语气，适合客户报告、PPT、长文档或短视频脚本。"
@@ -3137,6 +3228,8 @@ def model_task_prompt(question, project, references, task_type, role):
         system = "你是MMN策略推理助手。按本品、竞品、用户情绪、产品属性、身份认同、认知空位、传播动作的流程输出。"
     if role == "reviewer":
         system += " 你的任务是复核主分析：检查中文业务语境、逻辑漏洞、反方观点、事实边界和需人工复核项，不要重写整份方案。"
+    if task_type == "vehicle_configuration_fact" and role == "reviewer":
+        system += " 只返回JSON对象：verdict只能是supported、unsupported或insufficient；evidenceIds必须引用输入中的来源ID；confidence为0到1；issues为问题数组；conclusion为一句话结论。不得使用模型自身记忆补全汽车配置。"
     return [
         {"role": "system", "content": system + MMN_OUTPUT_STYLE},
         {"role": "user", "content": json.dumps({
@@ -3159,13 +3252,90 @@ def model_task_prompt(question, project, references, task_type, role):
     ]
 
 def call_provider(provider, messages, task_type, mode="fast", reviewer=False):
-    profile = "deep" if task_type == "strategy_reasoning" or (reviewer and mode == "deep") else "fast"
-    temperature = .18 if reviewer or task_type == "fact_explanation" else .28
+    profile = "deep" if task_type in {"strategy_reasoning", "vehicle_configuration_fact"} or (reviewer and mode == "deep") else "fast"
+    temperature = .18 if reviewer or task_type in {"fact_explanation", "vehicle_configuration_fact"} else .28
     if provider == "deepseek":
         return call_deepseek(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT), max_tokens=1200)
     if provider == "qwen":
         return call_qwen(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT))
+    if provider == "kimi":
+        return call_kimi(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT), max_tokens=1200)
     raise ValueError(f"不支持的模型路由：{provider}")
+
+def normalize_vehicle_config_review(value):
+    item = value if isinstance(value, dict) else parse_json_object(value)
+    item = item if isinstance(item, dict) else {}
+    verdict = str(item.get("verdict") or "insufficient").strip().lower()
+    if verdict not in {"supported", "unsupported", "insufficient"}:
+        verdict = "insufficient"
+    try:
+        confidence = max(0.0, min(1.0, float(item.get("confidence") or 0)))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return {
+        "verdict": verdict,
+        "evidenceIds": sorted({str(x).strip() for x in (item.get("evidenceIds") or []) if str(x).strip()}),
+        "confidence": confidence,
+        "issues": [str(x).strip() for x in (item.get("issues") or []) if str(x).strip()],
+        "conclusion": str(item.get("conclusion") or "").strip()[:500],
+    }
+
+def cross_validate_vehicle_config_reviews(outputs, evidence_ids, errors=None):
+    errors = errors or {}
+    allowed_ids = {str(x) for x in (evidence_ids or []) if str(x)}
+    normalized = {provider: normalize_vehicle_config_review(outputs.get(provider)) for provider in VEHICLE_CONFIG_VALIDATION_PROVIDERS if outputs.get(provider)}
+    reasons = []
+    if not allowed_ids:
+        reasons.append("没有可追溯的结构化数据、RAG或官方来源")
+    if errors or len(normalized) != len(VEHICLE_CONFIG_VALIDATION_PROVIDERS):
+        reasons.append("三模型未全部完成")
+    evidence_sets = []
+    for provider in VEHICLE_CONFIG_VALIDATION_PROVIDERS:
+        item = normalized.get(provider)
+        if not item:
+            continue
+        if item["verdict"] != "supported":
+            reasons.append("至少一个模型未确认来源支持该配置结论")
+        cited = set(item["evidenceIds"])
+        if not cited:
+            reasons.append("至少一个模型未引用证据")
+        if not cited.issubset(allowed_ids):
+            reasons.append("至少一个模型引用了不存在的证据")
+        if item["confidence"] < 0.6:
+            reasons.append("至少一个模型置信度不足")
+        evidence_sets.append(cited & allowed_ids)
+    common_ids = sorted(set.intersection(*evidence_sets)) if len(evidence_sets) == len(VEHICLE_CONFIG_VALIDATION_PROVIDERS) and evidence_sets else []
+    if allowed_ids and not common_ids:
+        reasons.append("三个模型没有共同引用同一证据")
+    reasons = list(dict.fromkeys(reasons))
+    aligned = not reasons
+    confidence = min((item["confidence"] for item in normalized.values()), default=0.0)
+    return {
+        "status": "aligned" if aligned else "needs_human_review",
+        "label": "三模型一致" if aligned else "需人工复核",
+        "confidence": round(min(0.92, confidence), 3) if aligned else round(min(0.48, confidence), 3),
+        "similarity": 1 if aligned else 0,
+        "commonEvidenceIds": common_ids,
+        "reasons": reasons,
+        "reviews": normalized,
+    }
+
+def run_vehicle_config_reviews(question, project, references, primary_text):
+    outputs, errors = {}, {}
+    review_project = {**(project or {}), "主分析输出": primary_text}
+    prompt = model_task_prompt(question, review_project, references, "vehicle_configuration_fact", "reviewer")
+    for provider in VEHICLE_CONFIG_VALIDATION_PROVIDERS:
+        try:
+            outputs[provider] = normalize_vehicle_config_review(call_provider(provider, prompt, "vehicle_configuration_fact", "deep", reviewer=True))
+        except Exception as exc:
+            errors[provider] = str(exc)
+    evidence_ids = [item["id"] for item in compact_reference_sources(references)]
+    conflict = cross_validate_vehicle_config_reviews(outputs, evidence_ids, errors)
+    if conflict["status"] == "aligned":
+        review_text = "三模型交叉验证完成：三个旗舰模型均基于同一组可追溯证据支持该配置结论。"
+    else:
+        review_text = "三模型交叉验证未通过：" + "；".join(conflict["reasons"] or ["需人工复核"])
+    return review_text, conflict, outputs, errors
 
 def output_similarity(a, b):
     def tokens(s):
@@ -3180,7 +3350,7 @@ def detect_router_conflict(primary_text, reviewer_text, task_type, references):
     conflict_words = ["不同意", "存在漏洞", "不成立", "缺少依据", "需要复核", "需人工复核", "事实不足", "过度推断", "风险"]
     similarity = output_similarity(primary_text, reviewer_text)
     conflict = any(x in review for x in conflict_words) or similarity < .08
-    if task_type == "fact_explanation" and not references:
+    if task_type in {"fact_explanation", "vehicle_configuration_fact"} and not references:
         conflict = True
     return {
         "status": "needs_human_review" if conflict else "aligned",
@@ -3225,7 +3395,8 @@ def save_router_decision(record):
     return item_id
 
 def complete_router_review(decision_id, question, project, references, task_type, route, mode, reviewer):
-    if reviewer not in {"qwen", "deepseek"}:
+    is_vehicle_config = task_type == "vehicle_configuration_fact"
+    if reviewer not in {"qwen", "deepseek"} and not is_vehicle_config:
         return
     with ROUTER_REVIEW_LOCK:
         ROUTER_REVIEW_TASKS[decision_id] = {"status": "running", "startedAt": now()}
@@ -3234,15 +3405,20 @@ def complete_router_review(decision_id, question, project, references, task_type
         with db() as conn:
             row = conn.execute("select primary_output from model_router_decisions where id=?", (decision_id,)).fetchone()
         primary_text = row["primary_output"] if row else ""
-        review_prompt = model_task_prompt(question, {**(project or {}), "主分析输出": primary_text}, references, task_type, "reviewer")
-        reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
-        used_reviewer = reviewer
+        if is_vehicle_config:
+            reviewer_text, conflict, review_outputs, errors = run_vehicle_config_reviews(question, project, references, primary_text)
+            used_reviewer = "+".join(VEHICLE_CONFIG_VALIDATION_PROVIDERS)
+        else:
+            review_prompt = model_task_prompt(question, {**(project or {}), "主分析输出": primary_text}, references, task_type, "reviewer")
+            reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
+            used_reviewer = reviewer
     except Exception as exc:
         errors[reviewer] = str(exc)
         reviewer_text = "复核未完成：请人工检查逻辑漏洞、证据不足、竞品误判和策略风险。"
         used_reviewer = "manual-required"
         primary_text = primary_text if "primary_text" in locals() else ""
-    conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
+    if not is_vehicle_config or "conflict" not in locals():
+        conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
     stamp = now()
     with db() as conn:
         conn.execute("""
@@ -3255,7 +3431,14 @@ def complete_router_review(decision_id, question, project, references, task_type
             conflict["status"],
             conflict["confidence"],
             "pending" if conflict["status"] == "needs_human_review" else "not_required",
-            json.dumps({"source": "mmn_task_router", "task_type": task_type, "status": conflict["status"], "critic_errors": errors}, ensure_ascii=False),
+            json.dumps({
+                "source": "mmn_task_router",
+                "task_type": task_type,
+                "status": conflict["status"],
+                "critic_errors": errors,
+                "provider_reviews": review_outputs if is_vehicle_config and "review_outputs" in locals() else {},
+                "common_evidence_ids": conflict.get("commonEvidenceIds") or [],
+            }, ensure_ascii=False),
             stamp,
             decision_id
         ))
@@ -3263,7 +3446,7 @@ def complete_router_review(decision_id, question, project, references, task_type
         ROUTER_REVIEW_TASKS[decision_id] = {"status": "done", "finishedAt": stamp, "errors": errors}
 
 def enqueue_router_review(decision_id, question, project, references, task_type, route, mode, reviewer, force=False):
-    if reviewer not in {"qwen", "deepseek"}:
+    if reviewer not in {"qwen", "deepseek"} and task_type != "vehicle_configuration_fact":
         return False
     with ROUTER_REVIEW_LOCK:
         if not force and ROUTER_REVIEW_TASKS.get(decision_id, {}).get("status") == "running":
@@ -3302,16 +3485,25 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
             used_primary = "local-rag"
     reviewer_text = ""
     used_reviewer = reviewer or ""
-    should_async_review = async_review and reviewer in {"qwen", "deepseek"}
-    if reviewer in {"qwen", "deepseek"} and not should_async_review:
+    has_review_route = reviewer in {"qwen", "deepseek"} or task_type == "vehicle_configuration_fact"
+    should_async_review = async_review and has_review_route
+    if has_review_route and not should_async_review:
         try:
-            review_prompt = model_task_prompt(question, {**project, "主分析输出": primary_text}, references, task_type, "reviewer")
-            reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
+            if task_type == "vehicle_configuration_fact":
+                reviewer_text, conflict, review_outputs, review_errors = run_vehicle_config_reviews(question, project, references, primary_text)
+                errors.update(review_errors)
+                used_reviewer = "+".join(VEHICLE_CONFIG_VALIDATION_PROVIDERS)
+            else:
+                review_prompt = model_task_prompt(question, {**project, "主分析输出": primary_text}, references, task_type, "reviewer")
+                reviewer_text = call_provider(reviewer, review_prompt, task_type, mode, reviewer=True)
         except Exception as exc:
             errors[reviewer] = str(exc)
             reviewer_text = "复核未完成：请人工检查事实依据、逻辑漏洞和表达风险。"
             used_reviewer = "manual-required"
-    conflict = {"status": "review_pending", "label": "深度复核进行中", "confidence": .62, "similarity": 0} if should_async_review else detect_router_conflict(primary_text, reviewer_text, task_type, references)
+    if should_async_review:
+        conflict = {"status": "review_pending", "label": "深度复核进行中", "confidence": .62, "similarity": 0}
+    elif task_type != "vehicle_configuration_fact" or "conflict" not in locals():
+        conflict = detect_router_conflict(primary_text, reviewer_text, task_type, references)
     final_text = "\n\n".join([
         primary_text,
         f"MMN复核结论：{reviewer_text}" if reviewer_text else "",
@@ -3347,7 +3539,7 @@ def run_mmn_task_router(question, project=None, references=None, mode="fast", ta
         "modelLabel": route.get("label", "MMN多模型引擎"),
         "route": route,
         "conflict": conflict,
-        "reviewStatus": "queued" if review_queued else ("not_required" if not reviewer else "done"),
+        "reviewStatus": "queued" if review_queued else ("not_required" if not has_review_route else "done"),
         "asyncReview": bool(review_queued),
         "cacheTtlSeconds": MMN_ROUTER_CACHE_TTL,
         "references": references[:8],
@@ -3442,6 +3634,44 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
     choices = data.get("choices") or []
     if not choices:
         raise ValueError("DeepSeek 模型无响应。")
+    return choices[0]["message"]["content"]
+
+def call_kimi(messages, temperature=.6, profile="fast", timeout=None, max_tokens=None):
+    cfg = kimi_config(profile)
+    api_key = env_value("KIMI_API_KEY")
+    if not api_key:
+        raise ValueError("未配置 KIMI_API_KEY。请在 .env 中配置 Kimi API Key。")
+    deep = (profile or "").lower() == "deep"
+    body = {
+        "model": cfg["model"],
+        "messages": messages,
+        "temperature": 1.0 if deep else temperature,
+        "enable_thinking": deep,
+    }
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = Request(
+        cfg["base_url"] + "/chat/completions",
+        data=payload,
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=timeout or (120 if deep else 45)) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        if exc.code == 401:
+            raise ValueError("Kimi 请求未授权：KIMI_API_KEY 无效、过期或与当前服务地址不匹配。")
+        if exc.code == 403:
+            raise ValueError("Kimi 请求被拒绝：请检查百炼工作空间和 kimi-k2.5 模型权限。")
+        raise ValueError(f"Kimi 请求失败：HTTP {exc.code} {detail[:300]}")
+    except (TimeoutError, URLError) as exc:
+        raise ValueError(f"Kimi 请求超时或网络不可用：{exc}")
+    choices = data.get("choices") or []
+    if not choices:
+        raise ValueError("Kimi 模型无响应。")
     return choices[0]["message"]["content"]
 
 def executive_brief_evidence_packet():
@@ -4241,7 +4471,10 @@ def model_judgment_prompt(text, project):
         {"role": "system", "content": (
             "你是MMN营销引擎的车型判断资产分析模块。用户会输入一句或一段对某台车的市场/营销/传播判断。"
             "你必须识别品牌、车型、判断维度、核心观点、归因、策略动作、还缺什么证据，并输出JSON。"
-            "只返回JSON，不要Markdown。字段：brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, tags, confidence。"
+            "只返回JSON，不要Markdown。字段：brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, tags, confidence, highlights。"
+            "highlights是需要向管理层高亮的最小原文片段数组，最多4条；每条必须包含field、quote、level、reason。"
+            "field只能是viewpoint、attribution、strategy_implication或evidence_needed；quote必须逐字存在于对应字段，不得改写。"
+            "level只能是primary或secondary，primary最多1条；优先选商业结果、关键判断转折与明确行动，不要把整句全部高亮。"
             "dimension从市场/营销/传播/竞品/内容/渠道/产品/价格/用户心智/综合判断中选择最合适的一项。"
             "不要编造数据；如果车型或品牌不确定，用当前项目兜底并把confidence设为low。"
             + MMN_OUTPUT_STYLE
@@ -4267,12 +4500,186 @@ def local_model_judgment(text, project):
         "strategy_implication": "先把该判断拆成可验证证据，再决定内容、渠道和品牌传播口径优先级。",
         "evidence_needed": "需要补充平台声量、竞品对比、用户评论原文、市场反馈或转化线索。",
         "tags": ["车型判断", "人工观点", "MMN学习"],
-        "confidence": "low"
+        "confidence": "low",
+        "highlights": [],
     }
+
+MODEL_JUDGMENT_HIGHLIGHT_FIELDS = {
+    "viewpoint", "attribution", "strategy_implication", "evidence_needed"
+}
+
+def normalize_model_judgment_highlights(item):
+    """Keep only short, exact, non-overlapping quotes safe for UI highlighting."""
+    raw_items = item.get("highlights") if isinstance(item.get("highlights"), list) else []
+    normalized = []
+    occupied = {field: [] for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    field_counts = {field: 0 for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    field_chars = {field: 0 for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    primary_count = 0
+    seen = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        field = str(raw.get("field") or "").strip()
+        quote = str(raw.get("quote") or "").strip()
+        source = str(item.get(field) or "") if field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS else ""
+        if not source or len(quote) < 2 or len(quote) > 40 or quote not in source:
+            continue
+        key = (field, quote)
+        if key in seen or field_counts[field] >= 3:
+            continue
+        level = "primary" if str(raw.get("level") or "").lower() == "primary" else "secondary"
+        if level == "primary" and primary_count >= 1:
+            level = "secondary"
+        start = source.find(quote)
+        end = start + len(quote)
+        if any(start < used_end and end > used_start for used_start, used_end in occupied[field]):
+            continue
+        max_chars = max(10, int(len(source) * .35))
+        if field_chars[field] + len(quote) > max_chars:
+            continue
+        normalized.append({
+            "field": field,
+            "quote": quote,
+            "level": level,
+            "reason": str(raw.get("reason") or "").strip()[:80],
+        })
+        occupied[field].append((start, end))
+        field_counts[field] += 1
+        field_chars[field] += len(quote)
+        primary_count += int(level == "primary")
+        seen.add(key)
+        if len(normalized) >= 4:
+            break
+    item["highlights"] = normalized
+    return item
+
+def model_judgment_highlight_review_prompt(text, item, project):
+    candidate = {key: item.get(key) for key in (
+        "brand_name", "model_name", "dimension", "viewpoint", "attribution",
+        "strategy_implication", "evidence_needed", "highlights"
+    )}
+    return [
+        {"role": "system", "content": (
+            "你是MMN车型判断高亮的独立质检模型。检查候选判断是否忠于用户原文，并逐条审核highlights。"
+            "只返回JSON对象：approved(boolean)、issues(string数组)、highlights(数组)。"
+            "approved=true时，highlights只能保留候选中值得高亮的原文片段，逐字复制field、quote和level，并可以补充reason。"
+            "不得改写quote，不得新增候选中没有的高亮；如果判断越界或没有任何候选值得高亮，approved=false并说明issues。"
+        )},
+        {"role": "user", "content": json.dumps({
+            "input": text, "currentProject": project or {}, "candidate": candidate
+        }, ensure_ascii=False)},
+    ]
+
+def cross_checked_model_judgment_highlights(primary_item, reviewer_raw):
+    reviewer = parse_json_object(reviewer_raw)
+    if not isinstance(reviewer, dict) or reviewer.get("approved") is not True or reviewer.get("issues"):
+        return None
+    reviewed_item = dict(primary_item)
+    reviewed_item["highlights"] = reviewer.get("highlights") or []
+    normalize_model_judgment_highlights(reviewed_item)
+    reviewed_keys = {(entry["field"], entry["quote"]) for entry in reviewed_item["highlights"]}
+    consensus = [
+        entry for entry in primary_item.get("highlights") or []
+        if (entry["field"], entry["quote"]) in reviewed_keys
+    ]
+    return consensus or None
+
+def analyze_product_whitepaper(filename, data, model):
+    parsed = parse_document(filename, data)
+    pages = readable_pdf_pages(parsed)
+    if not pages:
+        raise ValueError("该PDF未识别到可引用文字；扫描版请先完成OCR后再上传。")
+    selected_pages = select_product_pages(pages)
+    base = {
+        "filename": parsed.get("filename") or filename,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "model": str(model or "待选择车型").strip(),
+        "totalPages": max(pages),
+        "readablePages": len(pages),
+        "analyzedPages": [item["page"] for item in selected_pages],
+        "warnings": parsed.get("warnings") or [],
+        "capabilities": [],
+        "draftCapabilities": [],
+        "models": {
+            "qwen": qwen_config("deep"),
+            "deepseek": deepseek_config("fast"),
+        },
+        "errors": {},
+    }
+    if not base["models"]["qwen"]["configured"] or not base["models"]["deepseek"]["configured"]:
+        base["status"] = "pending_model_configuration"
+        return base
+    try:
+        primary_raw = call_qwen(
+            [{"role": "user", "content": product_whitepaper_extraction_prompt(base["model"], selected_pages)}],
+            temperature=.05,
+            profile="deep",
+            timeout=75,
+            max_tokens=2400,
+            enable_thinking=False,
+        )
+        primary = normalize_product_capabilities(parse_json_object(primary_raw), pages)
+        base["draftCapabilities"] = primary
+        if not primary:
+            base["status"] = "parsed_no_verified_evidence"
+            base["errors"]["qwen"] = "模型未返回可在原页逐字定位的产品能力证据。"
+            return base
+    except Exception as exc:
+        base["status"] = "model_review_failed"
+        base["errors"]["qwen"] = str(exc)
+        return base
+    try:
+        reviewer_raw = call_deepseek(
+            [{"role": "user", "content": product_whitepaper_review_prompt(base["model"], primary, pages)}],
+            temperature=.02,
+            profile="fast",
+            timeout=75,
+            max_tokens=2400,
+            response_format={"type": "json_object"},
+        )
+        reviewer = normalize_product_capabilities(parse_json_object(reviewer_raw), pages)
+        base["capabilities"] = dual_model_consensus(primary, reviewer)
+    except Exception as exc:
+        base["errors"]["deepseek"] = str(exc)
+    base["status"] = "dual_model_verified" if base["capabilities"] else "model_review_failed"
+    return base
+
+def save_product_whitepaper_evidence(result, org_id="local", edition="china"):
+    model = str(result.get("model") or "").strip()
+    if not model:
+        raise ValueError("缺少白皮书对应车型。")
+    stamp = now()
+    with db() as conn:
+        conn.execute("""
+            insert into product_whitepaper_evidence
+            (org_id, edition, model, filename, result_json, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?)
+            on conflict(org_id, edition, model) do update set
+              filename=excluded.filename,
+              result_json=excluded.result_json,
+              updated_at=excluded.updated_at
+        """, (org_id, edition, model, result.get("filename") or "", json.dumps(result, ensure_ascii=False), stamp, stamp))
+    return result
+
+def load_product_whitepaper_evidence(model, org_id="local", edition="china"):
+    with db() as conn:
+        row = conn.execute("""
+            select result_json from product_whitepaper_evidence
+            where org_id=? and edition=? and model=?
+        """, (org_id, edition, str(model or "").strip())).fetchone()
+    if not row:
+        return None
+    try:
+        result = json.loads(row["result_json"] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return result if isinstance(result, dict) else None
 
 def save_model_judgment_asset(item, source_text, edition="china"):
     stamp = now()
     tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+    highlights = item.get("highlights") if isinstance(item.get("highlights"), list) else []
     item_id = stable_id("model-judgment", edition, item.get("brand_name"), item.get("model_name"), item.get("dimension"), source_text)
     knowledge = {
         "id": stable_id("model-judgment-knowledge", item_id),
@@ -4290,14 +4697,16 @@ def save_model_judgment_asset(item, source_text, edition="china"):
             "module": item.get("dimension") or "综合判断",
             "entity": item.get("model_name") or "",
             "brand": item.get("brand_name") or "",
-            "confidence": item.get("confidence") or "low"
+            "confidence": item.get("confidence") or "low",
+            "highlights": highlights,
+            "highlight_status": item.get("highlight_status") or "pending_review",
         }
     }
     with db() as conn:
         conn.execute("""
             insert into model_judgment_assets
-            (id, edition, brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, source_text, tags_json, confidence, knowledge_json, created_at, updated_at)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, edition, brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, source_text, tags_json, highlights_json, confidence, knowledge_json, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             on conflict(id) do update set
               brand_name=excluded.brand_name,
               model_name=excluded.model_name,
@@ -4307,6 +4716,7 @@ def save_model_judgment_asset(item, source_text, edition="china"):
               strategy_implication=excluded.strategy_implication,
               evidence_needed=excluded.evidence_needed,
               tags_json=excluded.tags_json,
+              highlights_json=excluded.highlights_json,
               confidence=excluded.confidence,
               knowledge_json=excluded.knowledge_json,
               updated_at=excluded.updated_at
@@ -4314,7 +4724,8 @@ def save_model_judgment_asset(item, source_text, edition="china"):
             item_id, edition, item.get("brand_name") or "", item.get("model_name") or "", item.get("dimension") or "",
             item.get("viewpoint") or "", item.get("attribution") or "", item.get("strategy_implication") or "",
             item.get("evidence_needed") or "", source_text, json.dumps(tags, ensure_ascii=False),
-            item.get("confidence") or "low", json.dumps(knowledge, ensure_ascii=False), stamp, stamp
+            json.dumps(highlights, ensure_ascii=False), item.get("confidence") or "low",
+            json.dumps(knowledge, ensure_ascii=False), stamp, stamp
         ))
     saved = {
         "id": item_id,
@@ -9801,6 +10212,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "db": str(DB_PATH)
             })
             return
+        if parsed.path == "/api/product-whitepaper/latest":
+            try:
+                if cloud_login_required() and not self.require_cloud_auth():
+                    return
+                query = parse_qs(parsed.query)
+                model = str(query.get("model", [""])[0] or "").strip()
+                if not model:
+                    raise ValueError("缺少车型参数。")
+                auth = self.current_auth() or {}
+                result = load_product_whitepaper_evidence(
+                    model,
+                    org_id=auth.get("org_id", "local"),
+                    edition=edition_from(query.get("edition", ["china"])[0]),
+                )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/auth/config":
             auth_payload = self.current_auth()
             self.send_json({
@@ -9904,6 +10333,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/ai/status":
             qcfg = qwen_config()
             dcfg = deepseek_config()
+            kcfg = kimi_config()
             ocfg = openai_config()
             self.send_json({
                 "ok": True,
@@ -9912,6 +10342,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "qwenDeep": {"configured": qcfg["configured"], "model": qwen_model_for("deep"), "baseUrl": qcfg["base_url"]},
                 "deepseek": {"configured": dcfg["configured"], "model": dcfg["model"], "baseUrl": dcfg["base_url"]},
                 "deepseekDeep": {"configured": dcfg["configured"], "model": deepseek_model_for("deep"), "baseUrl": dcfg["base_url"]},
+                "kimi": {"configured": kcfg["configured"], "model": kcfg["model"], "baseUrl": kcfg["base_url"]},
+                "kimiDeep": {"configured": kcfg["configured"], "model": kimi_model_for("deep"), "baseUrl": kcfg["base_url"]},
                 "openai": {"configured": ocfg["configured"], "model": ocfg["model"], "baseUrl": ocfg["base_url"]},
                 "rules": {"configured": True, "model": "MMN规则引擎"}
             })
@@ -10054,12 +10486,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         except (OSError, ValueError, TypeError, json.JSONDecodeError):
                             continue
                 sales_payload = merge_sales_payloads(sales_payloads)
+                fuel_snapshot = cpca_fuel_market_payload()
+                fuel_market = parse_cpca_ice_market(fuel_snapshot.get("payload")) if fuel_snapshot else None
+                if fuel_market:
+                    fuel_market["sourceFetchedAt"] = fuel_snapshot.get("fetchedAt")
+                    fuel_market["sourceStale"] = fuel_snapshot.get("stale") is True
                 with db() as conn:
                     payload = build_group_dashboard_payload(
                         conn,
                         sales_payload,
                         auth.get("org_id", "local"),
                         edition_from(q.get("edition", ["china"])[0]),
+                        fuel_market=fuel_market,
                     )
                 payload["executiveBrief"] = executive_brief_state(
                     force=str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
@@ -10341,6 +10779,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/ai/founder-talk",
                 "/api/ai/model-identities",
                 "/api/ai/model-judgment",
+                "/api/product-whitepaper/analyze",
                 "/api/ai/router-feedback",
                 "/api/ai/router-review",
                 "/api/agents/run",
@@ -10361,6 +10800,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/product-whitepaper/analyze":
+            try:
+                query = parse_qs(parsed.query)
+                filename = str(query.get("filename", ["产品白皮书.pdf"])[0] or "产品白皮书.pdf").strip()
+                model = str(query.get("model", [""])[0] or "").strip()
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if not filename.lower().endswith(".pdf"):
+                    raise ValueError("产品能力入口仅支持PDF格式白皮书。")
+                if length <= 0 or length > MAX_UPLOAD_BYTES:
+                    raise ValueError(f"PDF大小需在1字节至{MAX_UPLOAD_BYTES // 1024 // 1024}MB之间。")
+                result = analyze_product_whitepaper(filename, self.rfile.read(length), model)
+                auth = self.current_auth() or {}
+                save_product_whitepaper_evidence(
+                    result,
+                    org_id=auth.get("org_id", "local"),
+                    edition=edition_from(query.get("edition", ["china"])[0]),
+                )
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path.startswith("/api/creator-distillation/"):
             try:
                 auth = self.current_auth() or {}
@@ -11174,7 +11634,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "references": references[:8],
                     "errors": routed["errors"],
                     "qwen": qwen_config(mode),
-                    "deepseek": deepseek_config(mode)
+                    "deepseek": deepseek_config(mode),
+                    "kimi": kimi_config(mode)
                 })
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -11195,7 +11656,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 task_type = current.get("task_type") or "strategy_reasoning"
                 mode = "deep" if body.get("mode") == "deep" or task_type == "strategy_reasoning" else "fast"
                 route = route_for_task(task_type, mode)
-                reviewer = current.get("reviewer_provider") if current.get("reviewer_provider") in {"qwen", "deepseek"} else route.get("reviewer")
+                reviewer = current.get("reviewer_provider") if current.get("reviewer_provider") in {"qwen", "deepseek", "qwen+deepseek+kimi"} else route.get("reviewer")
                 queued = enqueue_router_review(decision_id, current.get("question") or "", project, references, task_type, route, mode, reviewer, force=True)
                 if not queued:
                     raise ValueError("当前任务没有可用的后台复核模型。")
@@ -11310,10 +11771,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     errors["qwen"] = str(exc)
                     item = local_model_judgment(text, project)
                     used_model = "local-rule"
+                if not isinstance(item, dict):
+                    item = local_model_judgment(text, project)
+                    used_model = "local-rule"
                 if not item.get("model_name"):
                     item["model_name"] = project.get("model") or "待识别车型"
                 if not item.get("brand_name"):
                     item["brand_name"] = project.get("brand") or infer_brand_from_model(item.get("model_name"))
+                normalize_model_judgment_highlights(item)
+                item["highlight_status"] = "pending_review"
+                if used_model != "local-rule" and item.get("highlights"):
+                    try:
+                        reviewer_raw = call_deepseek(
+                            model_judgment_highlight_review_prompt(text, item, project),
+                            temperature=.05,
+                            profile="fast",
+                            timeout=45,
+                            max_tokens=1000,
+                            response_format={"type": "json_object"},
+                        )
+                        consensus = cross_checked_model_judgment_highlights(item, reviewer_raw)
+                        if consensus:
+                            item["highlights"] = consensus
+                            item["highlight_status"] = "model_verified"
+                            used_model = "qwen+deepseek"
+                        else:
+                            item["highlights"] = []
+                            errors["deepseek_review"] = "质检模型未通过高亮候选"
+                    except Exception as exc:
+                        item["highlights"] = []
+                        errors["deepseek_review"] = str(exc)
+                else:
+                    item["highlights"] = []
                 normalize_model_identity_records([{
                     "rawName": item.get("model_name"),
                     "normalizedName": item.get("model_name"),

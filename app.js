@@ -90,6 +90,10 @@ let dashboardPlatformFilter="all";
 let summaryDashboardModels=[];
 let summaryNsrPlatform="全网";
 let summaryAttributePlatform="全网";
+let sellingPointActiveLabel="";
+let productWhitepaperUploadState={loading:false,error:""};
+let productWhitepaperRestoreKeys=new Set();
+let sellingPointActiveCompetitor="";
 let summaryPlatformPopoverCleanup=null;
 let summaryPlatformPopoverTrigger=null;
 let dashModelMenuOpen=false;
@@ -462,6 +466,13 @@ function upsertModelJudgment(item){
 }
 function modelJudgmentsFor(model=state.config.model){
  return (modelJudgments||[]).filter(x=>!model||x.model_name===model||x.model===model).sort((a,b)=>(b.created_at||b.createdAt||"").localeCompare(a.created_at||a.createdAt||""));
+}
+function renderModelHighlight(text,item,field){
+ const source=String(text??""),raw=item?.highlight_status==="model_verified"&&Array.isArray(item?.highlights)?item.highlights.filter(x=>x?.field===field):[],ranges=[];
+ raw.slice(0,3).forEach((candidate,index)=>{const quote=String(candidate?.quote||"").trim(),start=source.indexOf(quote);if(!quote||start<0||ranges.some(range=>start<range.end&&start+quote.length>range.start))return;ranges.push({start,end:start+quote.length,level:candidate?.level==="primary"||index===0?"primary":"secondary"})});
+ ranges.sort((a,b)=>a.start-b.start);
+ let cursor=0;
+ return ranges.map(range=>{const before=escapeHtml(source.slice(cursor,range.start)),marked=`<mark class="model-highlight ${range.level}">${escapeHtml(source.slice(range.start,range.end))}</mark>`;cursor=range.end;return before+marked}).join("")+escapeHtml(source.slice(cursor));
 }
 function loadModelIdentities(){try{return JSON.parse(localStorage.getItem(storageKey("mmnModelIdentities")))||{items:{},updatedAt:""}}catch{return{items:{},updatedAt:""}}}
 function saveModelIdentities(){localStorage.setItem(storageKey("mmnModelIdentities"),JSON.stringify(modelIdentities))}
@@ -1353,7 +1364,140 @@ function syncDashboardModelFromControls(){
  }
  return state.config.model;
 }
+function localIsoDate(){const now=new Date(),offset=now.getTimezoneOffset()*60000;return new Date(now-offset).toISOString().slice(0,10)}
+function defaultMarketingModelContext(model=state.config.model){
+ const isE7X=/\bE7X\b/i.test(String(model||""));
+ return{firstDate:isE7X?"2026-05-08":"",t0Date:isE7X?"2026-05-29":"",assessmentDate:localIsoDate(),selectedPhase:"auto",claims:[],competitors:{},productEvidence:null};
+}
+function marketingModelContextKey(model=state.config.model){
+ const context=opportunityCacheContext(),selected=String(model||"unselected").trim()||"unselected";
+ return[context.orgId,context.edition,selected].map(value=>encodeURIComponent(value)).join(":");
+}
+function loadMarketingModelContext(model=state.config.model){
+ const defaults=defaultMarketingModelContext(model);
+ try{const parsed=JSON.parse(opportunityStorageValue("mmnMarketingModelContext",marketingModelContextKey(model))||"null");return parsed&&typeof parsed==="object"?{...defaults,...parsed,claims:Array.isArray(parsed.claims)?parsed.claims:[],competitors:parsed.competitors&&typeof parsed.competitors==="object"?parsed.competitors:{}}:defaults}catch(_){return defaults}
+}
+function saveMarketingModelContext(value,model=state.config.model){
+ const next={...defaultMarketingModelContext(model),...(value||{}),claims:Array.isArray(value?.claims)?value.claims:[],competitors:value?.competitors&&typeof value.competitors==="object"?value.competitors:{}};
+ try{localStorage.setItem(opportunityScopedStorageKey("mmnMarketingModelContext",marketingModelContextKey(model)),JSON.stringify(next))}catch(_){}
+ return next;
+}
+function marketingModelPhase(context=loadMarketingModelContext()){
+ const offset=globalThis.MmnTCycle?.dayOffset(context.t0Date,context.assessmentDate),current=globalThis.MmnTCycle?.phaseForOffset(offset),selected=context.selectedPhase&&context.selectedPhase!=="auto"?globalThis.MmnTCycle?.phases.find(item=>item.key===context.selectedPhase):current;
+ return{offset,current,selected:selected||current||globalThis.MmnTCycle?.phases?.[0]||null};
+}
+function tCycleTopicStage(phase){return phase?`${phase.label}（${phase.range}）`:"周期待设置"}
+function renderTCyclePanel(){
+ const rail=document.querySelector("#t-cycle-rail"),currentLabel=document.querySelector("#t-cycle-current"),contextBox=document.querySelector("#t-cycle-context");if(!rail||!currentLabel||!contextBox||!globalThis.MmnTCycle)return;
+ if(rail.dataset.model!==state.config.model){rail.dataset.model=state.config.model;delete rail.dataset.positioned}
+ const context=loadMarketingModelContext(),phaseState=marketingModelPhase(context),actual=phaseState.current,selected=phaseState.selected,offset=phaseState.offset,tLabel=globalThis.MmnTCycle.tLabel(offset);
+ const firstInput=document.querySelector("#t-cycle-first-date"),t0Input=document.querySelector("#t-cycle-t0-date"),assessmentInput=document.querySelector("#t-cycle-assessment-date");
+ if(firstInput)firstInput.value=context.firstDate||"";if(t0Input)t0Input.value=context.t0Date||"";if(assessmentInput)assessmentInput.value=context.assessmentDate||localIsoDate();
+ currentLabel.textContent=context.t0Date&&actual?`${tLabel} · ${actual.label}`:"待设置T0";
+ const selectedDates=globalThis.MmnTCycle.phaseDates(context.t0Date,selected),total=selected?.end===null?null:selected?selected.end-selected.start+1:null,covered=selected&&Number.isFinite(offset)?Math.max(0,Math.min(total??Math.max(1,offset-selected.start+1),offset-selected.start+1)):0;
+ contextBox.innerHTML=`<div><span>分析车型</span><b>${escapeHtml(state.config.model)}</b></div><div><span>当前阶段</span><b>${escapeHtml(actual?`${tLabel} ${actual.label}`:"待设置")}</b></div><div><span>正在查看</span><b>${escapeHtml(selected?.label||"待设置")}</b></div><div><span>实际日期</span><b>${escapeHtml(selectedDates.start?`${selectedDates.start}${selectedDates.end?` — ${selectedDates.end}`:" 起"}`:"等待T0")}</b></div><div><span>数据进度</span><b>${context.t0Date&&selected?`${covered}${total?`/${total}`:""}天`:"待接入"}</b></div>`;
+ rail.innerHTML=globalThis.MmnTCycle.phases.map(phase=>{const dates=globalThis.MmnTCycle.phaseDates(context.t0Date,phase),isActual=actual?.key===phase.key,isSelected=selected?.key===phase.key,status=!Number.isFinite(offset)?"waiting":isActual?"current":phase.end!==null&&offset>phase.end?"completed":offset<phase.start?"upcoming":"current";return`<button type="button" class="t-cycle-card ${status} ${isSelected?"selected":""}" data-t-cycle-phase="${escapeAttr(phase.key)}" aria-pressed="${isSelected?"true":"false"}"><span>${escapeHtml(phase.label)}</span><b>${escapeHtml(phase.range)}</b><small>${escapeHtml(dates.start?`${dates.start.slice(5)}${dates.end?`—${dates.end.slice(5)}`:"起"}`:"日期待设置")}</small><em>${status==="current"?"当前阶段":status==="completed"?"已完成":status==="upcoming"?"未开始":"待设置"}</em></button>`}).join("");
+ const topicStage=document.querySelector("#dashboard-topic-stage");if(topicStage&&selected)topicStage.value=tCycleTopicStage(selected);
+ rail.querySelectorAll("[data-t-cycle-phase]").forEach(button=>button.onclick=()=>{const next=loadMarketingModelContext();next.selectedPhase=button.dataset.tCyclePhase;saveMarketingModelContext(next);renderTCyclePanel();renderSellingPointDecisionWorkbench();const topic=document.querySelector("#dashboard-topic-stage"),chosen=globalThis.MmnTCycle.phases.find(item=>item.key===next.selectedPhase);if(topic)topic.value=tCycleTopicStage(chosen)});
+ const activeCard=rail.querySelector(".t-cycle-card.selected");if(activeCard&&!rail.dataset.positioned){rail.dataset.positioned="true";requestAnimationFrame(()=>activeCard.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}))}
+}
+function bindTCyclePanel(){
+ const saveButton=document.querySelector("#t-cycle-save");if(saveButton)saveButton.onclick=()=>{const context=loadMarketingModelContext();context.firstDate=document.querySelector("#t-cycle-first-date")?.value||"";context.t0Date=document.querySelector("#t-cycle-t0-date")?.value||"";context.assessmentDate=document.querySelector("#t-cycle-assessment-date")?.value||localIsoDate();context.selectedPhase="auto";saveMarketingModelContext(context);const rail=document.querySelector("#t-cycle-rail");if(rail)delete rail.dataset.positioned;renderTCyclePanel();renderSellingPointDecisionWorkbench();toast("T周期已更新")};
+ document.querySelectorAll("[data-t-cycle-scroll]").forEach(button=>button.onclick=()=>document.querySelector("#t-cycle-rail")?.scrollBy({left:Number(button.dataset.tCycleScroll)*320,behavior:"smooth"}));
+}
+const SELLING_POINT_LAUNCH_MODELS=["奥迪E7X","奥迪E5 Sportback","智己LS8","MG4","荣威i6","别克至境E7","ID.ERA 9X","尚界Z7"];
+let sellingPointInputModel="",sellingPointInputCollapsed=false;
+function sellingPointLabels(context=loadMarketingModelContext(),model=state.config.model){
+ return [...new Set([...(context.claims||[]).map(item=>item.tag),...(state.rows||[]).filter(row=>row[0]===model).map(row=>row[4]),...OPPORTUNITY_REVIEW_LABELS].filter(Boolean))];
+}
+function renderSellingPointInput(){
+ const panel=document.querySelector("#dashboard-selling-point-input"),body=document.querySelector("#selling-point-input-body"),modelSelect=document.querySelector("#selling-point-model-select"),toggle=document.querySelector("#selling-point-panel-toggle"),list=document.querySelector("#selling-point-list"),status=document.querySelector("#selling-point-input-status"),options=document.querySelector("#selling-point-tag-options"),form=document.querySelector("#selling-point-form");if(!panel||!body||!modelSelect||!toggle||!list||!status||!options||!form)return;
+ const models=[...new Set([state.config.model,...SELLING_POINT_LAUNCH_MODELS].filter(Boolean))];if(!models.includes(sellingPointInputModel))sellingPointInputModel=state.config.model||models[0]||"";modelSelect.innerHTML=models.map(model=>`<option value="${escapeAttr(model)}" ${model===sellingPointInputModel?"selected":""}>${escapeHtml(model)}</option>`).join("");
+ const context=loadMarketingModelContext(sellingPointInputModel),claims=context.claims||[],labels=sellingPointLabels(context,sellingPointInputModel);options.innerHTML=labels.map(label=>`<option value="${escapeAttr(label)}"></option>`).join("");status.textContent=`${sellingPointInputModel||"未选择车型"} · ${claims.length?`${claims.length}条卖点映射`:"等待卖点"}`;
+ panel.classList.toggle("collapsed",sellingPointInputCollapsed);body.hidden=sellingPointInputCollapsed;toggle.textContent=sellingPointInputCollapsed?"重新打开":"关闭";toggle.setAttribute("aria-expanded",sellingPointInputCollapsed?"false":"true");list.setAttribute("aria-label",`${sellingPointInputModel}的卖点映射列表`);
+ list.innerHTML=claims.length?claims.map(item=>`<article class="selling-point-map-card"><div><span>品牌语言 · ${escapeHtml(item.model||sellingPointInputModel)}</span><b>${escapeHtml(item.claim)}</b></div><i aria-hidden="true">→</i><div><span>标准标签</span><b>${escapeHtml(item.tag||"待映射")}</b></div><i aria-hidden="true">→</i><div><span>用户语言</span><b>${escapeHtml(item.userLanguage||"待补充")}</b></div><button type="button" data-selling-point-delete="${escapeAttr(item.id)}" aria-label="删除${escapeAttr(item.model||sellingPointInputModel)}卖点映射">删除</button></article>`).join(""):`<div class="selling-point-empty"><b>${escapeHtml(sellingPointInputModel)}暂未录入集团卖点</b><span>选择该车型后，可直接建立“品牌语言 → 标准标签 → 用户语言”映射，不影响其他车型数据。</span></div>`;
+ modelSelect.onchange=()=>{sellingPointInputModel=modelSelect.value;renderSellingPointInput()};toggle.onclick=()=>{sellingPointInputCollapsed=!sellingPointInputCollapsed;renderSellingPointInput();if(!sellingPointInputCollapsed)modelSelect.focus()};
+ form.onsubmit=event=>{event.preventDefault();const data=new FormData(form),claim=String(data.get("claim")||"").trim();if(!claim)return;const next=loadMarketingModelContext(sellingPointInputModel);next.claims=[...(next.claims||[]),{id:`claim_${Date.now()}`,model:sellingPointInputModel,claim,tag:String(data.get("tag")||"").trim(),userLanguage:String(data.get("userLanguage")||"").trim()}];saveMarketingModelContext(next,sellingPointInputModel);form.reset();renderSellingPointInput();renderSellingPointDecisionWorkbench();toast(`${sellingPointInputModel}企业卖点映射已保存`)};
+ list.querySelectorAll("[data-selling-point-delete]").forEach(button=>button.onclick=()=>{const next=loadMarketingModelContext(sellingPointInputModel);next.claims=(next.claims||[]).filter(item=>item.id!==button.dataset.sellingPointDelete);saveMarketingModelContext(next,sellingPointInputModel);renderSellingPointInput();renderSellingPointDecisionWorkbench()});
+}
+function activeSellingPointSignal(label){return dashboardDecisionSignals().find(item=>item.label===label)||null}
+function sellingPointCompetitorOptions(signal){
+ const configured=String(state.config.competitor||"").split(/[\/、,]/).map(item=>item.trim()),vertical=dashboardLatestCompetitorRows().slice(0,8).map(item=>item.competitor),scored=(signal?.rivals||[]).map(item=>item.model);
+ return [...new Set([signal?.best?.model,...scored,...vertical,...configured].filter(item=>item&&item!==state.config.model))];
+}
+function sellingPointPlanningCompetitors(){
+ const context=loadMarketingModelContext(),selected=context.competitors?.[sellingPointActiveLabel]||sellingPointActiveCompetitor,configured=String(state.config.competitor||"").split(/[\/、,]/).map(item=>item.trim());return[...new Set([selected,...configured].filter(Boolean))];
+}
+function sellingPointSignalForCompetitor(signal,competitor){
+ if(!signal)return null;const rival=(signal.rivals||[]).find(item=>item.model===competitor);return{...signal,best:rival||null,gap:rival?signal.ownAvg-rival.score:null};
+}
+function parseMarketingDateRange(value){
+ const dates=String(value||"").match(/\d{4}[.\/-]\d{1,2}[.\/-]\d{1,2}/g)||[],iso=dates.slice(0,2).map(value=>{const [year,month,day]=value.split(/[.\/-]/).map(Number);return`${String(year).padStart(4,"0")}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`});return iso.length===2?{start:iso[0],end:iso[1]}:null;
+}
+function productEvidenceForLabel(context,label){
+ const stateResult=state?.productWhitepaperEvidence?.[state.config.model],result=stateResult&&typeof stateResult==="object"?stateResult:context?.productEvidence&&typeof context.productEvidence==="object"?context.productEvidence:null,capabilities=Array.isArray(result?.capabilities)?result.capabilities:[],items=capabilities.filter(item=>item.label===label);
+ return{result,items,verified:result?.status==="dual_model_verified"&&items.length>0};
+}
+async function restoreProductWhitepaperEvidence(model=state.config.model){
+ const key=`${edition}:${model}`;if(productWhitepaperRestoreKeys.has(key))return;productWhitepaperRestoreKeys.add(key);
+ try{
+  const payload=await api(`/api/product-whitepaper/latest?${new URLSearchParams({model,edition})}`);if(!payload?.result)return;
+  state.productWhitepaperEvidence={...(state.productWhitepaperEvidence||{}),[model]:payload.result};const context=loadMarketingModelContext(model);context.productEvidence=payload.result;saveMarketingModelContext(context,model);if(state.config.model===model)renderSellingPointDecisionWorkbench();
+ }catch(_){productWhitepaperRestoreKeys.delete(key)}
+}
+async function uploadProductWhitepaper(file){
+ if(!file)return;
+ if(!/\.pdf$/i.test(file.name)){toast("请选择PDF格式的产品白皮书");return}
+ const uploadModel=state.config.model;productWhitepaperUploadState={loading:true,error:""};renderSellingPointDecisionWorkbench();
+ try{
+  const query=new URLSearchParams({filename:file.name,model:uploadModel,edition:state.edition||"china"}),response=await fetch(`/api/product-whitepaper/analyze?${query}`,{method:"POST",headers:authHeaders({"Content-Type":file.type||"application/pdf"}),body:await file.arrayBuffer()}),payload=await response.json().catch(()=>({}));
+  if(!response.ok||!payload.ok)throw new Error(payload.error||"白皮书解析失败");
+  const next=loadMarketingModelContext(uploadModel);next.productEvidence=payload.result;saveMarketingModelContext(next,uploadModel);state.productWhitepaperEvidence={...(state.productWhitepaperEvidence||{}),[uploadModel]:payload.result};save();productWhitepaperUploadState={loading:false,error:""};renderSellingPointDecisionWorkbench();
+  const count=payload.result?.capabilities?.length||0;toast(count?`白皮书已完成双旗舰复核：${count}条产品证据`:`白皮书已解析，暂未形成双旗舰一致证据`);
+ }catch(error){productWhitepaperUploadState={loading:false,error:error.message||"白皮书解析失败"};renderSellingPointDecisionWorkbench();toast(`白皮书上传失败：${productWhitepaperUploadState.error}`)}
+}
+function sellingPointMarketingMatch({context,phaseState,signal,claim}){
+ const dataLabel=dashboardTimeDimension(),dataRange=parseMarketingDateRange(dataLabel),phaseDates=globalThis.MmnTCycle?.phaseDates(context.t0Date,phaseState.selected),assessment=context.assessmentDate,phaseEnd=phaseDates?.end||assessment,expectedEnd=assessment&&phaseEnd&&assessment<phaseEnd?assessment:phaseEnd;
+ let cycleRatio=null;if(dataRange&&phaseDates?.start&&expectedEnd&&expectedEnd>=phaseDates.start){const expectedDays=globalThis.MmnTCycle.dayOffset(phaseDates.start,expectedEnd)+1,overlapStart=dataRange.start>phaseDates.start?dataRange.start:phaseDates.start,overlapEnd=dataRange.end<expectedEnd?dataRange.end:expectedEnd,overlapDays=overlapEnd>=overlapStart?globalThis.MmnTCycle.dayOffset(overlapStart,overlapEnd)+1:0;cycleRatio=expectedDays>0?Math.max(0,Math.min(1,overlapDays/expectedDays)):null}
+ const productEvidence=productEvidenceForLabel(context,sellingPointActiveLabel),cyclePoints=cycleRatio===null?0:Math.round(cycleRatio*35),nsrPoints=signal?.best?35:signal?18:0,claimPoints=claim?.userLanguage?20:claim?10:0,productPoints=productEvidence.verified?10:0,score=cyclePoints+nsrPoints+claimPoints+productPoints,status=score>=75?"高匹配":score>=50?"部分匹配":signal?"低匹配":"暂不可判断",tone=score>=75?"strong":score>=50?"partial":"risk",period=phaseState.selected?.label||"当前T阶段";
+ const cycleNote=cycleRatio===null?"缺少可识别的数据周期，暂不能校验":cycleRatio>=.8?`${dataLabel}覆盖当前${period}考核窗口`:cycleRatio>0?`${dataLabel}仅覆盖当前${period}的${Math.round(cycleRatio*100)}%`:`${dataLabel}未覆盖当前${period}考核窗口`;
+ return{score,status,tone,cyclePoints,nsrPoints,claimPoints,productPoints,cycleNote};
+}
+function sellingPointDecision(signal){
+ if(!signal)return{tone:"pending",title:"等待用户感知数据",action:"先补充该标签的提及量、正负样本与NSR，再进入机会判断。"};
+ if(!signal.best||signal.gap===null)return{tone:"pending",title:"等待所选竞品同维NSR",action:"本品已有用户感知，但所选竞品缺少同标签NSR，暂不能判断领先或弱势。"};
+ const positive=signal.ownAvg>=.6,leading=signal.gap===null?null:signal.gap>=0;
+ if(positive&&leading!==false)return{tone:"strength",title:"已打透｜持续放大",action:"保持核心表达，并用产品事实与真实用户证词扩大相对优势。"};
+ if(positive&&leading===false)return{tone:"opportunity",title:"口碑机会｜重点追赶",action:"用户评价健康，但竞品占位更强；增加差异化内容与同场景对比。"};
+ if(!positive&&leading)return{tone:"opportunity",title:"相对机会｜先建正面认知",action:"本品尚未形成正面感知，但相对竞品仍有空间；先修正用户理解。"};
+ return{tone:"risk",title:"弱势卖点｜优先修复",action:"用户评价与竞品对比均不利，先补产品证据或调整表达，不建议直接放大。"};
+}
+function renderSellingPointDecisionWorkbench(){
+ const controls=document.querySelector("#selling-point-decision-controls"),evidenceBox=document.querySelector("#selling-point-evidence"),actionBox=document.querySelector("#selling-point-action");if(!controls||!evidenceBox||!actionBox)return;
+ const context=loadMarketingModelContext(),labels=sellingPointLabels(context),preferred=sellingPointActiveLabel||summaryAttributeActiveLabel||context.claims?.find(item=>item.tag)?.tag||labels[0]||"";sellingPointActiveLabel=labels.includes(preferred)?preferred:labels[0]||"";restoreProductWhitepaperEvidence(state.config.model);
+ const phaseState=marketingModelPhase(context),rawSignal=activeSellingPointSignal(sellingPointActiveLabel),competitorOptions=sellingPointCompetitorOptions(rawSignal),storedCompetitor=context.competitors?.[sellingPointActiveLabel]||"",preferredCompetitor=[storedCompetitor,sellingPointActiveCompetitor,rawSignal?.best?.model,competitorOptions[0]].find(item=>competitorOptions.includes(item));sellingPointActiveCompetitor=preferredCompetitor||"";
+ const signal=sellingPointSignalForCompetitor(rawSignal,sellingPointActiveCompetitor),claim=(context.claims||[]).find(item=>item.tag===sellingPointActiveLabel),decision=sellingPointDecision(signal),competitor=sellingPointActiveCompetitor||"暂无可选竞品",gap=signal?.gap,period=phaseState.selected?.label||"周期待设置",tPeriod=phaseState.selected?`${globalThis.MmnTCycle?.tLabel(phaseState.offset)||""} · ${period}`:period;
+ controls.innerHTML=`<label><span>穿透标签</span><select id="selling-point-active-label">${labels.map(label=>`<option value="${escapeAttr(label)}" ${label===sellingPointActiveLabel?"selected":""}>${escapeHtml(label)}</option>`).join("")}</select></label><div><span>当前车型</span><b>${escapeHtml(state.config.model)}</b></div><div><span>当前周期</span><b>${escapeHtml(tPeriod)}</b></div><label><span>选择对标车型</span><select id="selling-point-active-competitor" ${competitorOptions.length?"":"disabled"}>${competitorOptions.length?competitorOptions.map(model=>`<option value="${escapeAttr(model)}" ${model===sellingPointActiveCompetitor?"selected":""}>${escapeHtml(model)}</option>`).join(""):'<option>暂无可选竞品</option>'}</select></label>`;
+ const productEvidence=productEvidenceForLabel(context,sellingPointActiveLabel),productResult=productEvidence.result,productPages=[...new Set(productEvidence.items.map(item=>item.page))],productStatus=productWhitepaperUploadState.loading?"pending":productEvidence.verified?"verified":productResult?.readablePages?"partial":productWhitepaperUploadState.error?"risk":"pending",productDetail=productWhitepaperUploadState.loading?"正在解析PDF并由双旗舰提取、复核产品能力…":productEvidence.verified?`双旗舰已验证 ${productEvidence.items.length} 条 · 白皮书 P${productPages.join("/P")}`:productResult?.status==="pending_model_configuration"?`PDF已解析 ${productResult.readablePages} 页 · 等待双旗舰模型配置`:productResult?.readablePages?`PDF已解析 ${productResult.readablePages} 页 · 当前标签暂无双旗舰一致证据`:productWhitepaperUploadState.error?productWhitepaperUploadState.error:"上传产品白皮书，自动生成可追溯产品能力证据";
+ const match=sellingPointMarketingMatch({context,phaseState,signal,claim}),evidence=[
+  {name:"市场事实",status:match.cyclePoints===35?"verified":match.cyclePoints>0?"partial":context.t0Date?"risk":"pending",detail:context.t0Date?match.cycleNote:"等待T0、销量/搜索/线索数据"},
+  {name:"用户感知",status:signal?"verified":"pending",detail:signal?`属性NSR ${(signal.ownAvg*100).toFixed(1)}% · ${signal.evidence.label}`:"等待该标签的提及量与NSR"},
+  {name:"竞品表现",status:signal?.best?"verified":"pending",detail:signal?.best?`${competitor} · ${gap>=0?"领先":"落后"}${Math.abs(gap*100).toFixed(1)}%`:"等待垂媒正反向与同标签竞品"},
+  {name:"产品能力",status:productStatus,statusLabel:productEvidence.verified?"已验证":productResult?.readablePages?"已解析":"待接入",detail:productDetail,product:true},
+  {name:"传播内容",status:claim?.userLanguage?"partial":"pending",detail:claim?.userLanguage?`已建立用户语言：${claim.userLanguage}`:"等待企业卖点与用户语言映射"}
+ ];
+ evidenceBox.innerHTML=`<div class="selling-point-column-title"><span>02 五类证据</span><b>为什么落在这个位置</b></div><div class="selling-point-evidence-list">${evidence.map(item=>`<article class="${item.status} ${item.product?"product-whitepaper-evidence":""}"><header><b>${escapeHtml(item.name)}</b><em>${escapeHtml(item.statusLabel||(item.status==="verified"?"已验证":item.status==="partial"?"部分验证":item.status==="risk"?"周期不匹配":"待接入"))}</em></header><p>${escapeHtml(item.detail)}</p>${item.product?`<input type="file" id="product-whitepaper-file" accept="application/pdf,.pdf" hidden><button type="button" class="product-whitepaper-upload" id="product-whitepaper-upload" ${productWhitepaperUploadState.loading?"disabled":""}>${productWhitepaperUploadState.loading?"双旗舰分析中…":productResult?"重新上传产品白皮书PDF":"上传产品白皮书PDF"}</button>${productEvidence.items.length?`<ul class="product-whitepaper-citations">${productEvidence.items.slice(0,3).map(capability=>`<li><b>${escapeHtml(capability.claim)}</b><details><summary>P${capability.page} · 查看白皮书原文</summary><span>“${escapeHtml(capability.quote)}”</span></details></li>`).join("")}</ul>`:""}`:""}</article>`).join("")}</div>`;
+ const readiness=evidence.filter(item=>item.status==="verified").length,claimStatus=claim?`${escapeHtml(claim.claim)} → ${escapeHtml(claim.tag||"待映射")}`:"尚未与集团战略卖点建立映射";
+ actionBox.innerHTML=`<div class="selling-point-column-title"><span>03 机会与动作</span><b>下一步应该做什么</b></div><article class="selling-point-action-card ${decision.tone}"><span>阶段性机会判断</span><h3>${escapeHtml(decision.title)}</h3><p>${escapeHtml(decision.action)}</p><section class="selling-point-match-summary ${match.tone}" aria-label="初步营销匹配度"><header><div><small>初步营销匹配度</small><b>${match.score}<em>/100</em></b></div><strong>${match.status}</strong></header><div><span>周期数据 <b>${match.cyclePoints}/35</b></span><span>NSR竞品 <b>${match.nsrPoints}/35</b></span><span>战略卖点 <b>${match.claimPoints}/20</b></span><span>产品证据 <b>${match.productPoints}/10</b></span></div><p>${escapeHtml(match.cycleNote)}</p></section><dl><div><dt>集团卖点</dt><dd>${claimStatus}</dd></div><div><dt>对标车型</dt><dd>${escapeHtml(competitor)}</dd></div><div><dt>证据成熟度</dt><dd>${readiness}/5项已验证</dd></div><div><dt>应用周期</dt><dd>${escapeHtml(tPeriod)}</dd></div></dl><button type="button" class="secondary" id="selling-point-to-topic" ${signal?.best?"":"disabled"}>带入营销动作建议</button></article><p class="selling-point-guardrail">匹配度权重：周期数据35、NSR竞品35、战略卖点20、产品证据10。它衡量当前动作依据是否完整，不等同于销量或转化结果。</p>`;
+ const selector=document.querySelector("#selling-point-active-label");if(selector)selector.onchange=()=>{sellingPointActiveLabel=selector.value;summaryAttributeActiveLabel=selector.value;renderSellingPointDecisionWorkbench()};
+ const competitorSelector=document.querySelector("#selling-point-active-competitor");if(competitorSelector)competitorSelector.onchange=()=>{sellingPointActiveCompetitor=competitorSelector.value;const next=loadMarketingModelContext();next.competitors={...(next.competitors||{}),[sellingPointActiveLabel]:sellingPointActiveCompetitor};saveMarketingModelContext(next);renderSellingPointDecisionWorkbench()};
+ const whitepaperButton=document.querySelector("#product-whitepaper-upload"),whitepaperInput=document.querySelector("#product-whitepaper-file");if(whitepaperButton&&whitepaperInput){whitepaperButton.onclick=()=>whitepaperInput.click();whitepaperInput.onchange=()=>uploadProductWhitepaper(whitepaperInput.files?.[0])}
+ const topicButton=document.querySelector("#selling-point-to-topic");if(topicButton)topicButton.onclick=()=>{const goal=document.querySelector("#dashboard-topic-goal"),stage=document.querySelector("#dashboard-topic-stage");if(goal)goal.value=`围绕${sellingPointActiveLabel}，对标${competitor}，${decision.action}`;if(stage)stage.value=tCycleTopicStage(phaseState.selected);document.querySelector("#dashboard-topic-planner")?.scrollIntoView({behavior:"smooth",block:"start"});toast("已带入营销动作建议")};
+}
 function renderDashboard(a){
+	 renderTCyclePanel();
+	 bindTCyclePanel();
+	 renderSellingPointInput();
 	 renderDashboardCompetitorTrend();
 	 renderDashboardProductProof();
 	 renderDashboardStrategyChoice();
@@ -1362,6 +1506,7 @@ function renderDashboard(a){
 	 renderDashboardData(a);
  renderDashboardCognition(a);
  renderOpportunityMap(a);
+	 renderSellingPointDecisionWorkbench();
  renderCockpitDecisionLoop();
 }
 
@@ -1404,7 +1549,7 @@ function renderDashboardCompetitorTrend(){
 }
 function dashboardDecisionSignals(){
  const model=state.config.model,competitors=dashboardLatestCompetitorRows(model).map(x=>x.competitor),labels=[...new Set((state.rows||[]).filter(r=>r[0]===model&&r[4]).map(r=>r[4]))];
- return labels.map(label=>{const ownScores=attributeSourceScores(state.rows,model,label),ownAvg=meanNumbers(ownScores.map(item=>item.score));if(ownAvg===null)return null;const rivals=competitors.map(competitor=>({model:competitor,score:meanNumbers(attributeSourceScores(state.rows,competitor,label).map(item=>item.score))})).filter(item=>item.score!==null),best=rivals.sort((a,b)=>b.score-a.score)[0],evidence=attributeEvidenceStatus(state.rows,label,model),gap=best?ownAvg-best.score:null;return{label,ownAvg,best,evidence,gap}}).filter(Boolean).sort((a,b)=>Math.abs(b.gap||0)-Math.abs(a.gap||0));
+ return labels.map(label=>{const ownScores=attributeSourceScores(state.rows,model,label),ownAvg=meanNumbers(ownScores.map(item=>item.score));if(ownAvg===null)return null;const rivals=competitors.map(competitor=>({model:competitor,score:meanNumbers(attributeSourceScores(state.rows,competitor,label).map(item=>item.score))})).filter(item=>item.score!==null).sort((a,b)=>b.score-a.score),best=rivals[0],evidence=attributeEvidenceStatus(state.rows,label,model),gap=best?ownAvg-best.score:null;return{label,ownAvg,best,rivals,evidence,gap}}).filter(Boolean).sort((a,b)=>Math.abs(b.gap||0)-Math.abs(a.gap||0));
 }
 function dashboardProductEvidenceTask(label){
  const text=String(label||"");
@@ -1730,9 +1875,10 @@ function renderDashboardTopicPlanner(a=analysis()){
  const box=document.querySelector("#dashboard-topic-plan");
  if(!box)return;
  const model=state.config.model;
- const competitor=state.config.competitor||"核心竞品";
+ const competitor=sellingPointPlanningCompetitors().join(" / ")||"核心竞品";
  const stage=document.querySelector("#dashboard-topic-stage");
- if(stage&&!state.config.stage)state.config.stage=stage.value||"上市中";
+ const selectedPhase=marketingModelPhase().selected;if(stage&&selectedPhase)stage.value=tCycleTopicStage(selectedPhase);
+ if(stage)state.config.stage=stage.value||"周期待设置";
  if(dashboardTopicPlanState.loading){
   box.innerHTML=`<div class="topic-plan-loading"><b>MMN正在生成车型传播选题规划</b><span>${model} · ${competitor} · ${state.config.targetIdentity||"目标人群"}</span></div>`;
   return;
@@ -1787,7 +1933,7 @@ async function runDashboardTopicPlanning(){
  renderDashboardTopicPlanner();
  try{
 	  const report=reportPayload();
-	  const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+	  const competitors=sellingPointPlanningCompetitors();
 	  const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
 	  const planningPayload=dashboardTopicPlanningPayload({model,stage,platform,goal,report,competitors,coreSellingPoints});
 		  const question=[
@@ -1809,7 +1955,7 @@ async function runDashboardTopicPlanning(){
   toast("MMN深度策略已生成车型传播选题规划");
 	 }catch(err){
   const report=reportPayload();
-  const competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);
+  const competitors=sellingPointPlanningCompetitors();
   const coreSellingPoints=(report.knowhow||[]).slice(0,8).map(x=>x.label||x.message).filter(Boolean);
   const fallback=buildLocalDashboardTopicPlan(dashboardTopicPlanningPayload({model,stage,platform,goal,report,competitors,coreSellingPoints}),err.message);
   dashboardTopicPlanState={loading:false,result:fallback,error:""};
@@ -1820,7 +1966,7 @@ async function runDashboardTopicPlanning(){
 function renderModelJudgmentWorkbench(){
  const box=document.querySelector("#model-judgment-result");if(!box)return;
  const items=modelJudgmentsFor(state.config.model).slice(0,5);
- box.innerHTML=items.length?`<div class="model-judgment-list">${items.map(item=>`<article class="model-judgment-card"><div><span>${item.dimension||"综合判断"} · ${item.brand_name||state.config.brand}</span><b>${item.model_name||state.config.model}</b></div><p>${item.viewpoint||item.source_text||""}</p><dl><dt>归因</dt><dd>${item.attribution||"待补充"}</dd><dt>策略动作</dt><dd>${item.strategy_implication||"待补充"}</dd><dt>还缺证据</dt><dd>${item.evidence_needed||"待补充"}</dd></dl><small>${(item.tags||[]).slice(0,8).map(x=>`#${x}`).join(" ")}｜${(item.created_at||item.createdAt||"").slice(0,10)}</small></article>`).join("")}</div>`:`<p class="empty">还没有沉淀到 ${state.config.model} 的车型判断。你可以直接输入一句判断，MMN会自动拆成车型资产。</p>`;
+ box.innerHTML=items.length?`<div class="model-judgment-list">${items.map(item=>`<article class="model-judgment-card"><div><span>${escapeHtml(item.dimension||"综合判断")} · ${escapeHtml(item.brand_name||state.config.brand)}</span><b>${escapeHtml(item.model_name||state.config.model)}</b></div><p>${renderModelHighlight(item.viewpoint||item.source_text||"",item,"viewpoint")}</p><dl><dt>归因</dt><dd>${renderModelHighlight(item.attribution||"待补充",item,"attribution")}</dd><dt>策略动作</dt><dd>${renderModelHighlight(item.strategy_implication||"待补充",item,"strategy_implication")}</dd><dt>还缺证据</dt><dd>${renderModelHighlight(item.evidence_needed||"待补充",item,"evidence_needed")}</dd></dl><small>${item.highlight_status==="model_verified"?"✓ 模型认定后已标注重点 · ":""}${(item.tags||[]).slice(0,8).map(x=>`#${escapeHtml(x)}`).join(" ")}｜${escapeHtml((item.created_at||item.createdAt||"").slice(0,10))}</small></article>`).join("")}</div>`:`<p class="empty">还没有沉淀到 ${escapeHtml(state.config.model)} 的车型判断。你可以直接输入一句判断，MMN会自动拆成车型资产。</p>`;
 }
 const emotionQuadrantDefinitions=[
  {key:"active-positive",title:"高唤醒正向",subtitle:"正向效价 · 高表达强度"},
@@ -2035,7 +2181,7 @@ function renderSummaryHeatDashboard(a){
  document.querySelectorAll("[data-summary-heat-model]").forEach(row=>row.onclick=event=>{event.stopPropagation();openSummaryPlatformPopover(row.dataset.summaryHeatModel,row)});
  document.querySelectorAll("[data-summary-nsr-model]").forEach(row=>row.onclick=event=>{event.stopPropagation();openSummaryNsrPopover(row.dataset.summaryNsrModel,row)});
  document.querySelectorAll("[data-summary-attribute-model]").forEach(cell=>cell.onclick=event=>{event.stopPropagation();openSummaryAttributePopover(cell.dataset.summaryAttributeModel,cell.dataset.summaryAttributeLabel,cell)});
- document.querySelectorAll("[data-summary-attribute-item]").forEach(item=>item.onclick=()=>{summaryAttributeActiveLabel=item.dataset.summaryAttributeItem;summaryAttributeEvidenceExpanded=false;renderSummaryHeatDashboard(a)});
+ document.querySelectorAll("[data-summary-attribute-item]").forEach(item=>item.onclick=()=>{summaryAttributeActiveLabel=item.dataset.summaryAttributeItem;sellingPointActiveLabel=summaryAttributeActiveLabel;summaryAttributeEvidenceExpanded=false;renderSummaryHeatDashboard(a);renderSellingPointDecisionWorkbench()});
  document.querySelectorAll("[data-summary-attribute-category]").forEach(category=>category.onclick=()=>{summaryAttributeActiveCategory=category.dataset.summaryAttributeCategory;summaryAttributeActiveLabel="";summaryAttributeEvidenceExpanded=false;resetSummaryQuadrantCollapse();renderSummaryHeatDashboard(a)});
  document.querySelectorAll("[data-summary-quadrant-expand]").forEach(button=>button.onclick=()=>{const key=button.dataset.summaryQuadrantExpand;summaryAttributeCollapsedQuadrants.delete(key);summaryAttributeExpandedQuadrants.add(key);renderSummaryHeatDashboard(a)});
  document.querySelectorAll("[data-summary-quadrant-collapse]").forEach(button=>button.onclick=()=>{const key=button.dataset.summaryQuadrantCollapse;summaryAttributeExpandedQuadrants.delete(key);summaryAttributeCollapsedQuadrants.add(key);renderSummaryHeatDashboard(a)});

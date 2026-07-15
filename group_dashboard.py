@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -98,6 +99,74 @@ def _period_key(label):
     return 0, 0, 0
 
 
+def parse_cpca_ice_market(payload):
+    """解析乘联会 FuelMarket 的 ICE 批发/零售月度量与份额。"""
+    if not isinstance(payload, list):
+        return None
+    rows_by_period = {}
+    for section in payload:
+        for item in (section.get("dataList") or []) if isinstance(section, dict) else []:
+            ice = item.get("ICE") if isinstance(item, dict) else None
+            match = re.fullmatch(r"(20\d{2})-(\d{1,2})月", str(item.get("月份") or "").strip()) if isinstance(item, dict) else None
+            if not match or not isinstance(ice, list) or len(ice) < 4:
+                continue
+            try:
+                year, month = int(match.group(1)), int(match.group(2))
+                values = [float(value) for value in ice[:4]]
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= month <= 12 or not all(math.isfinite(value) for value in values):
+                continue
+            wholesale, retail, wholesale_share, retail_share = values
+            if wholesale < 0 or retail < 0 or not 0 <= wholesale_share <= 100 or not 0 <= retail_share <= 100:
+                continue
+            period = f"{year:04d}-{month:02d}"
+            rows_by_period[period] = {
+                "period": period,
+                "wholesaleSales": round(wholesale * 10000),
+                "retailSales": round(retail * 10000),
+                "wholesaleShare": round(wholesale_share / 100, 4),
+                "retailShare": round(retail_share / 100, 4),
+            }
+    rows = list(rows_by_period.values())
+    rows.sort(key=lambda item: item["period"])
+    if len(rows) < 2:
+        return None
+    previous, latest = rows[-2:]
+    previous_year, previous_month = map(int, previous["period"].split("-"))
+    latest_year, latest_month = map(int, latest["period"].split("-"))
+    if latest_year * 12 + latest_month - (previous_year * 12 + previous_month) != 1:
+        return None
+    retail_change = (
+        (latest["retailSales"] - previous["retailSales"]) / previous["retailSales"]
+        if previous["retailSales"]
+        else None
+    )
+    wholesale_change = (
+        (latest["wholesaleSales"] - previous["wholesaleSales"]) / previous["wholesaleSales"]
+        if previous["wholesaleSales"]
+        else None
+    )
+    return {
+        "status": "available",
+        "latestPeriod": latest["period"],
+        "previousPeriod": previous["period"],
+        "retailSales": latest["retailSales"],
+        "previousRetailSales": previous["retailSales"],
+        "retailShare": latest["retailShare"],
+        "previousRetailShare": previous["retailShare"],
+        "changeRate": round(retail_change, 4) if retail_change is not None else None,
+        "shareChangePoints": round((latest["retailShare"] - previous["retailShare"]) * 100, 1),
+        "wholesaleSales": latest["wholesaleSales"],
+        "previousWholesaleSales": previous["wholesaleSales"],
+        "wholesaleShare": latest["wholesaleShare"],
+        "previousWholesaleShare": previous["wholesaleShare"],
+        "wholesaleChangeRate": round(wholesale_change, 4) if wholesale_change is not None else None,
+        "sourceLabel": "乘联会 FuelMarket",
+        "sourceUrl": "https://data.cpcadata.com/FuelMarket",
+    }
+
+
 def _canonical_launch(model_name):
     value = str(model_name or "").strip()
     for launch in LAUNCH_MODELS:
@@ -124,6 +193,34 @@ def _sales_items(payload):
     return payload.get("items") or payload.get("records") or []
 
 
+def _sales_model_key(row):
+    return str(row.get("normalized_series_name") or row.get("series_name") or "").strip()
+
+
+def _derive_fuel_periods(grouped):
+    """在独立燃油榜缺失时，从全国总榜 Top10 排除新能源车型。"""
+    derived_periods = set()
+    energy_keys = ("new_energy", "ev", "phev", "erev")
+    for period, overall_rows in grouped.get("series", {}).items():
+        if period in grouped.get("fuel", {}):
+            continue
+        energy_models = {
+            _sales_model_key(row)
+            for key in energy_keys
+            for row in grouped.get(key, {}).get(period, [])
+            if _sales_model_key(row)
+        }
+        if not energy_models:
+            continue
+        grouped["fuel"][period] = [
+            row
+            for row in sorted(overall_rows, key=lambda item: item.get("rank") or 999)[:10]
+            if _sales_model_key(row) not in energy_models
+        ]
+        derived_periods.add(period)
+    return derived_periods
+
+
 def merge_sales_payloads(payloads):
     """合并不同周期的销量快照，并按稳定记录标识去重。"""
     unique = {}
@@ -146,8 +243,10 @@ def build_segment_cards(sales_payload):
     for item in items:
         key = str(item.get("rank_type") or "")
         period = str(item.get("period_start") or "")
-        if key in labels and period:
+        if (key in labels or key in {"series", "new_energy"}) and period:
             grouped[key][period].append(item)
+
+    derived_fuel_periods = _derive_fuel_periods(grouped)
 
     cards = []
     for key, label in labels.items():
@@ -158,7 +257,14 @@ def build_segment_cards(sales_payload):
         previous_rows = sorted(grouped[key].get(previous_period, []), key=lambda row: row.get("rank") or 999)[:10]
         latest_total = sum(int(row.get("sales_volume") or row.get("sales") or 0) for row in latest_rows)
         previous_total = sum(int(row.get("sales_volume") or row.get("sales") or 0) for row in previous_rows)
-        change_rate = ((latest_total - previous_total) / previous_total) if previous_total else None
+        data_basis = "overall_top10_minus_new_energy" if key == "fuel" and latest_period in derived_fuel_periods else "independent_rank"
+        previous_data_basis = "overall_top10_minus_new_energy" if key == "fuel" and previous_period in derived_fuel_periods else "independent_rank"
+        comparison_basis_changed = bool(previous_period and data_basis != previous_data_basis)
+        change_rate = (
+            ((latest_total - previous_total) / previous_total)
+            if previous_total and not comparison_basis_changed
+            else None
+        )
         saic_rows = [
             {
                 "rank": row.get("rank"),
@@ -183,8 +289,15 @@ def build_segment_cards(sales_payload):
                 "sales": int(latest_rows[0].get("sales_volume") or latest_rows[0].get("sales") or 0),
             } if latest_rows else None),
             "saicTop10": saic_rows,
-            "status": "available" if latest_rows else "missing",
-            "scopeNote": "懂车帝细分榜 Top10，非全市场份额",
+            "status": "available" if latest_rows or latest_period in derived_fuel_periods else "missing",
+            "dataBasis": data_basis,
+            "previousDataBasis": previous_data_basis,
+            "comparisonBasisChanged": comparison_basis_changed,
+            "scopeNote": (
+                "懂车帝全国总榜 Top10 排除同期新能源榜车型后的燃油车型，非燃油独立榜、非全市场份额"
+                if data_basis == "overall_top10_minus_new_energy"
+                else "懂车帝细分榜 Top10，非全市场份额"
+            ),
         })
     return cards
 
@@ -200,6 +313,53 @@ def build_market_dimensions(sales_payload):
         }
         for dimension in MARKET_DIMENSIONS
     ]
+
+
+def apply_cpca_fuel_market(market_dimensions, fuel_market):
+    if not fuel_market or fuel_market.get("status") != "available" or not market_dimensions:
+        return market_dimensions
+    fuel = next((item for item in market_dimensions[0].get("items", []) if item.get("key") == "fuel"), None)
+    if not fuel:
+        return market_dimensions
+    original_basis = fuel.get("dataBasis")
+    saic_rank_period = fuel.get("latestPeriod")
+    saic_rank_basis = (
+        "missing"
+        if fuel.get("status") != "available" or not saic_rank_period
+        else "dongchedi_fuel_top10"
+        if original_basis == "independent_rank"
+        else "dongchedi_national_overall_top10"
+    )
+    fuel.update({
+        "latestPeriod": fuel_market["latestPeriod"],
+        "previousPeriod": fuel_market["previousPeriod"],
+        "marketSales": fuel_market["retailSales"],
+        "previousMarketSales": fuel_market["previousRetailSales"],
+        "marketShare": fuel_market["retailShare"],
+        "previousMarketShare": fuel_market["previousRetailShare"],
+        "shareChangePoints": fuel_market["shareChangePoints"],
+        "changeRate": fuel_market["changeRate"],
+        "wholesaleSales": fuel_market["wholesaleSales"],
+        "wholesaleChangeRate": fuel_market["wholesaleChangeRate"],
+        "status": "available",
+        "dataBasis": "cpca_ice_retail_market",
+        "previousDataBasis": "cpca_ice_retail_market",
+        "comparisonBasisChanged": False,
+        "sourceLabel": "乘联会 ICE 零售",
+        "sourceUrl": fuel_market["sourceUrl"],
+        "sourceFetchedAt": fuel_market.get("sourceFetchedAt"),
+        "sourceStale": fuel_market.get("sourceStale") is True,
+        "saicRankBasis": saic_rank_basis,
+        "saicRankPeriod": saic_rank_period,
+        "scopeNote": (
+            "乘联会 ICE 零售整体市场销量与份额；懂车帝车型榜暂未接入，当前不判断上汽车型是否进入榜单"
+            if saic_rank_basis == "missing"
+            else "乘联会 ICE 零售整体市场销量与份额；上汽车型名次来自懂车帝燃油榜，两套来源的月份分别标注"
+            if saic_rank_basis == "dongchedi_fuel_top10"
+            else "乘联会 ICE 零售整体市场销量与份额；上汽车型名次来自懂车帝全国总榜，不代表燃油榜名次，两套来源的月份分别标注"
+        ),
+    })
+    return market_dimensions
 
 
 def _rows_with_demo_fallback(conn, sql, org_id, edition, params=()):
@@ -286,8 +446,9 @@ def _vertical_signals(conn, org_id, edition):
     return output, fallback
 
 
-def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="china"):
+def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="china", fuel_market=None):
     market_dimensions = build_market_dimensions(sales_payload)
+    apply_cpca_fuel_market(market_dimensions, fuel_market)
     product_evaluation = load_e7x_product_evaluation()
     social, social_fallback = _latest_social_by_model(conn, org_id, edition)
     voc, vertical_fallback = _vertical_signals(conn, org_id, edition)
@@ -331,8 +492,8 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
         "launches": launches,
         "productEvaluation": product_evaluation,
         "methodology": [
-            "市场结构：按懂车帝的能源形式、轿车级别、SUV级别和MPV级别分别展示 Top10 近期变化。",
-            "能源形式严格拆分纯电、插混、增程和燃油；当前源未提供燃油独立榜，因此保留为待接入。",
+            "市场结构：纯电、插混、增程及车身级别采用懂车帝 Top10；燃油采用乘联会 ICE 零售整体市场月度数据。",
+            "燃油卡的销量、环比与份额来自乘联会 FuelMarket；上汽车型名次仅来自懂车帝全国总榜，不表述为燃油榜名次。",
             "营销声量：已存 TikHub 公开社媒样本的内容量与互动热度，未采集车型明确留空。",
             "VOC：懂车帝与汽车之家正反向对比排名，仅作为用户比较行为信号。",
             "E7X产品评价：来自 AUDI E7X等5车产品评价_0710_v2.xlsx，数据期为2026年6月；声量、互动量和NSR均沿用工作簿定义。",

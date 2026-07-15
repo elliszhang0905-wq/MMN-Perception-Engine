@@ -3,7 +3,7 @@
  if(!mount)return;
  const ranges={"24h":"24小时","7d":"7天","30d":"30天"};
  const RECOGNITION_DELAY_MS=300;
- const state={range:"24h",view:"videos"};
+ const state={range:"24h",view:"videos",rankingExpanded:false};
  const rankingState={};
  const rankingRequests={};
  const recognitionState={};
@@ -211,6 +211,12 @@
  function videoRows(){return currentItems().map((item,index)=>`<li class="douyin-hot-row"><span class="douyin-hot-rank">${index+1}</span>${videoCover(item)}<div class="douyin-hot-content"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.author)}${item.tags?.length?` · ${item.tags.map(tag=>`<span>#${escapeHtml(tag)}</span>`).join(" ")}`:""}</p><div class="douyin-hot-metrics"><span>播放 <b>${fmt(item.playCount)}</b></span><span>点赞 <b>${fmt(item.likeCount)}</b></span><span>评论 <b>${fmt(item.commentCount)}</b></span><span>分享 <b>${fmt(item.shareCount)}</b></span></div><div class="douyin-entity-chips">${entityChips(item)}${manualEditButton(item)}</div></div><p class="douyin-hot-signal"><span>走红信号</span>${escapeHtml(signal(item))}</p></li>`).join("")}
  function topicRows(){return currentItems().map((item,index)=>`<li class="douyin-hot-row topic"><span class="douyin-hot-rank">${index+1}</span><div class="douyin-hot-cover" aria-hidden="true"><b>#</b><small>${escapeHtml(item.title)}</small></div><div class="douyin-hot-content"><h3>#${escapeHtml(item.title)}</h3><p>投稿创作者 ${fmt(item.creatorCount)} 人 · 投稿 ${fmt(item.publishCount)} 条</p><div class="douyin-hot-metrics"><span>播放 <b>${fmt(item.playCount)}</b></span><span>点赞 <b>${fmt(item.likeCount)}</b></span><span>评论 <b>${fmt(item.commentCount)}</b></span><span>分享 <b>${fmt(item.shareCount)}</b></span></div><div class="douyin-entity-chips">${entityChips(item)}${manualEditButton(item)}</div></div><p class="douyin-hot-signal"><span>传播含义</span>${escapeHtml(signal(item))}</p></li>`).join("")}
 
+ function rankingPreview(){
+  const items=currentItems().slice(0,3),total=currentItems().length;
+  const preview=items.length?items.map((item,index)=>`<span><b>${index+1}</b><em>${state.view==="topics"?"#":""}${escapeHtml(item.title)}</em></span>`).join(""):`<span class="empty"><em>榜单数据同步后可在这里快速预览前三名</em></span>`;
+  return `<button type="button" class="douyin-ranking-preview" data-ranking-toggle aria-expanded="false" aria-controls="douyin-ranking-content"><span class="douyin-ranking-preview__items"><small>TOP 3 快览</small>${preview}</span><span class="douyin-ranking-preview__action"><em>${total?`共 ${total} 条`:`查看榜单`}</em><strong>展开完整榜单<i aria-hidden="true"></i></strong></span></button>`;
+ }
+
  function insight(){const copy={"24h":["用于捕捉突发爆款和快速升温的话题。","结合24小时排名变化，判断内容是否仍在加速。","优先下钻高互动视频的封面、标题和评论。"],"7d":["用于判断内容结构是否持续，而非只看单条爆发。","对比品牌车型的上榜次数与最高排名。","把稳定高热主题与现有NSR机会交叉验证。"],"30d":["用于识别稳定母题、创作者供给和长期品牌占位。","与7天榜对比，区分长期热门与近期异动。","月度热度属于传播证据，不直接代表购车需求或销量。"]};return `<aside class="douyin-hot-insight"><span class="douyin-hot-insight__eyebrow">MMN 传播信号</span><h3>${ranges[state.range]}热点怎么用</h3><ol>${copy[state.range].map(text=>`<li>${escapeHtml(text)}</li>`).join("")}</ol><div><b>策略边界</b><p>榜单说明“有人在看、在聊、在参与”，不直接等于市场需求、购车意向或销量。</p></div></aside>`}
 
  function listBody(){
@@ -222,14 +228,15 @@
  }
 
  function bind(){
-  mount.querySelectorAll("[data-hot-view]").forEach(button=>button.onclick=()=>{state.view=button.dataset.hotView;manualReviewState.open=false;render();setTimeout(requestRecognition,RECOGNITION_DELAY_MS)});
-  mount.querySelectorAll("[data-hot-range]").forEach(button=>button.onclick=()=>{state.range=button.dataset.hotRange;manualReviewState.open=false;render();loadRange(state.range)});
+  mount.querySelectorAll("[data-hot-view]").forEach(button=>button.onclick=()=>{state.view=button.dataset.hotView;state.rankingExpanded=false;manualReviewState.open=false;render();setTimeout(requestRecognition,RECOGNITION_DELAY_MS)});
+  mount.querySelectorAll("[data-hot-range]").forEach(button=>button.onclick=()=>{state.range=button.dataset.hotRange;state.rankingExpanded=false;manualReviewState.open=false;render();loadRange(state.range)});
   mount.querySelectorAll(".douyin-hot-cover img").forEach(image=>image.onerror=()=>{const cover=image.closest(".douyin-hot-cover");cover?.classList.remove("has-image");if(cover&&!cover.querySelector("b")){const label=document.createElement("b");label.textContent="封面失效";cover.insertBefore(label,cover.querySelector("i"))}image.remove()});
   mount.querySelector("[data-collector-connect]")?.addEventListener("click",connectCollector);
   mount.querySelector("[data-collector-sync]")?.addEventListener("click",()=>startCollectorSync(false));
   mount.querySelector("[data-collector-force]")?.addEventListener("click",()=>startCollectorSync(true));
   mount.querySelector("[data-manual-review-open]")?.addEventListener("click",()=>openManualReview());
   mount.querySelectorAll("[data-manual-edit]").forEach(button=>button.addEventListener("click",()=>openManualReview(button.dataset.manualEdit)));
+  mount.querySelector("[data-ranking-toggle]")?.addEventListener("click",()=>{state.rankingExpanded=!state.rankingExpanded;render();mount.querySelector("[data-ranking-toggle]")?.focus()});
   mount.querySelector("[data-manual-review-close]")?.addEventListener("click",closeManualReview);
   mount.querySelectorAll("[data-manual-review-item]").forEach(button=>button.addEventListener("click",()=>{manualReviewState.selectedId=button.dataset.manualReviewItem;manualReviewState.error="";manualReviewState.message="";render()}));
   mount.querySelector("[data-manual-confirm]")?.addEventListener("click",()=>submitManualReview("confirm"));
@@ -238,7 +245,8 @@
 
  function render(){
   const snapshot=currentSnapshot(),source=safeHttpUrl(snapshot?.sourceUrl),capturedDate=snapshot?.capturedAt?new Date(snapshot.capturedAt):null,captured=capturedDate&&!Number.isNaN(capturedDate.getTime())?capturedDate.toLocaleString("zh-CN",{hour12:false}):(snapshot?.capturedAt||"尚未同步");
-  mount.innerHTML=`<article class="panel douyin-hot-panel"><header class="douyin-hot-head"><div><span>DOUYIN AUTO PULSE</span><h2 id="douyin-hot-title">抖音汽车热点</h2><p>热门视频与热门话题双榜，帮助客户快速看清近期内容风向。</p></div><div class="douyin-collector-actions"><em class="${collectorState.browserOpen?"connected":""}"><i></i>${collectorState.browserOpen?"采集器窗口已连接":"抖音账号未连接"}</em><button type="button" data-collector-connect>${collectorState.browserOpen?"重新打开登录窗口":"连接抖音账号"}</button><button type="button" class="primary" data-collector-sync ${!collectorState.browserOpen||collectorRunning()||collectorState.freshToday?"disabled":""}>${collectorRunning()?"同步进行中…":collectorState.freshToday?"今日已更新":"更新今日榜单"}</button><button type="button" data-collector-force ${!collectorState.browserOpen||collectorRunning()?"disabled":""}>强制刷新</button></div></header>${collectorProgress()}<div class="douyin-hot-controls">${tabs()}</div>${summary()}${entityRadar()}${manualReviewPanel()}<div class="douyin-hot-layout"><section class="douyin-hot-list" aria-live="polite"><div class="douyin-hot-list__head"><b>${state.view==="videos"?"热门视频排行榜":"热门话题排行榜"}</b><span>${ranges[state.range]} · 汽车类目 · 按播放热度 · 同步于 ${escapeHtml(captured)}</span></div>${listBody()}</section>${insight()}</div><footer><span>刷新频率：每日一次，同时更新24小时、7天与30天六个榜单；登录不会触发重复抓取。</span>${source?`<a href="${escapeHtml(source)}" target="_blank" rel="noopener noreferrer">查看原始数据源 ↗</a>`:`<span>等待数据源同步</span>`}</footer></article>`;
+  const rankingTitle=state.view==="videos"?"热门视频排行榜":"热门话题排行榜";
+  mount.innerHTML=`<article class="panel douyin-hot-panel"><header class="douyin-hot-head"><div><span>DOUYIN AUTO PULSE</span><h2 id="douyin-hot-title">抖音汽车热点</h2><p>热门视频与热门话题双榜，帮助客户快速看清近期内容风向。</p></div><div class="douyin-collector-actions"><em class="${collectorState.browserOpen?"connected":""}"><i></i>${collectorState.browserOpen?"采集器窗口已连接":"抖音账号未连接"}</em><button type="button" data-collector-connect>${collectorState.browserOpen?"重新打开登录窗口":"连接抖音账号"}</button><button type="button" class="primary" data-collector-sync ${!collectorState.browserOpen||collectorRunning()||collectorState.freshToday?"disabled":""}>${collectorRunning()?"同步进行中…":collectorState.freshToday?"今日已更新":"更新今日榜单"}</button><button type="button" data-collector-force ${!collectorState.browserOpen||collectorRunning()?"disabled":""}>强制刷新</button></div></header>${collectorProgress()}<div class="douyin-hot-controls">${tabs()}</div>${summary()}${entityRadar()}${manualReviewPanel()}<div class="douyin-hot-layout ${state.rankingExpanded?"is-expanded":"is-collapsed"}"><section class="douyin-hot-list" aria-live="polite"><div class="douyin-hot-list__head"><div><b>${rankingTitle}</b><span>${ranges[state.range]} · 汽车类目 · 按播放热度 · 同步于 ${escapeHtml(captured)}</span></div>${state.rankingExpanded?`<button type="button" class="douyin-ranking-close" data-ranking-toggle aria-expanded="true" aria-controls="douyin-ranking-content" aria-label="收起${rankingTitle}"><span>收起榜单</span><i aria-hidden="true"></i></button>`:""}</div><div id="douyin-ranking-content">${state.rankingExpanded?listBody():rankingPreview()}</div></section>${state.rankingExpanded?insight():""}</div><footer><span>刷新频率：每日一次，同时更新24小时、7天与30天六个榜单；登录不会触发重复抓取。</span>${source?`<a href="${escapeHtml(source)}" target="_blank" rel="noopener noreferrer">查看原始数据源 ↗</a>`:`<span>等待数据源同步</span>`}</footer></article>`;
   bind();
  }
 

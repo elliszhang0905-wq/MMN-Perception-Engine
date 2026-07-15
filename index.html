@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.02-management-toggle-2">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-20260716-whitepaper-evidence-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
   <link rel="stylesheet" href="douyin-hot-demo.css?v=collector-8">
-  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-executive-actions-3">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-executive-actions-4">
   <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-chart-readability-6">
 </head>
 <body>
@@ -119,6 +119,24 @@
         <div><span>核心竞品</span><b id="dash-competitor"></b></div>
         <div><span>样本规模</span><b id="dash-samples"></b></div>
       </div>
+      <article id="dashboard-t-cycle" class="panel t-cycle-panel" aria-labelledby="t-cycle-title">
+        <div class="panel-title">
+          <div><span>T周期模型</span><h2 id="t-cycle-title">按车型自动定位上市阶段与数据考核窗口</h2></div>
+          <em id="t-cycle-current">待设置T0</em>
+        </div>
+        <div class="t-cycle-controls">
+          <label>首发/预售日<input id="t-cycle-first-date" type="date"></label>
+          <label>正式上市日 T0<input id="t-cycle-t0-date" type="date"></label>
+          <label>数据考核日<input id="t-cycle-assessment-date" type="date"></label>
+          <button type="button" class="secondary" id="t-cycle-save">保存周期</button>
+        </div>
+        <div id="t-cycle-context" class="t-cycle-context" aria-live="polite"></div>
+        <div class="t-cycle-rail-shell">
+          <button type="button" class="t-cycle-scroll" data-t-cycle-scroll="-1" aria-label="向前查看T周期">‹</button>
+          <div id="t-cycle-rail" class="t-cycle-rail" tabindex="0" aria-label="选择T周期阶段"></div>
+          <button type="button" class="t-cycle-scroll" data-t-cycle-scroll="1" aria-label="向后查看T周期">›</button>
+        </div>
+      </article>
       <div class="dashboard-import">
         <div>
           <span>产品评价数据入口</span>
@@ -129,14 +147,35 @@
           <button class="ghost" data-page-jump="data">查看数据表</button>
         </div>
       </div>
+      <article id="dashboard-selling-point-input" class="panel selling-point-input-panel" aria-labelledby="selling-point-input-title">
+        <div class="panel-title">
+          <div><span>企业战略卖点输入</span><h2 id="selling-point-input-title">把品牌语言转换为可监测的用户语言与NSR标签</h2></div>
+          <div class="selling-point-panel-actions">
+            <label>上市核心车型<select id="selling-point-model-select" aria-label="选择卖点所属的上市核心车型"></select></label>
+            <em id="selling-point-input-status">等待集团卖点</em>
+            <button type="button" class="ghost" id="selling-point-panel-toggle" aria-expanded="true" aria-controls="selling-point-input-body">关闭</button>
+          </div>
+        </div>
+        <div id="selling-point-input-body">
+          <form id="selling-point-form" class="selling-point-form">
+            <label>企业战略卖点<input name="claim" required placeholder="例如：集团确认的核心产品价值"></label>
+            <label>标准标签<input name="tag" list="selling-point-tag-options" placeholder="例如：动力与操控"></label>
+            <label>用户语言<input name="userLanguage" placeholder="例如：好不好开、过弯稳不稳"></label>
+            <button type="submit" class="primary">加入映射</button>
+          </form>
+          <datalist id="selling-point-tag-options"></datalist>
+          <div id="selling-point-list" class="selling-point-list" tabindex="0" aria-label="当前车型的卖点映射列表"></div>
+        </div>
+      </article>
       <div class="dashboard-flow">
-        <div><span>01</span><b>导入数据</b><small>产品评价 × 属性 NSR</small></div>
-        <div><span>02</span><b>看地图</b><small>多车型优势、风险与缺口</small></div>
-        <div><span>03</span><b>找机会</b><small>本品领先与竞品威胁</small></div>
-        <div><span>04</span><b>出策略</b><small>基于地图生成内容策略</small></div>
+        <div><span>01</span><b>定周期</b><small>车型 × T阶段 × 考核窗口</small></div>
+        <div><span>02</span><b>录卖点</b><small>品牌语言 → 用户语言</small></div>
+        <div><span>03</span><b>看感知</b><small>标签提及 × 属性 NSR</small></div>
+        <div><span>04</span><b>判机会</b><small>竞品占位 × 五类证据</small></div>
+        <div><span>05</span><b>出动作</b><small>传播建议 × 结果回流</small></div>
       </div>
       <nav id="dashboard-anchor-nav" class="dashboard-anchor-nav" aria-label="决策数据链">
-        <a href="#dashboard-data-summary">01 NSR现状</a><a href="#dashboard-competitor-intelligence">02 竞品占位</a><a href="#opportunity-map">03 机会判断</a><a href="#dashboard-learning-loop">04 资产沉淀</a><a href="#dashboard-douyin-hot">05 抖音热点</a>
+        <a href="#dashboard-t-cycle">01 T周期</a><a href="#dashboard-data-summary">02 用户感知</a><a href="#dashboard-competitor-intelligence">03 竞品认知</a><a href="#selling-point-decision-workbench">04 卖点决策</a><a href="#dashboard-topic-planner">05 营销动作</a>
       </nav>
       <div class="kpis dashboard-kpis" hidden>
         <article class="kpi">
@@ -172,13 +211,21 @@
         <div class="panel-title"><div><span>垂媒正反向验证 × 竞品占位</span><h2>谁正在被共同比较，关系在增强还是减弱</h2></div><em>与上方NSR使用同一车型集合</em></div>
         <div id="dashboard-competitor-trend" class="dashboard-competitor-trend"></div>
       </article>
-      <article class="panel dashboard-opportunity-panel data-first-map-panel">
-        <div class="panel-title"><div><span>机会地图</span><h2>多车型 NSR 竞争力分布</h2></div><em>数据优先 · 自动更新</em></div>
-        <div id="nsr-map-models" class="nsr-map-models" aria-label="选择本品基准与对比车型"></div>
-        <div id="nsr-map-legend" class="nsr-map-legend" aria-label="竞争力状态图例"></div>
-        <div id="opportunity-map" class="opportunity-map" aria-label="NSR 竞争力机会地图"></div>
-        <div class="map-summary" id="map-summary"></div>
-        <div id="nsr-map-insights" class="nsr-map-insights" aria-label="自动地图解读"></div>
+      <article id="selling-point-decision-workbench" class="panel dashboard-opportunity-panel data-first-map-panel">
+        <div class="panel-title"><div><span>卖点机会决策台</span><h2>看位置、查证据、选动作</h2></div><em>市场匹配 · 证据穿透 · 策略建议</em></div>
+        <div id="selling-point-decision-controls" class="selling-point-decision-controls"></div>
+        <div class="selling-point-decision-layout">
+          <section class="selling-point-map-column" aria-label="卖点市场匹配四象限">
+            <div class="selling-point-column-title"><span>01 市场匹配</span><b>卖点现在处于什么位置</b></div>
+            <div id="nsr-map-models" class="nsr-map-models" aria-label="选择本品基准与对比车型"></div>
+            <div id="nsr-map-legend" class="nsr-map-legend" aria-label="竞争力状态图例"></div>
+            <div id="opportunity-map" class="opportunity-map" aria-label="NSR 竞争力机会地图"></div>
+            <div class="map-summary" id="map-summary"></div>
+            <div id="nsr-map-insights" class="nsr-map-insights" aria-label="自动地图解读"></div>
+          </section>
+          <section id="selling-point-evidence" class="selling-point-evidence-column" aria-label="五类证据穿透"></section>
+          <section id="selling-point-action" class="selling-point-action-column" aria-label="机会与营销动作"></section>
+        </div>
       </article>
       <article id="dashboard-product-proof" class="panel dashboard-product-proof" aria-label="产品证据验证" hidden></article>
       <article id="dashboard-strategy-choice" class="panel dashboard-strategy-choice" aria-label="策略选择" hidden></article>
@@ -186,19 +233,23 @@
       <section id="dashboard-douyin-hot" class="douyin-hot-module" aria-labelledby="douyin-hot-title">
         <div class="douyin-hot-module__mount" id="douyin-hot-module-mount"></div>
       </section>
-      <article class="panel dashboard-topic-planner">
+      <article id="dashboard-topic-planner" class="panel dashboard-topic-planner">
         <div class="panel-title">
           <div><span>MMN深度选题规划</span><h2>旗舰策略模型生成分阶段选题、达人匹配与内容排期</h2></div>
           <em>MMN深度策略 + topic_planning_engine</em>
         </div>
         <div class="topic-planner-controls">
           <label>传播阶段
-            <select id="dashboard-topic-stage">
-              <option>上市前期</option>
-              <option selected>上市中</option>
-              <option>上市后期</option>
-              <option>销售期</option>
+            <select id="dashboard-topic-stage" disabled aria-describedby="dashboard-topic-stage-note">
+              <option>上市预热（T-45～T-22）</option>
+              <option>首发/预售（T-21～T-1）</option>
+              <option>正式上市（T0）</option>
+              <option>热度放大（T+1～T+30）</option>
+              <option selected>销售转化（T+31～T+90）</option>
+              <option>销售验证（T+91～T+120）</option>
+              <option>常态经营（T+121起）</option>
             </select>
+            <small id="dashboard-topic-stage-note">由上方T周期选择自动同步</small>
           </label>
           <label>传播平台
             <select id="dashboard-topic-platform">
@@ -1145,7 +1196,8 @@
   <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
-  <script src="app.js?v=beta-1.02-management-toggle-1"></script>
+  <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
+  <script src="app.js?v=beta-1.02-20260716-whitepaper-evidence-1"></script>
   <script src="group-dashboard.js?v=beta-1.02-executive-actions-3"></script>
   <script src="douyin-hot-demo.js?v=collector-8"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>

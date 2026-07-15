@@ -7,6 +7,7 @@ from group_dashboard import (
     build_group_dashboard_payload,
     build_market_dimensions,
     build_segment_cards,
+    parse_cpca_ice_market,
     load_e7x_product_evaluation,
     merge_sales_payloads,
 )
@@ -43,6 +44,141 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(card["saicTop10"][0]["brand"], "智己")
         suv = next(item for item in build_segment_cards(payload) if item["key"] == "mid_suv")
         self.assertEqual([item["model"] for item in suv["saicTop10"]], ["途观L"])
+
+    def test_fuel_card_derives_saic_entry_from_overall_top10_when_independent_rank_is_missing(self):
+        payload = {"items": [
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 9, "series_name": "凯美瑞", "brand_name": "丰田", "sales_volume": 17114},
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 10, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 15444},
+            {"rank_type": "new_energy", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+        ]}
+
+        card = next(item for item in build_segment_cards(payload) if item["key"] == "fuel")
+
+        self.assertEqual(card["status"], "available")
+        self.assertEqual(card["dataBasis"], "overall_top10_minus_new_energy")
+        self.assertEqual(card["top10Sales"], 32558)
+        self.assertEqual(card["saicTop10"], [{
+            "rank": 10,
+            "model": "朗逸",
+            "brand": "大众",
+            "sales": 15444,
+        }])
+        self.assertIn("全国总榜 Top10", card["scopeNote"])
+
+    def test_fuel_card_prefers_independent_rank_when_it_is_available(self):
+        payload = {"items": [
+            {"rank_type": "fuel", "period_start": "2026-06-01", "rank": 1, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 15444},
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 10, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 15444},
+            {"rank_type": "new_energy", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+        ]}
+
+        card = next(item for item in build_segment_cards(payload) if item["key"] == "fuel")
+
+        self.assertEqual(card["dataBasis"], "independent_rank")
+        self.assertEqual(card["saicTop10"][0]["rank"], 1)
+
+    def test_fuel_card_does_not_compare_months_with_different_data_basis(self):
+        payload = {"items": [
+            {"rank_type": "series", "period_start": "2026-05-01", "rank": 1, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 100},
+            {"rank_type": "new_energy", "period_start": "2026-05-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 90},
+            {"rank_type": "fuel", "period_start": "2026-06-01", "rank": 1, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 200},
+        ]}
+
+        card = next(item for item in build_segment_cards(payload) if item["key"] == "fuel")
+
+        self.assertEqual(card["dataBasis"], "independent_rank")
+        self.assertEqual(card["previousDataBasis"], "overall_top10_minus_new_energy")
+        self.assertTrue(card["comparisonBasisChanged"])
+        self.assertIsNone(card["changeRate"])
+
+    def test_fuel_card_marks_reverse_switch_to_derived_basis(self):
+        payload = {"items": [
+            {"rank_type": "fuel", "period_start": "2026-05-01", "rank": 1, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 100},
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 1, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 200},
+            {"rank_type": "new_energy", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 180},
+        ]}
+
+        card = next(item for item in build_segment_cards(payload) if item["key"] == "fuel")
+
+        self.assertEqual(card["dataBasis"], "overall_top10_minus_new_energy")
+        self.assertEqual(card["previousDataBasis"], "independent_rank")
+        self.assertTrue(card["comparisonBasisChanged"])
+        self.assertIsNone(card["changeRate"])
+
+    def test_cpca_ice_market_uses_retail_volume_and_keeps_saic_overall_rank_separate(self):
+        cpca = [
+            {"category": "整体市场", "dataList": []},
+            {"category": "", "dataList": []},
+            {"category": "", "dataList": [
+                {"月份": "2026-5月", "ICE": [86.2828, 55.9863, 39.0, 37.1], "NEV": [135.2027, 95.017, 61.0, 62.9]},
+                {"月份": "2026-6月", "ICE": [87.5515, 59.5171, 37.1, 37.2], "NEV": [148.1452, 100.6753, 62.9, 62.8]},
+            ]},
+        ]
+        sales = {"items": [
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 10, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 15444},
+            {"rank_type": "new_energy", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+        ]}
+
+        parsed = parse_cpca_ice_market(cpca)
+        result = build_group_dashboard_payload(self.conn, sales, fuel_market=parsed)
+        fuel = next(item for item in result["marketDimensions"][0]["items"] if item["key"] == "fuel")
+
+        self.assertEqual(parsed["latestPeriod"], "2026-06")
+        self.assertEqual(parsed["retailSales"], 595171)
+        self.assertEqual(parsed["previousRetailSales"], 559863)
+        self.assertEqual(parsed["retailShare"], 0.372)
+        self.assertEqual(parsed["changeRate"], 0.0631)
+        self.assertEqual(fuel["dataBasis"], "cpca_ice_retail_market")
+        self.assertEqual(fuel["marketSales"], 595171)
+        self.assertEqual(fuel["changeRate"], 0.0631)
+        self.assertEqual(fuel["saicRankBasis"], "dongchedi_national_overall_top10")
+        self.assertEqual(fuel["saicRankPeriod"], "2026-06")
+        self.assertFalse(fuel["sourceStale"])
+        self.assertEqual(fuel["saicTop10"][0]["model"], "朗逸")
+
+    def test_cpca_ice_market_rejects_nonconsecutive_or_out_of_range_rows(self):
+        nonconsecutive = [{"dataList": [
+            {"月份": "2026-4月", "ICE": [80, 50, 40, 38]},
+            {"月份": "2026-6月", "ICE": [88, 60, 37, 37]},
+        ]}]
+        invalid_share = [{"dataList": [
+            {"月份": "2026-5月", "ICE": [80, 50, 40, 38]},
+            {"月份": "2026-6月", "ICE": [88, 60, 37, 137]},
+        ]}]
+
+        self.assertIsNone(parse_cpca_ice_market(nonconsecutive))
+        self.assertIsNone(parse_cpca_ice_market(invalid_share))
+
+    def test_cpca_market_period_does_not_overwrite_dongchedi_rank_period(self):
+        cpca = parse_cpca_ice_market([{"dataList": [
+            {"月份": "2026-6月", "ICE": [88, 60, 37, 37]},
+            {"月份": "2026-7月", "ICE": [90, 62, 36, 36]},
+        ]}])
+        sales = {"items": [
+            {"rank_type": "series", "period_start": "2026-06-01", "rank": 10, "series_name": "朗逸", "brand_name": "大众", "sales_volume": 15444},
+            {"rank_type": "new_energy", "period_start": "2026-06-01", "rank": 1, "series_name": "星愿", "brand_name": "吉利银河", "sales_volume": 33000},
+        ]}
+
+        result = build_group_dashboard_payload(self.conn, sales, fuel_market=cpca)
+        fuel = next(item for item in result["marketDimensions"][0]["items"] if item["key"] == "fuel")
+
+        self.assertEqual(fuel["latestPeriod"], "2026-07")
+        self.assertEqual(fuel["saicRankPeriod"], "2026-06")
+
+    def test_cpca_market_does_not_claim_a_dongchedi_rank_when_rank_data_is_missing(self):
+        cpca = parse_cpca_ice_market([{"dataList": [
+            {"月份": "2026-5月", "ICE": [86, 56, 39, 37]},
+            {"月份": "2026-6月", "ICE": [88, 60, 37, 37]},
+        ]}])
+
+        result = build_group_dashboard_payload(self.conn, {"items": []}, fuel_market=cpca)
+        fuel = next(item for item in result["marketDimensions"][0]["items"] if item["key"] == "fuel")
+
+        self.assertEqual(fuel["saicRankBasis"], "missing")
+        self.assertEqual(fuel["saicRankPeriod"], "")
+        self.assertIn("暂未接入", fuel["scopeNote"])
 
     def test_sales_snapshots_merge_without_duplicate_records(self):
         merged = merge_sales_payloads([
@@ -93,6 +229,7 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(result["productEvaluation"]["ownModel"], "奥迪E7X")
         self.assertEqual(result["productEvaluation"]["positioning"]["energyRankKey"], "ev")
         self.assertEqual(len(result["productEvaluation"]["models"]), 5)
+        self.assertTrue(any("燃油采用乘联会 ICE 零售整体市场" in item for item in result["methodology"]))
 
 
 if __name__ == "__main__":

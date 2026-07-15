@@ -7,6 +7,14 @@ LOG_FILE="${LOG_DIR}/local_mmn.log"
 PID_FILE="${LOG_DIR}/local_mmn.pid"
 WATCHDOG_PID_FILE="${LOG_DIR}/local_mmn_watchdog.pid"
 child_pid=""
+BUNDLED_PYTHON="/Users/ellis/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3"
+if [[ -x "${MMN_PYTHON:-}" ]]; then
+  PYTHON_BIN="${MMN_PYTHON}"
+elif [[ -x "${BUNDLED_PYTHON}" ]]; then
+  PYTHON_BIN="${BUNDLED_PYTHON}"
+else
+  PYTHON_BIN="$(command -v python3)"
+fi
 
 mkdir -p "${LOG_DIR}"
 cd "${PROJECT_DIR}"
@@ -28,7 +36,7 @@ while true; do
   MMN_PORT="${MMN_PORT:-8765}" \
   MMN_CLOUD_LOGIN_REQUIRED="${MMN_CLOUD_LOGIN_REQUIRED:-false}" \
   MMN_AUTO_OPEN_BROWSER="false" \
-  python3 server.py >>"${LOG_FILE}" 2>&1 &
+  "${PYTHON_BIN}" server.py >>"${LOG_FILE}" 2>&1 &
   child_pid=$!
   echo "${child_pid}" >"${PID_FILE}"
   exit_code=0

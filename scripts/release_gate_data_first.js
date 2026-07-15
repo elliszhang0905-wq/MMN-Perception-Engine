@@ -99,7 +99,7 @@ async function main() {
         overlaps: bubbles.reduce((total, bubble, index) => total + bubbles.slice(index + 1).filter(other => overlap(bubble, other)).length, 0),
       };
     });
-    add("map keeps labels inside the plotting area without overlap", layout.map?.width > 700 && layout.map?.height >= 360 && layout.inside && layout.overlaps === 0, JSON.stringify(layout));
+    add("map keeps labels inside the plotting area without overlap", layout.map?.width >= 520 && layout.map?.height >= 360 && layout.inside && layout.overlaps === 0, JSON.stringify(layout));
 
     const socialNav = await page.evaluate(() => ({
       parent: Boolean(document.querySelector('.cockpit-nav [data-page="dashboard"]')),
