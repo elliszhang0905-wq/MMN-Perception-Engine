@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from pathlib import Path
 
 from group_dashboard import (
     build_group_dashboard_payload,
@@ -10,8 +11,15 @@ from group_dashboard import (
     merge_sales_payloads,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_deploy_publishes_e7x_evaluation_into_persistent_data_volume(self):
+        deploy_script = (ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("data/e7x_product_evaluation_2026-06.json", deploy_script)
+        self.assertIn("mmn-app:/app/data/e7x_product_evaluation_2026-06.json", deploy_script)
+
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
         self.conn.row_factory = sqlite3.Row

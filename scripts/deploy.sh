@@ -47,6 +47,9 @@ docker compose --env-file .env up -d
 
 echo "同步随版本发布的销量与 RAG 数据资产到持久化卷。"
 docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales
+if [[ -f data/e7x_product_evaluation_2026-06.json ]]; then
+  docker compose --env-file .env cp data/e7x_product_evaluation_2026-06.json mmn-app:/app/data/e7x_product_evaluation_2026-06.json
+fi
 if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
   docker compose --env-file .env cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json
 fi
