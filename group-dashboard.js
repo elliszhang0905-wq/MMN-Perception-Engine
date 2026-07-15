@@ -83,7 +83,7 @@
   if(loading||(!force&&loadedEdition===currentEdition))return;
   loading=true;skeleton();
   try{
-   const response=await fetch(`/api/group-dashboard-demo?edition=${encodeURIComponent(currentEdition)}`,{credentials:"same-origin"});
+   const response=await fetch(`/api/group-dashboard-demo?edition=${encodeURIComponent(currentEdition)}`,{credentials:"same-origin",headers:typeof authHeaders==="function"?authHeaders():{}});
    const data=await response.json();
    if(!response.ok||!data.ok)throw new Error(data.error||`HTTP ${response.status}`);
    loadedEdition=currentEdition;render(data);

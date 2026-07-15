@@ -18,6 +18,7 @@ assert.match(html, /id="group-dashboard-root"/);
 assert.match(html, /group-dashboard\.css/);
 assert.match(html, /group-dashboard\.js/);
 assert.match(ui, /\/api\/group-dashboard-demo/);
+assert.match(ui, /headers:typeof authHeaders==="function"\?authHeaders\(\):\{\}/);
 assert.match(ui, /社媒证据不等于市场需求或销量/);
 assert.match(ui, /国内版专属看板/);
 assert.match(ui, /group-segment-plot/);
