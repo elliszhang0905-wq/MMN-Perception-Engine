@@ -73,7 +73,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260716-executive-qc-4"
+APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-2"
 APP_RELEASE_DATE = "2026-07-16"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -3462,13 +3462,80 @@ def executive_brief_evidence_packet():
         {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
         {"id": "penetration_buffer", "title": "结构托底", "detail": "新能源零售渗透率为63.1%"},
     ]
+    actions = [
+        {
+            "id": "p1",
+            "scope": "集团品牌与媒介",
+            "title": "统一“结构韧性”周度传播口径",
+            "conclusion": "总盘零售同比下降15%，但新能源零售降幅少7个百分点且渗透率达到63.1%；集团传播应把新能源韧性与乘用车总体承压分开陈述。",
+            "reviewSignal": "新能源内容正向认知 / 竞品差异词",
+            "evidenceIds": ["retail", "nev_retail", "nev_penetration"],
+        },
+        {
+            "id": "p2",
+            "scope": "同期上市重点车型",
+            "title": "按车型证据包分别给出上市期动作",
+            "conclusion": "只有已经接入车型专项声量、NSR与VOC证据的车型才输出传播优先级；数据待接入车型先输出证据建设任务，不以集团总盘替代车型判断。",
+            "reviewSignal": "车型声量 / 平台NSR / 属性VOC / 试驾线索",
+            "evidenceIds": ["launch_roster", "e7x_voice_rank", "e7x_nsr_rank"],
+        },
+        {
+            "id": "p3",
+            "scope": "集团新品营销监测",
+            "title": "建立声量—NSR—VOC周度预警",
+            "conclusion": "集团旗下同期重点车型应统一按总体声量判断传播规模、按NSR判断认知质量、再用VOC定位产品属性机会；当前只有奥迪E7X接入完整五车产品评价，其余车型应先补齐同口径数据。",
+            "reviewSignal": "声量排名 / 平台NSR / 风险属性VOC / 周度变化",
+            "evidenceIds": ["launch_roster", "e7x_voice_rank", "e7x_nsr_rank", "vehicle_data_gap"],
+        },
+    ]
+    launch_vehicles = [
+        {"id": "im-ls9", "brand": "智己", "model": "智己LS9", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "mg4", "brand": "MG", "model": "MG4", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "roewe-m7-dmh", "brand": "荣威", "model": "荣威M7 DMH", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "vw-id-era-9x", "brand": "大众", "model": "ID.ERA 9X", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "audi-e7x", "brand": "AUDI", "model": "奥迪E7X", "stage": "上市期", "dataStatus": "五车产品评价已接入", "selected": True},
+        {"id": "buick-electra-encasa", "brand": "别克", "model": "至境世家", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "cadillac-vistiq", "brand": "凯迪拉克", "model": "凯迪拉克VISTIQ", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "maxus-g70", "brand": "大通", "model": "大通G70", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+        {"id": "wuling-xingguang-730", "brand": "五菱", "model": "星光730", "stage": "同期重点车型", "dataStatus": "车型专项数据待接入"},
+    ]
+    vehicle_actions = []
+    for vehicle in launch_vehicles:
+        connected = vehicle["id"] == "audi-e7x"
+        vehicle_actions.append(
+            {
+                **vehicle,
+                "title": "从声量竞争转向优势属性放大" if connected else "先完成上市期车型证据包",
+                "conclusion": (
+                    "五车同口径对比中，奥迪E7X总体声量第4、全网NSR第2；上市期应先扩大传播规模，再用产品认知星图选择已验证的优势属性。"
+                    if connected
+                    else f"{vehicle['model']}尚未接入同口径声量、平台NSR与属性VOC，当前不发布传播优先级；先完成数据接入与竞品口径确认。"
+                ),
+                "reviewSignal": "优势属性提及率 / 平台NSR" if connected else "数据接入率 / 竞品口径 / 有效样本量",
+                "evidenceIds": ["e7x_voice_rank", "e7x_nsr_rank"] if connected else ["launch_roster", "vehicle_data_gap"],
+            }
+        )
+    action_evidence = [
+        {
+            "id": "launch_roster",
+            "type": "group_configuration",
+            "detail": "同期重点车型名单是管理层看板的集团排期配置项；模型只验证基于该配置的动作边界，不验证公开上市真实性。",
+        },
+        {"id": "e7x_voice_rank", "type": "imported_product_evaluation", "detail": "AUDI E7X五车同口径总体声量排名第4。"},
+        {"id": "e7x_nsr_rank", "type": "imported_product_evaluation", "detail": "AUDI E7X五车同口径全网NSR排名第2。"},
+        {"id": "vehicle_data_gap", "type": "data_coverage", "detail": "除AUDI E7X外，当前名单车型尚未接入同口径声量、平台NSR与属性VOC。"},
+    ]
     candidate = "终端需求偏弱，渠道补库同步收缩；新能源以63.1%零售渗透率继续托住市场基本盘。"
-    fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences}, ensure_ascii=False, sort_keys=True)
+    fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
     return {
         "facts": facts,
         "source": source,
         "candidate": candidate,
         "inferences": inferences,
+        "actions": actions,
+        "actionEvidence": action_evidence,
+        "launchVehicles": launch_vehicles,
+        "vehicleActions": vehicle_actions,
         "fingerprint": hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest(),
     }
 
@@ -3479,8 +3546,14 @@ def executive_brief_review_prompt(packet):
         "source": packet["source"],
         "candidateSummary": packet["candidate"],
         "mmnInferences": packet["inferences"],
+        "mmnActions": packet["actions"],
+        "actionEvidence": packet["actionEvidence"],
+        "launchVehicles": packet["launchVehicles"],
+        "vehicleActions": packet["vehicleActions"],
         "requiredEvidenceIds": ["retail", "wholesale", "nev_retail", "nev_penetration"],
         "requiredInferenceIds": ["retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"],
+        "requiredActionIds": ["p1", "p2", "p3"],
+        "requiredVehicleActionIds": [item["id"] for item in packet["vehicleActions"]],
     }
     return [
         {
@@ -3489,8 +3562,12 @@ def executive_brief_review_prompt(packet):
                 "你是MMN集团管理摘要的独立质检模型。只检查给定摘要是否被锁定事实支持，不得修改数字、出处或摘要文本。"
                 "重点检查数字一致性、推理边界、因果是否过度、管理层表述是否准确。"
                 "只输出JSON对象：approved(boolean)、summary(必须原样返回candidateSummary)、factsFingerprint、"
-                "evidenceIds(string数组)、inferenceIds(string数组)、issues(string数组)。"
-                "summary和mmnInferences必须分别被lockedFacts支持；任何证据不足或措辞越界都必须approved=false。"
+                "evidenceIds(string数组)、inferenceIds(string数组)、actionIds(string数组)、vehicleActionIds(string数组)、issues(string数组)。"
+                "若approved=true，evidenceIds、inferenceIds、actionIds、vehicleActionIds必须分别原样复制用户消息中的四个required列表，禁止返回空数组；"
+                "若任一required项未通过，必须approved=false并在issues说明。"
+                "summary和mmnInferences必须被lockedFacts支持；mmnActions和vehicleActions必须被lockedFacts或actionEvidence支持。"
+                "launch_roster属于集团排期配置项，只验证动作是否遵守数据边界，不验证名单的公开上市真实性。"
+                "任何证据不足或措辞越界都必须approved=false。"
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -3502,14 +3579,20 @@ def normalize_executive_brief_review(raw, packet):
         return False
     evidence_ids = {str(item) for item in parsed.get("evidenceIds") or []}
     inference_ids = {str(item) for item in parsed.get("inferenceIds") or []}
+    action_ids = {str(item) for item in parsed.get("actionIds") or []}
+    vehicle_action_ids = {str(item) for item in parsed.get("vehicleActionIds") or []}
     required_ids = {"retail", "wholesale", "nev_retail", "nev_penetration"}
     required_inference_ids = {"retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"}
+    required_action_ids = {"p1", "p2", "p3"}
+    required_vehicle_action_ids = {item["id"] for item in packet["vehicleActions"]}
     return bool(
         parsed.get("approved") is True
         and str(parsed.get("summary") or "").strip() == packet["candidate"]
         and str(parsed.get("factsFingerprint") or "") == packet["fingerprint"]
         and required_ids.issubset(evidence_ids)
         and required_inference_ids.issubset(inference_ids)
+        and required_action_ids.issubset(action_ids)
+        and required_vehicle_action_ids.issubset(vehicle_action_ids)
         and not (parsed.get("issues") or [])
     )
 
@@ -3544,6 +3627,9 @@ def public_executive_brief_state(packet, cached=None):
         "summary": packet["candidate"] if status == "verified" else "",
         "facts": packet["facts"],
         "inferences": packet["inferences"] if status == "verified" else [],
+        "actions": packet["actions"] if status == "verified" else [],
+        "launchVehicles": packet["launchVehicles"] if status == "verified" else [],
+        "vehicleActions": packet["vehicleActions"] if status == "verified" else [],
         "source": packet["source"],
         "factsFingerprint": packet["fingerprint"],
         "providerChecks": cached.get("providerChecks") or {"qwen": "pending", "deepseek": "pending"},
@@ -3558,14 +3644,14 @@ def run_executive_brief_dual_review(packet=None):
     def review(provider):
         try:
             if provider == "qwen":
-                raw = call_qwen(prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1200, enable_thinking=False)
+                raw = call_qwen(prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1800, enable_thinking=False)
             else:
                 raw = call_deepseek(
                     prompt,
                     temperature=.05,
                     profile="deep",
                     timeout=MMN_CRITIC_TIMEOUT,
-                    max_tokens=1200,
+                    max_tokens=1800,
                     response_format={"type": "json_object"},
                 )
             return "verified" if normalize_executive_brief_review(raw, packet) else "rejected"

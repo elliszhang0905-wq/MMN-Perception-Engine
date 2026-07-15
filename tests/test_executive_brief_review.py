@@ -16,6 +16,8 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
                 "factsFingerprint": packet["fingerprint"],
                 "evidenceIds": ["retail", "wholesale", "nev_retail", "nev_penetration"],
                 "inferenceIds": ["retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"],
+                "actionIds": ["p1", "p2", "p3"],
+                "vehicleActionIds": [item["id"] for item in packet["vehicleActions"]],
                 "issues": [],
             },
             ensure_ascii=False,
@@ -30,6 +32,9 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(facts["nev_retail"]["priorValue"], 30.4)
         self.assertEqual(facts["nev_penetration"]["value"], 63.1)
         self.assertEqual(len(packet["inferences"]), 4)
+        self.assertEqual([item["id"] for item in packet["actions"]], ["p1", "p2", "p3"])
+        self.assertEqual(len(packet["vehicleActions"]), 9)
+        self.assertEqual(next(item for item in packet["vehicleActions"] if item.get("selected"))["model"], "奥迪E7X")
         self.assertEqual(len(packet["fingerprint"]), 64)
 
     def test_review_requires_exact_summary_fingerprint_and_all_evidence(self):
@@ -41,6 +46,8 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
             {"factsFingerprint": "wrong"},
             {"evidenceIds": ["retail"]},
             {"inferenceIds": ["retail_pressure"]},
+            {"actionIds": ["p1"]},
+            {"vehicleActionIds": ["audi-e7x"]},
             {"issues": ["措辞越界"]},
         ):
             candidate = {**valid, **mutation}
@@ -56,6 +63,8 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
             state = server.run_executive_brief_dual_review(packet)
         self.assertEqual(state["status"], "verified")
         self.assertEqual(state["summary"], packet["candidate"])
+        self.assertEqual(len(state["actions"]), 3)
+        self.assertEqual(len(state["vehicleActions"]), 9)
         self.assertEqual(state["providerChecks"], {"qwen": "verified", "deepseek": "verified"})
 
     def test_model_failure_keeps_summary_private(self):
@@ -68,6 +77,8 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
             state = server.run_executive_brief_dual_review(packet)
         self.assertEqual(state["status"], "pending_review")
         self.assertEqual(state["summary"], "")
+        self.assertEqual(state["actions"], [])
+        self.assertEqual(state["vehicleActions"], [])
         self.assertNotIn("secret provider detail", json.dumps(state, ensure_ascii=False))
 
 

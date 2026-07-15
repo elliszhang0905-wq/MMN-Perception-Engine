@@ -24,3 +24,30 @@ body[data-domestic-mode="management"] #management-dashboard-panel .group-view-fo
 .executive-action-grid{display:grid;min-height:0;flex:1;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.executive-action-grid article{display:grid;padding:15px;grid-template-rows:auto 1fr auto}.executive-action-grid article.priority-one{border-color:#bda761;box-shadow:inset 0 3px 0 #a7852e}.executive-action-no{display:inline-grid;width:28px;height:22px;margin-bottom:8px;place-items:center;border-radius:4px;background:#263941;color:#fff!important;font-family:"DIN Alternate",monospace;font-size:9px!important}.executive-action-grid small{color:#849197;font-size:7px}.executive-action-grid h3{margin:5px 0 7px;color:#263941;font-size:13px}.executive-action-grid p{margin:0;color:#66767d;font-size:8.5px;line-height:1.6}.executive-action-grid footer{display:grid;gap:3px;margin-top:12px;padding-top:9px;border-top:1px solid #e1e6e8}.executive-action-grid footer b{color:#8a6822;font-size:7px}.executive-action-grid footer span{color:#53666e!important;font-size:8px!important}.executive-evidence-note{display:flex;align-items:center;gap:8px;margin-top:8px;padding:7px 10px;border-radius:6px;background:#f3f6f6;color:#617178;font-size:7.5px}.executive-evidence-note b{color:#263941;white-space:nowrap}
 @media(max-width:980px){.executive-brief-grid,.executive-impact-layout{grid-template-columns:1fr}.executive-causal-card{display:none}.executive-action-grid{grid-template-columns:repeat(3,minmax(230px,1fr));overflow-x:auto}.group-view-tabs{grid-template-columns:repeat(7,112px)}}
 @media(max-width:760px){.executive-thesis h3{font-size:20px}.executive-fact-charts{grid-template-columns:1fr;overflow-y:auto}.executive-yoy-card svg{height:48px}.executive-brand-narrative{grid-template-columns:1fr;overflow-y:auto}.executive-source-line small{display:none}}
+
+/* 管理层同比卡片纵向拉满；P1—P3展示双模型验证与车型级动作。 */
+.executive-fact-charts{flex:1;gap:10px;align-items:stretch}
+.executive-yoy-card{height:100%;min-height:0;padding:10px 11px;box-sizing:border-box;grid-template-rows:auto minmax(150px,1fr) auto;align-content:stretch}
+.executive-yoy-card svg{height:100%;min-height:150px}
+.executive-yoy-card .bar-baseline{stroke:#d5dfe1;stroke-width:1}
+.executive-yoy-card .bar-label{font-size:9.5px;font-weight:850}
+.executive-yoy-card .bar-value{font-size:10.5px}
+.executive-yoy-card>small{font-size:8px;line-height:1.35;white-space:normal}
+.executive-action-grid article{min-width:0}
+.executive-action-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.executive-action-no{flex:0 0 auto}
+.executive-action-verification{align-self:flex-start;color:#197252!important;font-size:9px!important;font-weight:900;line-height:1.3;text-align:right}
+.executive-action-conclusion{display:block;margin:10px 0 5px;color:#8a6822;font-size:11px}
+.executive-action-vehicle-card{grid-template-rows:auto auto minmax(0,1fr)!important}
+.executive-vehicle-select{display:flex;min-width:0;align-items:center;gap:6px}
+.executive-vehicle-select>span{color:#6f7e84!important;font-size:9px!important;font-weight:900;white-space:nowrap}
+.executive-vehicle-select select{max-width:210px;min-width:0;padding:7px 26px 7px 9px;border:1px solid #a9b7bb;border-radius:5px;background:#fff;color:#263941;font-size:11px;font-weight:900}
+.executive-vehicle-action-stage{min-height:0}
+.executive-vehicle-action{display:grid;height:100%;grid-template-rows:auto auto auto 1fr auto}
+.executive-vehicle-action[hidden]{display:none}
+.executive-action-grid small{font-size:10px}
+.executive-action-grid h3{margin:7px 0 9px;font-size:17px;line-height:1.25}
+.executive-action-grid p{font-size:12px;line-height:1.55}
+.executive-action-grid footer b{font-size:10px}
+.executive-action-grid footer span{font-size:11px!important}
+@media(max-width:760px){.executive-yoy-card{min-height:220px}.executive-yoy-card svg{height:150px}}
