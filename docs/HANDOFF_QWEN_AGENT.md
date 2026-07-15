@@ -561,3 +561,13 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 本地验收基线：JavaScript 11/11、Python 175/175、发布门禁专项 85/85，浏览器 `failed: []`、`runtimeErrors: []`。
 - 最终服务器备份：`backups/code_before_28a9ba2_20260714_022900.tar.gz` 与 `backups/mmn_backup_20260714_022931.tar.gz`；批次前备份为 `code_before_23a7f8e_20260714_022425.tar.gz` 与 `mmn_backup_20260714_022531.tar.gz`。
 - 手工验收顺序固定为：健康接口 → 首页资源版本 → 社媒趋势竞品选择 → 本品 Benchmark → 风险内容气泡 → 销量月份 → 6 个服务状态 → 近期错误日志 → 本地/服务器哈希。
+
+## 24. 2026-07-15 集团管理层看板交接
+
+- 国内版左侧“管理层版”是看板开关，不是第三套数据版本。默认关闭；打开后将集团看板插入国内版决策驾驶舱最上方，关闭后仅隐藏该面板。
+- 开关不得调用 `loadEditionData`、`resetOpportunityContextState`、`save` 或任何项目/车型/样本推导链路。
+- 看板使用 E7X 五车工作簿聚合数据、懂车帝细分榜与已存社媒/VOC 证据；百分比仅表示细分榜 Top10 合计环比，不是市场份额。
+- 能源形式固定拆为纯电、插混、增程和燃油；车身级别按懂车帝轿车、SUV、MPV 区间分开。
+- Docker `/app/data` 持久化卷会遮挡镜像内 E7X JSON；不得删除 `scripts/deploy.sh` 中的 `data/e7x_product_evaluation_2026-06.json` 卷同步步骤。
+- 云端看板请求必须复用 `authHeaders()`，否则本地免登录正常但云端会返回 401。
+- 最终提交链为 `7b2651e` → `d9a9b6f` → `f2deafa`；公网 IP 首页、健康接口、管理员登录、E7X 看板开关、5 车/7 平台/15 属性数据均验收通过。
