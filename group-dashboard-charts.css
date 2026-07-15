@@ -1,0 +1,47 @@
+/* 集团看板图形主视图：数字只作为星点注释。 */
+.group-chart-frame{position:relative;padding:8px 12px 10px;border:1px solid #dbe3e5;border-radius:10px;background:#f9fbfb;overflow:hidden}
+.group-chart-frame svg{display:block;width:100%;height:auto;overflow:visible}
+.group-market-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-bottom:10px}
+.group-market-tabs button{display:grid;gap:2px;min-height:48px;padding:8px 10px;border:1px solid #d2dcdf;border-radius:7px;background:#fff;color:#607078;box-shadow:none;text-align:left}
+.group-market-tabs button:hover{border-color:#83949b;transform:none}.group-market-tabs button.active{border-color:#263941;background:#263941;color:#fff}
+.group-market-tabs b{font-size:9px}.group-market-tabs small{color:#8b979c;font-size:7px}.group-market-tabs button.active small{color:#cbd5d8}
+.group-market-panel[hidden]{display:none}.group-market-panel.active{display:block}
+.group-chart-axis{position:absolute;top:38px;bottom:84px;left:12px;display:flex;flex-direction:column;justify-content:space-between;color:#8a969b;font-size:7px;font-weight:850}
+.group-chart-legend{display:flex;align-items:center;justify-content:center;gap:20px;padding:8px;border-top:1px solid #e0e6e8;color:#728087;font-size:7px;font-weight:800}
+.group-chart-legend span{display:flex;align-items:center;gap:5px}
+.group-chart-legend i{display:inline-block;width:8px;height:8px;border-radius:50%}
+.group-chart-legend i.up{background:#29936d}.group-chart-legend i.down{background:#c2575d}
+.group-chart-legend i.size{width:12px;height:12px;border:2px solid #65767e;background:transparent}
+.group-chart-legend i.missing{border:2px dashed #d5a84d;background:#fffaf0}
+.group-chart-legend i.focus{border:2px solid #1e7aa8;background:#fff;box-shadow:0 0 0 3px rgba(30,122,168,.12)}
+.group-segment-plot .zero-line{stroke:#b9c5c9;stroke-width:1;stroke-dasharray:5 5}
+.group-star-point{cursor:default}.group-star-point:focus{outline:none}
+.group-star-point line{stroke:#9aa8ae;stroke-width:1.2;stroke-dasharray:3 4}
+.group-star-point .halo{fill:rgba(43,147,109,.1)}.group-star-point.down .halo{fill:rgba(194,87,93,.1)}
+.group-star-point .dot{fill:#29936d;stroke:#fff;stroke-width:3;filter:drop-shadow(0 5px 7px rgba(30,55,64,.16))}
+.group-star-point.down .dot{fill:#c2575d}.group-star-point.flat .dot{fill:#829198}.group-star-point:focus .halo{stroke:#263941;stroke-width:2}
+.group-star-point.missing .halo{fill:transparent;stroke:#d5a84d;stroke-dasharray:3 3}.group-star-point.missing .dot{fill:#fffaf0;stroke:#d5a84d;stroke-width:2;stroke-dasharray:3 3;filter:none}
+.group-star-point.missing .delta{fill:#a77818}.group-star-point.missing .sales,.group-star-point.missing .saic{fill:#a18b5f}
+.group-star-point .focus-ring{fill:none;stroke:#1e7aa8;stroke-width:2;stroke-dasharray:3 3}.group-star-point .focus-tag{fill:#1e7aa8;font-size:7px;font-weight:900}
+.group-star-point text,.group-voice-dot text,.group-voc-plot text{font-family:inherit}
+.group-star-point .delta{fill:#46575f;font-size:11px;font-weight:900}.group-star-point .segment{fill:#263840;font-size:10px;font-weight:900}
+.group-star-point .sales{fill:#6e7d84;font-size:9px;font-weight:850}.group-star-point .saic{fill:#87949a;font-size:7px;font-weight:750}
+.group-voice-frame{padding-top:4px}.group-voice-dot:focus{outline:none}
+.group-voice-dot .orbit{fill:rgba(43,147,109,.09);stroke:#a9cfc0;stroke-width:1;stroke-dasharray:3 4}
+.group-voice-dot .dot{fill:#29936d;stroke:#fff;stroke-width:3;filter:drop-shadow(0 5px 7px rgba(30,55,64,.14))}
+.group-voice-dot.missing .orbit{fill:transparent;stroke:#d5a84d}.group-voice-dot.missing .dot{fill:#fffaf0;stroke:#d5a84d;stroke-width:2;stroke-dasharray:3 3;filter:none}
+.group-voice-dot:focus .orbit{stroke:#263941;stroke-width:2}.group-voice-dot .value{fill:#fff;font-size:10px;font-weight:900}
+.group-voice-dot.missing .value{fill:#bd8c2b;font-size:18px}.group-voice-dot .model{fill:#34464e;font-size:9px;font-weight:900}.group-voice-dot .status{fill:#839096;font-size:7px;font-weight:750}
+.group-chart-legend i.voice-ready{background:#29936d}.group-chart-legend i.voice-missing{border:2px dashed #d5a84d;background:#fffaf0}
+.group-voc-frame{padding:6px 12px}.group-voc-plot .ideal-zone{fill:#edf8f3}.group-voc-plot .risk-zone{fill:#fff3f3}
+.group-voc-plot .axis{stroke:#718087;stroke-width:1.2}.group-voc-plot .midline{stroke:#c7d1d4;stroke-width:1;stroke-dasharray:5 5}
+.group-voc-plot .zone-label{font-size:8px;font-weight:900}.group-voc-plot .zone-label.ideal{fill:#2a8967}.group-voc-plot .zone-label.risk{fill:#b45056}
+.group-voc-plot .axis-label{fill:#66767d;font-size:8px;font-weight:850}.group-voc-point:focus{outline:none}.group-voc-point .halo{fill:rgba(56,116,160,.1)}
+.group-voc-point .dot{fill:#3d789e;stroke:#fff;stroke-width:3;filter:drop-shadow(0 4px 6px rgba(30,55,64,.18))}.group-voc-point:focus .halo{stroke:#263941;stroke-width:2}
+.group-voc-point .model{fill:#31434b;font-size:8px;font-weight:900}.group-voc-point .pair{fill:#75838a;font-size:7px;font-weight:800}
+.group-chart-legend i.voc-dot{background:#3d789e;box-shadow:0 0 0 3px rgba(56,116,160,.12)}
+.group-competitive-plot .quality-zone{fill:#edf8f3}.group-competitive-plot .axis,.group-platform-plot .axis,.group-attribute-plot .axis{stroke:#718087;stroke-width:1.2}.group-competitive-plot .midline,.group-attribute-plot .midline{stroke:#c7d1d4;stroke-width:1;stroke-dasharray:5 5}.group-competitive-plot .zone-label,.group-attribute-plot .zone-label{font-size:8px;font-weight:900;fill:#278263}.group-competitive-plot .axis-label,.group-attribute-plot .axis-label{fill:#66767d;font-size:8px;font-weight:850}
+.group-competitive-point:focus,.group-platform-point:focus,.group-attribute-point:focus{outline:none}.group-competitive-point .halo{fill:rgba(61,120,158,.1)}.group-competitive-point .dot{fill:#4c839f;stroke:#fff;stroke-width:3;filter:drop-shadow(0 4px 6px rgba(30,55,64,.16))}.group-competitive-point .model{fill:#31434b;font-size:9px;font-weight:900}.group-competitive-point .metric{fill:#75838a;font-size:7px;font-weight:800}.group-competitive-point.own .halo{fill:rgba(190,139,32,.13);stroke:#d3a239;stroke-width:1;stroke-dasharray:3 3}.group-competitive-point.own .star{fill:#c6922d;stroke:#fff;stroke-width:3;filter:drop-shadow(0 5px 7px rgba(92,68,18,.2))}.group-chart-legend i.e7x-star{border-radius:2px;background:#c6922d;transform:rotate(45deg)}
+.group-platform-plot .benchmark{stroke:#263941;stroke-width:1;stroke-dasharray:5 5}.group-platform-plot .benchmark-label{fill:#53646b;font-size:8px;font-weight:900}.group-platform-point line{stroke:#9aa8ae;stroke-width:1;stroke-dasharray:3 3}.group-platform-point .halo{fill:rgba(43,147,109,.1)}.group-platform-point .dot{fill:#29936d;stroke:#fff;stroke-width:3;filter:drop-shadow(0 4px 6px rgba(30,55,64,.15))}.group-platform-point.below .halo{fill:rgba(194,87,93,.1)}.group-platform-point.below .dot{fill:#c2575d}.group-platform-point .value{fill:#34464e;font-size:9px;font-weight:900}.group-platform-point .platform{fill:#34464e;font-size:9px;font-weight:900}.group-platform-point .volume{fill:#839096;font-size:7px;font-weight:750}
+.group-attribute-plot .asset-zone{fill:#edf8f3}.group-attribute-plot .risk-zone{fill:#fff3f3}.group-attribute-plot .zone-label.risk{fill:#b45056}.group-attribute-point .halo{fill:rgba(56,116,160,.1)}.group-attribute-point .dot{fill:#3d789e;stroke:#fff;stroke-width:2}.group-attribute-point.asset .halo{fill:rgba(43,147,109,.1)}.group-attribute-point.asset .dot{fill:#29936d}.group-attribute-point.risk .halo{fill:rgba(194,87,93,.1)}.group-attribute-point.risk .dot{fill:#c2575d}.group-attribute-point.fragile .halo{fill:rgba(198,146,45,.12)}.group-attribute-point.fragile .dot{fill:#c6922d}.group-attribute-point text{fill:#43545c;font-size:7.5px;font-weight:900}.group-chart-legend i.attribute-asset{background:#29936d}.group-chart-legend i.attribute-watch{background:#c6922d}.group-chart-legend i.attribute-risk{background:#c2575d}
+@media(max-width:760px){.group-market-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.group-chart-frame{overflow-x:auto}.group-chart-frame svg{min-width:760px}.group-chart-axis{display:none}.group-chart-legend{min-width:720px;justify-content:flex-start}}

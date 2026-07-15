@@ -1,0 +1,51 @@
+{
+  "source": {
+    "fileName": "AUDI E7X等5车产品评价_0710_v2.xlsx",
+    "period": "2026.06.01—2026.06.30",
+    "scope": "主流社交媒体、五大汽车媒体与主流门户网站",
+    "voiceFormula": "帖子量 + 评论量",
+    "engagementFormula": "转发量 + 评论量 + 点赞量",
+    "nsrFormula": "（正面 - 负面）/（正面 + 负面）"
+  },
+  "ownModel": "奥迪E7X",
+  "positioning": {
+    "energy": "纯电",
+    "bodyClass": "中大型 SUV",
+    "energyRankKey": "ev",
+    "bodyRankKey": "mid_large_suv",
+    "sourceUrl": "https://www.saic-audi.cn/audi-e/models/e7x/e7x.html"
+  },
+  "models": [
+    {"model": "小米YU7", "voice": 1300345, "engagement": 9260761, "overallNsr": 0.3085210578, "verticalNsr": 0.6279809221, "douyinNsr": 0.0874125874},
+    {"model": "Model Y", "voice": 730202, "engagement": 3519781, "overallNsr": 0.2993664203, "verticalNsr": 0.6173913043, "douyinNsr": 0.0430247718},
+    {"model": "问界M7", "voice": 252720, "engagement": 1145264, "overallNsr": 0.7035601841, "verticalNsr": 0.7237715803, "douyinNsr": 0.7091319053},
+    {"model": "奥迪E7X", "voice": 235579, "engagement": 2169813, "overallNsr": 0.7512874631, "verticalNsr": 0.7905405405, "douyinNsr": 0.7138139791},
+    {"model": "奥迪Q6L e-tron", "voice": 20741, "engagement": 55736, "overallNsr": 0.8093922652, "verticalNsr": null, "douyinNsr": 0.7213114754}
+  ],
+  "platforms": [
+    {"platform": "全网", "voice": 235579, "engagement": 2169813, "nsr": 0.7512874631},
+    {"platform": "垂媒车主口碑", "voice": 6052, "engagement": 27610, "nsr": 0.7905405405},
+    {"platform": "抖音", "voice": 103589, "engagement": 1546529, "nsr": 0.7138139791},
+    {"platform": "小红书", "voice": 35439, "engagement": 111512, "nsr": 0.3301282051},
+    {"platform": "微博", "voice": 69977, "engagement": 310158, "nsr": 0.8518518519},
+    {"platform": "B站", "voice": 2562, "engagement": 68422, "nsr": 0.6665069478},
+    {"platform": "视频号", "voice": 6083, "engagement": 71400, "nsr": 0.8407789233}
+  ],
+  "attributes": [
+    {"attribute": "外观", "ownNsr": 0.7226168224, "averageNsr": 0.7586518648},
+    {"attribute": "动力与操控", "ownNsr": 0.8972496108, "averageNsr": 0.6832567281},
+    {"attribute": "价格", "ownNsr": 0.6248587571, "averageNsr": 0.2694637867},
+    {"attribute": "品牌口碑", "ownNsr": 0.6458546571, "averageNsr": 0.6437490536},
+    {"attribute": "内饰", "ownNsr": 0.8598028478, "averageNsr": 0.6534061478},
+    {"attribute": "舒适性", "ownNsr": 0.8826347305, "averageNsr": 0.6361412256},
+    {"attribute": "配置", "ownNsr": 0.7851739788, "averageNsr": 0.6369355402},
+    {"attribute": "智能座舱", "ownNsr": 0.6770833333, "averageNsr": 0.6436861179},
+    {"attribute": "空间", "ownNsr": 0.8890814558, "averageNsr": 0.6989218409},
+    {"attribute": "安全", "ownNsr": 0.5036855037, "averageNsr": 0.2463901230},
+    {"attribute": "辅助驾驶", "ownNsr": 0.6383561644, "averageNsr": 0.4388039183},
+    {"attribute": "用车场景", "ownNsr": 0.9522673031, "averageNsr": 0.7454085073},
+    {"attribute": "质量", "ownNsr": 0.4262295082, "averageNsr": 0.1133502972},
+    {"attribute": "用户服务", "ownNsr": 0.5441176471, "averageNsr": 0.2199078789},
+    {"attribute": "用车成本", "ownNsr": 0.3333333333, "averageNsr": 0.4581971711}
+  ]
+}

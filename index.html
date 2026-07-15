@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.02-social-benchmark-risk-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-management-toggle-2">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
   <link rel="stylesheet" href="douyin-hot-demo.css?v=collector-7">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-management-toggle-1">
+  <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-management-toggle-1">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -38,6 +40,9 @@
         <button type="button" data-edition="china" class="active">国内版</button>
         <button type="button" data-edition="global">出海版</button>
       </div>
+      <button type="button" class="management-edition-button" data-domestic-mode="management" aria-pressed="false" aria-expanded="false" aria-controls="management-dashboard-panel">
+        <span>管理层版</span><small>打开集团看板</small>
+      </button>
     </div>
     <nav id="nav" aria-label="MMN主导航">
       <div class="nav-section primary-nav">
@@ -103,6 +108,11 @@
     </header>
 
     <section class="page active" id="dashboard">
+      <section id="management-dashboard-panel" class="management-dashboard-panel" aria-label="管理层集团营销看板" hidden>
+        <div id="group-dashboard-root" aria-live="polite">
+          <div class="group-dashboard-loading" role="status"><b>集团营销经营数据准备中</b><span></span><span></span><span></span></div>
+        </div>
+      </section>
       <div class="project-strip">
         <div><span>当前项目</span><b id="dash-project"></b></div>
         <div><span>分析对象</span><b id="dash-model"></b></div>
@@ -1135,7 +1145,8 @@
   <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
-  <script src="app.js?v=beta-1.02-social-benchmark-risk-1"></script>
+  <script src="app.js?v=beta-1.02-management-toggle-1"></script>
+  <script src="group-dashboard.js?v=beta-1.02-management-toggle-1"></script>
   <script src="douyin-hot-demo.js?v=collector-7"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>

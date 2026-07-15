@@ -30,8 +30,10 @@ fi
 echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check app.js
 "$NODE_BIN" --check bf-factory.js
+"$NODE_BIN" --check group-dashboard.js
 "$NODE_BIN" tests/test_nsr_map.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
+"$NODE_BIN" tests/test_group_dashboard_ui.js
 "$NODE_BIN" tests/test_social_competitor_picker.js
 "$NODE_BIN" tests/test_social_positive_benchmark.js
 "$NODE_BIN" tests/test_social_risk_popover.js
@@ -39,10 +41,11 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_douyin_creator_collector.js
 "$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 "$NODE_BIN" tests/test_ensure_local_mmn.js
-python3 -m py_compile server.py bf_factory/*.py
+python3 -m py_compile server.py group_dashboard.py bf_factory/*.py
 python3 -m unittest \
   tests.test_product_summary_import \
   tests.test_brand_penetration_module \
+  tests.test_group_dashboard \
   tests.test_dongchedi_sales_freshness \
   tests.test_douyin_hot_entities \
   tests.test_social_trend_jobs \

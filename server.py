@@ -44,6 +44,7 @@ from opportunity_pipeline import (
     heat_scores,
 )
 from cockpit_decision_loop import derive_execution_recommendations
+from group_dashboard import build_group_dashboard_payload, merge_sales_payloads
 from bf_factory.repository import (
     BFConflictError,
     BFNotFoundError,
@@ -9775,6 +9776,34 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(dongchedi_sales_payload())
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc), "items": []}, 500)
+            return
+        if parsed.path == "/api/group-dashboard-demo":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                candidates = [
+                    ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
+                    DATA_DIR / "dongchedi_sales" / "latest.json",
+                    DATA_DIR / "dongchedi_sales" / "latest_mmn_perception_feed.json",
+                ]
+                sales_payloads = []
+                for path in candidates:
+                    if path.exists():
+                        try:
+                            sales_payloads.append(json.loads(path.read_text(encoding="utf-8")))
+                        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                            continue
+                sales_payload = merge_sales_payloads(sales_payloads)
+                with db() as conn:
+                    payload = build_group_dashboard_payload(
+                        conn,
+                        sales_payload,
+                        auth.get("org_id", "local"),
+                        edition_from(q.get("edition", ["china"])[0]),
+                    )
+                self.send_json(payload)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 500)
             return
         if parsed.path == "/api/global-sales-marquee":
             try:
