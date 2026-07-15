@@ -73,7 +73,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-2"
+APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-3"
 APP_RELEASE_DATE = "2026-07-16"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -363,6 +363,7 @@ def init_db():
             evidence_needed text,
             source_text text not null,
             tags_json text not null default '[]',
+            highlights_json text not null default '[]',
             confidence text,
             knowledge_json text not null,
             created_at text not null,
@@ -650,6 +651,7 @@ def init_db():
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
         ensure_column(conn, "content_capability_chunks", "content_breakdown_json", "text not null default '{}'")
+        ensure_column(conn, "model_judgment_assets", "highlights_json", "text not null default '[]'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
         conn.execute("""
             delete from vertical_rank_assets
@@ -3460,7 +3462,7 @@ def executive_brief_evidence_packet():
         {"id": "retail_pressure", "title": "终端零售承压", "detail": "乘用车零售44.3万辆，同比下降15%"},
         {"id": "wholesale_pressure", "title": "批发端承压更明显", "detail": "厂商批发37.9万辆，同比下降26%，降幅大于零售"},
         {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
-        {"id": "penetration_buffer", "title": "结构托底", "detail": "新能源零售渗透率为63.1%"},
+        {"id": "penetration_buffer", "title": "新能源结构占比", "detail": "新能源零售渗透率为63.1%"},
     ]
     actions = [
         {
@@ -3525,7 +3527,7 @@ def executive_brief_evidence_packet():
         {"id": "e7x_nsr_rank", "type": "imported_product_evaluation", "detail": "AUDI E7X五车同口径全网NSR排名第2。"},
         {"id": "vehicle_data_gap", "type": "data_coverage", "detail": "除AUDI E7X外，当前名单车型尚未接入同口径声量、平台NSR与属性VOC。"},
     ]
-    candidate = "终端需求偏弱，渠道补库同步收缩；新能源以63.1%零售渗透率继续托住市场基本盘。"
+    candidate = "乘用车零售与批发同比均下降，且批发降幅大于零售；新能源零售降幅小于乘用车总体，零售渗透率为63.1%。"
     fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
     return {
         "facts": facts,
@@ -4241,7 +4243,10 @@ def model_judgment_prompt(text, project):
         {"role": "system", "content": (
             "你是MMN营销引擎的车型判断资产分析模块。用户会输入一句或一段对某台车的市场/营销/传播判断。"
             "你必须识别品牌、车型、判断维度、核心观点、归因、策略动作、还缺什么证据，并输出JSON。"
-            "只返回JSON，不要Markdown。字段：brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, tags, confidence。"
+            "只返回JSON，不要Markdown。字段：brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, tags, confidence, highlights。"
+            "highlights是需要向管理层高亮的最小原文片段数组，最多4条；每条必须包含field、quote、level、reason。"
+            "field只能是viewpoint、attribution、strategy_implication或evidence_needed；quote必须逐字存在于对应字段，不得改写。"
+            "level只能是primary或secondary，primary最多1条；优先选商业结果、关键判断转折与明确行动，不要把整句全部高亮。"
             "dimension从市场/营销/传播/竞品/内容/渠道/产品/价格/用户心智/综合判断中选择最合适的一项。"
             "不要编造数据；如果车型或品牌不确定，用当前项目兜底并把confidence设为low。"
             + MMN_OUTPUT_STYLE
@@ -4267,12 +4272,64 @@ def local_model_judgment(text, project):
         "strategy_implication": "先把该判断拆成可验证证据，再决定内容、渠道和品牌传播口径优先级。",
         "evidence_needed": "需要补充平台声量、竞品对比、用户评论原文、市场反馈或转化线索。",
         "tags": ["车型判断", "人工观点", "MMN学习"],
-        "confidence": "low"
+        "confidence": "low",
+        "highlights": [],
     }
+
+MODEL_JUDGMENT_HIGHLIGHT_FIELDS = {
+    "viewpoint", "attribution", "strategy_implication", "evidence_needed"
+}
+
+def normalize_model_judgment_highlights(item):
+    """Keep only short, exact, non-overlapping quotes safe for UI highlighting."""
+    raw_items = item.get("highlights") if isinstance(item.get("highlights"), list) else []
+    normalized = []
+    occupied = {field: [] for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    field_counts = {field: 0 for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    field_chars = {field: 0 for field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS}
+    primary_count = 0
+    seen = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        field = str(raw.get("field") or "").strip()
+        quote = str(raw.get("quote") or "").strip()
+        source = str(item.get(field) or "") if field in MODEL_JUDGMENT_HIGHLIGHT_FIELDS else ""
+        if not source or len(quote) < 2 or len(quote) > 40 or quote not in source:
+            continue
+        key = (field, quote)
+        if key in seen or field_counts[field] >= 3:
+            continue
+        level = "primary" if str(raw.get("level") or "").lower() == "primary" else "secondary"
+        if level == "primary" and primary_count >= 1:
+            level = "secondary"
+        start = source.find(quote)
+        end = start + len(quote)
+        if any(start < used_end and end > used_start for used_start, used_end in occupied[field]):
+            continue
+        max_chars = max(10, int(len(source) * .35))
+        if field_chars[field] + len(quote) > max_chars:
+            continue
+        normalized.append({
+            "field": field,
+            "quote": quote,
+            "level": level,
+            "reason": str(raw.get("reason") or "").strip()[:80],
+        })
+        occupied[field].append((start, end))
+        field_counts[field] += 1
+        field_chars[field] += len(quote)
+        primary_count += int(level == "primary")
+        seen.add(key)
+        if len(normalized) >= 4:
+            break
+    item["highlights"] = normalized
+    return item
 
 def save_model_judgment_asset(item, source_text, edition="china"):
     stamp = now()
     tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+    highlights = item.get("highlights") if isinstance(item.get("highlights"), list) else []
     item_id = stable_id("model-judgment", edition, item.get("brand_name"), item.get("model_name"), item.get("dimension"), source_text)
     knowledge = {
         "id": stable_id("model-judgment-knowledge", item_id),
@@ -4290,14 +4347,16 @@ def save_model_judgment_asset(item, source_text, edition="china"):
             "module": item.get("dimension") or "综合判断",
             "entity": item.get("model_name") or "",
             "brand": item.get("brand_name") or "",
-            "confidence": item.get("confidence") or "low"
+            "confidence": item.get("confidence") or "low",
+            "highlights": highlights,
+            "highlight_status": item.get("highlight_status") or "pending_review",
         }
     }
     with db() as conn:
         conn.execute("""
             insert into model_judgment_assets
-            (id, edition, brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, source_text, tags_json, confidence, knowledge_json, created_at, updated_at)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, edition, brand_name, model_name, dimension, viewpoint, attribution, strategy_implication, evidence_needed, source_text, tags_json, highlights_json, confidence, knowledge_json, created_at, updated_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             on conflict(id) do update set
               brand_name=excluded.brand_name,
               model_name=excluded.model_name,
@@ -4307,6 +4366,7 @@ def save_model_judgment_asset(item, source_text, edition="china"):
               strategy_implication=excluded.strategy_implication,
               evidence_needed=excluded.evidence_needed,
               tags_json=excluded.tags_json,
+              highlights_json=excluded.highlights_json,
               confidence=excluded.confidence,
               knowledge_json=excluded.knowledge_json,
               updated_at=excluded.updated_at
@@ -4314,7 +4374,8 @@ def save_model_judgment_asset(item, source_text, edition="china"):
             item_id, edition, item.get("brand_name") or "", item.get("model_name") or "", item.get("dimension") or "",
             item.get("viewpoint") or "", item.get("attribution") or "", item.get("strategy_implication") or "",
             item.get("evidence_needed") or "", source_text, json.dumps(tags, ensure_ascii=False),
-            item.get("confidence") or "low", json.dumps(knowledge, ensure_ascii=False), stamp, stamp
+            json.dumps(highlights, ensure_ascii=False), item.get("confidence") or "low",
+            json.dumps(knowledge, ensure_ascii=False), stamp, stamp
         ))
     saved = {
         "id": item_id,
@@ -11310,10 +11371,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     errors["qwen"] = str(exc)
                     item = local_model_judgment(text, project)
                     used_model = "local-rule"
+                if not isinstance(item, dict):
+                    item = local_model_judgment(text, project)
+                    used_model = "local-rule"
                 if not item.get("model_name"):
                     item["model_name"] = project.get("model") or "待识别车型"
                 if not item.get("brand_name"):
                     item["brand_name"] = project.get("brand") or infer_brand_from_model(item.get("model_name"))
+                item["highlight_status"] = "model_verified" if used_model != "local-rule" else "pending_review"
+                normalize_model_judgment_highlights(item)
                 normalize_model_identity_records([{
                     "rawName": item.get("model_name"),
                     "normalizedName": item.get("model_name"),
