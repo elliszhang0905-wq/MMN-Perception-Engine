@@ -73,7 +73,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-2"
+APP_VERSION_CODE = "beta-1.02-20260716-executive-actions-3"
 APP_RELEASE_DATE = "2026-07-16"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -3460,7 +3460,7 @@ def executive_brief_evidence_packet():
         {"id": "retail_pressure", "title": "终端零售承压", "detail": "乘用车零售44.3万辆，同比下降15%"},
         {"id": "wholesale_pressure", "title": "批发端承压更明显", "detail": "厂商批发37.9万辆，同比下降26%，降幅大于零售"},
         {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
-        {"id": "penetration_buffer", "title": "结构托底", "detail": "新能源零售渗透率为63.1%"},
+        {"id": "penetration_buffer", "title": "新能源结构占比", "detail": "新能源零售渗透率为63.1%"},
     ]
     actions = [
         {
@@ -3525,7 +3525,7 @@ def executive_brief_evidence_packet():
         {"id": "e7x_nsr_rank", "type": "imported_product_evaluation", "detail": "AUDI E7X五车同口径全网NSR排名第2。"},
         {"id": "vehicle_data_gap", "type": "data_coverage", "detail": "除AUDI E7X外，当前名单车型尚未接入同口径声量、平台NSR与属性VOC。"},
     ]
-    candidate = "终端需求偏弱，渠道补库同步收缩；新能源以63.1%零售渗透率继续托住市场基本盘。"
+    candidate = "乘用车零售与批发同比均下降，且批发降幅大于零售；新能源零售降幅小于乘用车总体，零售渗透率为63.1%。"
     fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
     return {
         "facts": facts,
