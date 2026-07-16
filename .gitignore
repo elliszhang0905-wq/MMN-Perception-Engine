@@ -17,3 +17,4 @@ logs/
 output/playwright/
 data/opportunity/
 data/executive_brief_review.json
+data/sales_warning_review.json

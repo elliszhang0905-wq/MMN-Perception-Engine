@@ -35,7 +35,7 @@ backend_code_is_newer() {
   pid=$(server_pid)
   [[ -n "${pid}" && -f "${PID_FILE}" ]] || return 1
   [[ "$(cat "${PID_FILE}" 2>/dev/null || true)" == "${pid}" ]] || return 0
-  find server.py bf_factory -type f -name '*.py' -newer "${PID_FILE}" -print -quit 2>/dev/null | grep -q .
+  find server.py group_dashboard.py bf_factory -type f -name '*.py' -newer "${PID_FILE}" -print -quit 2>/dev/null | grep -q .
 }
 
 stop_stale_server() {

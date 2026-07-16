@@ -230,6 +230,7 @@ assert.match(css, /\.dashboard-strategy-choice/);
 assert.match(css, /\.dashboard-data-context \.data-dimension\{grid-column:span 1\}/);
 assert.match(css, /\.dashboard-data-context \.label-dimension\{grid-column:span 2\}/);
 assert.match(css, /\.app-home-button/);
+assert.match(css, /#toast\{position:fixed;right:20px;bottom:76px/);
 assert.match(css, /#dashboard\.active>\.model-judgment-panel\{grid-column:1\/-1/);
 assert.match(css, /\.product-proof-cards/);
 assert.match(css, /\.product-proof-card/);

@@ -52,7 +52,7 @@ from opportunity_pipeline import (
     heat_scores,
 )
 from cockpit_decision_loop import derive_execution_recommendations
-from group_dashboard import build_group_dashboard_payload, merge_sales_payloads, parse_cpca_ice_market
+from group_dashboard import build_group_dashboard_payload, build_sales_warning_demo, merge_sales_payloads, parse_cpca_ice_market
 from bf_factory.repository import (
     BFConflictError,
     BFNotFoundError,
@@ -81,8 +81,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260716-whitepaper-evidence-1"
-APP_RELEASE_DATE = "2026-07-16"
+APP_VERSION_CODE = "beta-1.02-20260717-sales-warning-global-1"
+APP_RELEASE_DATE = "2026-07-17"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -120,6 +120,8 @@ SOCIAL_TREND_JOB_LIMIT = 100
 SOCIAL_TREND_JOB_TTL = timedelta(days=1)
 EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
 EXECUTIVE_BRIEF_REVIEW_TASKS = {}
+SALES_WARNING_REVIEW_LOCK = Lock()
+SALES_WARNING_REVIEW_TASKS = {}
 DOUYIN_COLLECTOR_LOCK = Lock()
 DOUYIN_COLLECTOR_TASKS = {}
 DOUYIN_COLLECTOR_LAST_JOB = {}
@@ -3932,6 +3934,321 @@ def executive_brief_state(force=False):
     enqueue_executive_brief_review(packet, force=force)
     return public_executive_brief_state(packet, cached)
 
+
+def sales_warning_evidence_packet(warning=None):
+    warning = warning or build_sales_warning_demo()
+    facts = {
+        "mode": warning.get("mode") or "single_segment_demo",
+        "source": warning.get("source") or {},
+        "segment": warning.get("segment") or {},
+        "summary": warning.get("summary") or {},
+        "thresholds": warning.get("thresholds") or {},
+        "priceRules": warning.get("priceRules") or {},
+        "qualityIssues": warning.get("qualityIssues") or [],
+        "saicModels": [
+            {
+                **{
+                    key: item.get(key)
+                    for key in (
+                        "seriesId", "model", "brand", "bodyType", "sizeClass", "energyType", "segmentKey",
+                        "sales", "rank", "priceDisplay", "effectivePriceMin", "effectivePriceMax", "priceRule",
+                        "marketSales", "marketModelCount", "benchmark", "performanceRate", "yellowLine",
+                        "redLine", "greenLine", "level", "qualityStatus", "peerBasis", "peerCount",
+                    )
+                },
+                "benchmarkPeers": item.get("benchmarkPeers") or [],
+                "benchmarkAuditPeers": item.get("benchmarkAuditPeers") or item.get("benchmarkPeers") or [],
+            }
+            for item in warning.get("saicModels") or []
+        ],
+    }
+    reviewed_model_ids = [item["model"] for item in facts["saicModels"]]
+    warning_ids = [item["model"] for item in facts["saicModels"] if item.get("level") != "green"]
+    fingerprint = hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {"facts": facts, "reviewedModelIds": reviewed_model_ids, "warningIds": warning_ids, "fingerprint": fingerprint}
+
+
+def sales_warning_review_prompt(packet):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN细分市场销量预警的独立质检模型。只校验锁定事实包，不得改写数字或另选竞品。"
+                "逐项检查每款车型自己的车身形式、懂车帝尺寸、能源形式、市场总销量、市场车型数、"
+                "市场销量中位数、表现率与阈值计算；single_segment_demo模式再检查有效价格规则与竞品池。"
+                "预警等级必须严格使用lockedFacts.summary.levelRules与lockedFacts.thresholds，不得使用固定阈值替代。"
+                "不得把懂车帝分类改写为乘联会级别，不得把单月相关性写成因果。"
+                "只输出JSON对象：approved(boolean)、factsFingerprint、reviewedModelIds(string数组)、warningIds(string数组)、issues(string数组)。"
+                "全部通过时reviewedModelIds和warningIds必须分别原样复制requiredReviewedModelIds与requiredWarningIds；"
+                "warningIds只包含level不为green的车型；任一事实或计算不一致必须approved=false。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "factsFingerprint": packet["fingerprint"],
+                    "lockedFacts": packet["facts"],
+                    "requiredReviewedModelIds": packet["reviewedModelIds"],
+                    "requiredWarningIds": packet["warningIds"],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def normalize_sales_warning_review(raw, packet):
+    try:
+        parsed = parse_json_object(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return bool(
+        parsed.get("approved") is True
+        and str(parsed.get("factsFingerprint") or "") == packet["fingerprint"]
+        and set(map(str, parsed.get("reviewedModelIds") or [])) == set(packet["reviewedModelIds"])
+        and set(map(str, parsed.get("warningIds") or [])) == set(packet["warningIds"])
+        and not (parsed.get("issues") or [])
+    )
+
+
+def sales_warning_review_cache_path():
+    return DATA_DIR / "sales_warning_review.json"
+
+
+def load_sales_warning_review_cache(packet):
+    path = sales_warning_review_cache_path()
+    if not path.exists():
+        return None
+    try:
+        cached = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return cached if cached.get("factsFingerprint") == packet["fingerprint"] else None
+
+
+def save_sales_warning_review_cache(payload):
+    path = sales_warning_review_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def public_sales_warning_review_state(packet, cached=None):
+    cached = cached or {}
+    status = cached.get("status") if cached.get("status") in {"verified", "pending_review"} else "pending_review"
+    internal_checks = cached.get("providerChecks") or {"qwen": "pending", "deepseek": "pending"}
+    return {
+        "status": status,
+        "statusLabel": "双旗舰模型交叉验证已通过" if status == "verified" else "双旗舰模型交叉验证中 · 管理结论暂不发布",
+        "factsFingerprint": packet["fingerprint"],
+        "providerChecks": {
+            "flagshipA": internal_checks.get("qwen", "pending"),
+            "flagshipB": internal_checks.get("deepseek", "pending"),
+        },
+        "reviewedAt": cached.get("reviewedAt") or "",
+        "managementConclusionPublished": status == "verified",
+        "gateNote": "数值由确定性规则计算；两路模型只做独立质检，不改写销量、价格、竞品池或阈值。",
+    }
+
+
+def run_sales_warning_dual_review(packet=None):
+    packet = packet or sales_warning_evidence_packet()
+    prompt = sales_warning_review_prompt(packet)
+
+    def review(provider):
+        try:
+            if provider == "qwen":
+                raw = call_qwen(prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=2000, enable_thinking=False)
+            else:
+                raw = call_deepseek(
+                    prompt,
+                    temperature=.05,
+                    profile="deep",
+                    timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=8000,
+                    response_format={"type": "json_object"},
+                )
+            return "verified" if normalize_sales_warning_review(raw, packet) else "rejected"
+        except Exception:
+            return "unavailable"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        qwen_future = executor.submit(review, "qwen")
+        deepseek_future = executor.submit(review, "deepseek")
+        checks = {"qwen": qwen_future.result(), "deepseek": deepseek_future.result()}
+    status = "verified" if all(value == "verified" for value in checks.values()) else "pending_review"
+    result = {
+        "status": status,
+        "factsFingerprint": packet["fingerprint"],
+        "providerChecks": checks,
+        "reviewedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    save_sales_warning_review_cache(result)
+    return public_sales_warning_review_state(packet, result)
+
+
+def enqueue_sales_warning_review(packet=None):
+    packet = packet or sales_warning_evidence_packet()
+    if os.getenv("MMN_SALES_WARNING_MODELS_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
+        return False
+    if not (qwen_config("deep")["configured"] and deepseek_config("deep")["configured"]):
+        return False
+    with SALES_WARNING_REVIEW_LOCK:
+        task = SALES_WARNING_REVIEW_TASKS.get(packet["fingerprint"]) or {}
+        if task.get("status") == "running":
+            return True
+        SALES_WARNING_REVIEW_TASKS[packet["fingerprint"]] = {"status": "running", "startedAt": now()}
+
+    def work():
+        try:
+            run_sales_warning_dual_review(packet)
+        finally:
+            with SALES_WARNING_REVIEW_LOCK:
+                SALES_WARNING_REVIEW_TASKS[packet["fingerprint"]] = {"status": "done", "finishedAt": now()}
+
+    Thread(target=work, daemon=True, name="sales-warning-review").start()
+    return True
+
+
+def sales_warning_review_state(warning=None, force=False):
+    packet = sales_warning_evidence_packet(warning)
+    cached = load_sales_warning_review_cache(packet)
+    if cached and cached.get("status") == "verified" and not force:
+        return public_sales_warning_review_state(packet, cached)
+    enqueue_sales_warning_review(packet)
+    return public_sales_warning_review_state(packet, cached)
+
+
+SALES_WARNING_T_CYCLE_PHASES = (
+    {"key": "preheat", "label": "上市预热期", "range": "T-45～T-22", "start": -45, "end": -22},
+    {"key": "presale", "label": "首发/预售期", "range": "T-21～T-1", "start": -21, "end": -1},
+    {"key": "launch", "label": "正式上市期", "range": "T0", "start": 0, "end": 0},
+    {"key": "amplify", "label": "热度放大期", "range": "T+1～T+30", "start": 1, "end": 30},
+    {"key": "conversion", "label": "销售转化期", "range": "T+31～T+90", "start": 31, "end": 90},
+    {"key": "validation", "label": "销售验证期", "range": "T+91～T+120", "start": 91, "end": 120},
+    {"key": "alwayson", "label": "常态经营期", "range": "T+121起", "start": 121, "end": None},
+)
+
+
+def sales_warning_cycle_packet(model, launch_date, assessment_date=None, series_id=""):
+    model = str(model or "").strip()
+    if not model:
+        raise ValueError("车型不能为空。")
+    try:
+        launch = datetime.strptime(str(launch_date or ""), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("正式上市日期必须为 YYYY-MM-DD 格式。") from exc
+    if assessment_date:
+        try:
+            assessment = datetime.strptime(str(assessment_date), "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValueError("计算日期必须为 YYYY-MM-DD 格式。") from exc
+    else:
+        assessment = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    offset = (assessment - launch).days
+    phase = next(
+        (
+            item for item in SALES_WARNING_T_CYCLE_PHASES
+            if offset >= item["start"] and (item["end"] is None or offset <= item["end"])
+        ),
+        SALES_WARNING_T_CYCLE_PHASES[0],
+    )
+    t_label = "T0" if offset == 0 else f"T{'+' if offset > 0 else ''}{offset}"
+    facts = {
+        "seriesId": str(series_id or ""),
+        "model": model,
+        "launchDate": launch.isoformat(),
+        "assessmentDate": assessment.isoformat(),
+        "dayOffset": offset,
+        "tLabel": t_label,
+        "phaseKey": phase["key"],
+        "phaseLabel": phase["label"],
+        "phaseRange": phase["range"],
+        "rule": "assessmentDate - launchDate，按自然日计算；阶段边界沿用 MMN T 周期模型",
+    }
+    fingerprint = hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    return {"facts": facts, "fingerprint": fingerprint}
+
+
+def sales_warning_cycle_review_prompt(packet):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN车型T周期的独立质检模型。正式上市日期、计算日期、自然日差、T+X标签和阶段边界均已由确定性规则锁定。"
+                "你只检查日期差与阶段归类是否一致，不得改写日期、T+X或阶段。"
+                "只输出JSON对象：approved(boolean)、factsFingerprint、model、launchDate、assessmentDate、"
+                "dayOffset(number)、tLabel、phaseKey、phaseLabel、phaseRange、issues(string数组)。"
+                "全部一致时原样复制lockedFacts且issues为空；任一不一致必须approved=false。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {"factsFingerprint": packet["fingerprint"], "lockedFacts": packet["facts"]},
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def normalize_sales_warning_cycle_review(raw, packet):
+    try:
+        parsed = parse_json_object(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    facts = packet["facts"]
+    return bool(
+        isinstance(parsed, dict)
+        and parsed.get("approved") is True
+        and str(parsed.get("factsFingerprint") or "") == packet["fingerprint"]
+        and all(parsed.get(key) == facts[key] for key in (
+            "model", "launchDate", "assessmentDate", "dayOffset", "tLabel",
+            "phaseKey", "phaseLabel", "phaseRange",
+        ))
+        and not (parsed.get("issues") or [])
+    )
+
+
+def run_sales_warning_cycle_dual_review(model, launch_date, assessment_date=None, series_id=""):
+    packet = sales_warning_cycle_packet(model, launch_date, assessment_date, series_id)
+    prompt = sales_warning_cycle_review_prompt(packet)
+
+    def review(provider):
+        try:
+            if provider == "qwen":
+                raw = call_qwen(
+                    prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=1200, enable_thinking=False,
+                )
+            else:
+                raw = call_deepseek(
+                    prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=1200, response_format={"type": "json_object"},
+                )
+            return "verified" if normalize_sales_warning_cycle_review(raw, packet) else "rejected"
+        except Exception:
+            return "unavailable"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        qwen_future = executor.submit(review, "qwen")
+        deepseek_future = executor.submit(review, "deepseek")
+        checks = {"qwen": qwen_future.result(), "deepseek": deepseek_future.result()}
+    status = "verified" if all(value == "verified" for value in checks.values()) else "pending_review"
+    return {
+        "status": status,
+        "statusLabel": "双旗舰模型交叉质检已通过" if status == "verified" else "双旗舰模型交叉质检未通过，暂不写入周期",
+        "factsFingerprint": packet["fingerprint"],
+        "providerChecks": {"flagshipA": checks["qwen"], "flagshipB": checks["deepseek"]},
+        "conclusion": packet["facts"] if status == "verified" else None,
+        "reviewedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "gateNote": "MMN按正式上市日确定性计算T+X；双旗舰模型只做交叉质检，不改写结论。",
+    }
+
 def node_binary():
     for candidate in NODE_CANDIDATES:
         if candidate and Path(candidate).exists():
@@ -5946,6 +6263,10 @@ def source_platform(filename, sheet_names):
         return "汽车之家"
     if any(k in text for k in ("懂车帝", "dongchedi", "DCD", "dcdapp")):
         return "懂车帝"
+    # 上汽集团的“八车周对比次数正反向排名”是懂车帝固定导出文件，
+    # 原始文件名本身不带平台名，需用稳定的业务文件名识别来源。
+    if "八车周对比次数正反向排名" in text:
+        return "懂车帝"
     if any(k in text for k in ("易车", "yiche", "BitAuto")):
         return "易车"
     return "自动识别"
@@ -6085,7 +6406,7 @@ def build_generic_vertical_items(sheets, filename, fallback_platform):
         if any(h == "正向排名top20车系名称" for h in headers):
             continue
         if "本品车系名称" in headers and "竞品车系名称" in headers:
-            # This is the dedicated汽车之家 weekly format handled above. Parsing it
+            # This dedicated weekly format has already been handled above. Parsing it
             # again here creates a second ISO-date observation for the same week.
             continue
         platform_i = col_index(headers, platform_keys)
@@ -6191,7 +6512,7 @@ def build_vertical_media_dataset_from_workbook(data, filename):
     platform = source_platform(filename, list(sheets.keys()))
     items = []
 
-    # 汽车之家格式：每个 sheet 是一个周周期；列为 本品、正向排名、竞品、占比、反向排名。
+    # 周度长表格式：每个 sheet 是一个周周期；列为本品、正向排名、竞品、占比、反向排名。
     for sheet, cells in sheets.items():
         rows = sheet_rows(cells)
         if not rows:
@@ -10499,8 +10820,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         edition_from(q.get("edition", ["china"])[0]),
                         fuel_market=fuel_market,
                     )
-                payload["executiveBrief"] = executive_brief_state(
-                    force=str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
+                force_review = str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
+                payload["executiveBrief"] = executive_brief_state(force=force_review)
+                payload["salesWarnings"]["dualModelReview"] = sales_warning_review_state(
+                    payload["salesWarnings"],
+                    force=force_review,
                 )
                 self.send_json(payload)
             except Exception as exc:
@@ -10790,6 +11114,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/opportunity-map/generate",
                 "/api/opportunity-map/review",
                 "/api/opportunity-map/manual-reviews",
+                "/api/group-dashboard/cycle-review",
                 "/api/cockpit/execution-cycles",
                 "/api/cockpit/execution-cycles/monitoring",
                 "/api/douyin-hot/recognize",
@@ -10800,6 +11125,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/group-dashboard/cycle-review":
+            try:
+                if not (qwen_config("deep")["configured"] and deepseek_config("deep")["configured"]):
+                    raise RuntimeError("双旗舰模型尚未配置完整，无法发布T周期结论。")
+                body = self.read_json()
+                result = run_sales_warning_cycle_dual_review(
+                    body.get("model"),
+                    body.get("launchDate"),
+                    series_id=body.get("seriesId"),
+                )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/product-whitepaper/analyze":
             try:
                 query = parse_qs(parsed.query)

@@ -721,7 +721,7 @@ td.empty-cell{
 dialog{border:0;border-radius:16px;padding:0;width:min(760px,90vw);box-shadow:0 25px 80px rgba(0,0,0,.2)}dialog::backdrop{background:rgba(10,25,39,.55)}#row-form{padding:23px}.dialog-head,.dialog-actions{display:flex;justify-content:space-between;align-items:center}.dialog-head{margin-bottom:20px}.dialog-head button{border:0;font-size:20px;background:transparent}.dialog-actions{justify-content:flex-end;gap:10px;margin-top:22px}
 #creator-form{padding:23px}
 #creator-form textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px 12px;font:inherit;resize:vertical;background:#fff;color:var(--ink)}
-#toast{position:fixed;right:24px;bottom:24px;background:var(--navy);color:#fff;padding:12px 17px;border-radius:9px;opacity:0;transform:translateY(12px);transition:.25s;z-index:20;font-size:12px}#toast.show{opacity:1;transform:none}
+#toast{position:fixed;right:20px;bottom:76px;background:var(--navy);color:#fff;padding:12px 17px;border-radius:9px;opacity:0;transform:translateY(12px);transition:.25s;z-index:20;font-size:12px}#toast.show{opacity:1;transform:none}
 @media(max-width:1000px){.sidebar{width:200px}.brand-logo{width:142px!important}.edition-switch{width:154px}main{margin-left:200px}.page,main>header{padding-left:24px;padding-right:24px}.kpis{grid-template-columns:1fr 1fr}.grid.two{grid-template-columns:1fr}.project-strip{grid-template-columns:1fr 1fr}.action-item{grid-template-columns:50px 1fr 1fr}.action-item .action-meta:nth-of-type(2){display:none}.tier-grid{grid-template-columns:1fr}.topic-planner-controls{grid-template-columns:1fr 1fr}.topic-planner-controls button{grid-column:1/-1}.topic-phase-grid,.topic-card-grid{grid-template-columns:1fr 1fr}}
 
 /* MMN premium polish layer */

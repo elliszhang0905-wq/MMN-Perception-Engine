@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 
 
 LAUNCH_MODELS = (
-    {"model": "奥迪E7X", "brand": "上汽奥迪", "aliases": ("奥迪E7X",)},
-    {"model": "奥迪E5 Sportback", "brand": "上汽奥迪", "aliases": ("奥迪E5 Sportback", "奥迪E5")},
+    {"model": "奥迪E7X", "brand": "上汽奥迪", "aliases": ("奥迪E7X", "AUDI E7X")},
+    {"model": "奥迪E5 Sportback", "brand": "上汽奥迪", "aliases": ("奥迪E5 Sportback", "奥迪E5", "AUDI E5 Sportback", "AUDI E5")},
     {"model": "智己LS8", "brand": "智己", "aliases": ("智己LS8",)},
     {"model": "MG4", "brand": "MG", "aliases": ("MG4",)},
     {"model": "荣威i6", "brand": "荣威", "aliases": ("荣威i6",)},
@@ -46,12 +48,16 @@ MARKET_DIMENSIONS = (
 SAIC_BRANDS = {
     "上汽大众", "上汽奥迪", "智己", "智己汽车",
     "MG", "名爵", "荣威", "上汽通用别克", "别克", "凯迪拉克", "大通",
-    "五菱汽车", "宝骏", "尚界", "沃尔沃",
+    "五菱汽车", "上汽通用五菱", "宝骏", "尚界", "沃尔沃", "飞凡", "飞凡汽车",
 }
 
 SAIC_VOLKSWAGEN_MODELS = ("朗逸", "帕萨特", "途观", "途岳", "途昂", "凌渡", "威然", "ID.3", "ID.4 X", "ID.6 X", "ID. ERA")
 SAIC_AUDI_MODELS = ("奥迪E5", "奥迪E7X")
 E7X_EVALUATION_PATH = Path(__file__).with_name("data") / "e7x_product_evaluation_2026-06.json"
+SALES_WARNING_DEMO_PATH = Path(__file__).with_name("data") / "sales_warning_demo_2026-06.json"
+SALES_WARNING_LATEST_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_latest.json"
+SALES_WARNING_OBSERVED_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_observed_2026-06.json"
+SALES_WARNING_MONITOR_SOURCE = "八车周对比次数正反向排名"
 
 
 def _safe_json(value, fallback):
@@ -86,6 +92,431 @@ def load_e7x_product_evaluation(path=E7X_EVALUATION_PATH):
     payload["status"] = "available"
     payload["validVerticalModels"] = len(valid_vertical)
     return payload
+
+
+def _warning_level(performance_rate):
+    if performance_rate >= 0.8:
+        return "green", "正常"
+    if performance_rate >= 0.25:
+        return "yellow", "黄色预警"
+    return "red", "红色预警"
+
+
+def build_sales_warning_demo(path=SALES_WARNING_DEMO_PATH):
+    """构建可复核的细分市场销量失速预警 Demo。"""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"status": "missing", "source": {}, "segment": {}, "summary": {}, "saicModels": [], "ranking": []}
+
+    models = []
+    for item in payload.get("models") or []:
+        adjustment = float(item.get("effectivePriceAdjustment") or 0)
+        normalized = {
+            **item,
+            "sales": int(item.get("sales") or 0),
+            "effectivePriceMin": round(float(item.get("priceMin") or 0) + adjustment, 2),
+            "effectivePriceMax": round(float(item.get("priceMax") or item.get("priceMin") or 0) + adjustment, 2),
+            "priceRule": "车电分离口径 -10万" if adjustment else "榜单展示价格",
+        }
+        models.append(normalized)
+    models.sort(key=lambda item: item["sales"], reverse=True)
+    for rank, item in enumerate(models, 1):
+        item["rank"] = rank
+        item["isSaic"] = _is_saic_sales_row({
+            "brand_name": item.get("brand"),
+            "series_name": item.get("model"),
+        })
+
+    saic_models = []
+    for item in (model for model in models if model["isSaic"]):
+        peers = [peer for peer in models if peer["model"] != item["model"]]
+        benchmark_peers = sorted(peers, key=lambda peer: peer["sales"], reverse=True)
+        benchmark = int(round(median([peer["sales"] for peer in benchmark_peers]))) if benchmark_peers else 0
+        performance_rate = round(item["sales"] / benchmark, 4) if benchmark else 0
+        level, level_label = _warning_level(performance_rate)
+        yellow_line = int(round(benchmark * 0.5))
+        red_line = int(round(benchmark * 0.25))
+        saic_models.append({
+            **item,
+            "benchmark": benchmark,
+            "performanceRate": performance_rate,
+            "yellowLine": yellow_line,
+            "redLine": red_line,
+            "gapToWarningLine": max(0, yellow_line - item["sales"]),
+            "level": level,
+            "levelLabel": level_label,
+            "peerBasis": "懂车帝同细分市场全量（仅排除本品）",
+            "peerCount": len(peers),
+            "benchmarkPeers": [
+                {"model": peer["model"], "sales": peer["sales"], "effectivePriceMin": peer["effectivePriceMin"]}
+                for peer in benchmark_peers[:3]
+            ],
+            "benchmarkAuditPeers": [
+                {"model": peer["model"], "sales": peer["sales"], "effectivePriceMin": peer["effectivePriceMin"]}
+                for peer in benchmark_peers
+            ],
+            "workflow": {
+                "status": "待认领" if level in {"red", "orange"} else "持续观察" if level == "yellow" else "正常监测",
+                "owner": "品牌与产品联合专项" if level in {"red", "orange"} else "品牌经营团队",
+                "nextReview": "2026年7月销量发布后",
+                "closeCriteria": "连续2个月高于黄色预警线；连续2个月达到市场基准80%则恢复正常",
+            },
+        })
+
+    severity = {"red": 0, "orange": 1, "yellow": 2, "green": 3}
+    saic_models.sort(key=lambda item: (severity[item["level"]], item["performanceRate"]))
+    market_total = sum(item["sales"] for item in models)
+    return {
+        "status": "available",
+        "mode": "single_segment_demo",
+        "source": payload.get("source") or {},
+        "segment": payload.get("segment") or {},
+        "priceRules": payload.get("priceRules") or {},
+        "summary": {
+            "marketSales": market_total,
+            "modelCount": len(models),
+            "saicModelCount": len(saic_models),
+            "redCount": sum(item["level"] == "red" for item in saic_models),
+            "warningCount": sum(item["level"] != "green" for item in saic_models),
+            "method": "懂车帝同车型种类×同尺寸×同动力形式的全部其他车型销量中位数；仅排除本品",
+            "levelRules": {
+                "green": "表现率≥80%",
+                "yellow": "25%≤表现率＜80%",
+                "red": "表现率＜25%",
+                "warningDefinition": "黄色、红色均计入预警；仅绿色为正常",
+            },
+        },
+        "saicModels": saic_models,
+        "ranking": models,
+    }
+
+
+def build_sales_warning_full(payload):
+    """Adapt the crawler's complete deterministic dataset to the dashboard contract."""
+    if not isinstance(payload, dict) or payload.get("complete") is not True:
+        raise ValueError("全量细分市场数据未通过完整性门禁")
+    if payload.get("source") not in {
+        "dongchedi_authenticated_browser",
+        "dongchedi_public_rank_api",
+    }:
+        raise ValueError("全量细分市场数据来源不受支持")
+    period = str(payload.get("period") or "").strip()
+    thresholds = payload.get("thresholds") or {}
+    red_ratio = float(thresholds.get("red_ratio") or 0)
+    green_ratio = float(thresholds.get("green_ratio") or 0)
+    yellow_ratio = float(thresholds.get("yellow_ratio") or ((red_ratio + green_ratio) / 2))
+    if not period or not (0 < red_ratio < yellow_ratio < green_ratio):
+        raise ValueError("全量细分市场月份或阈值无效")
+
+    level_labels = {
+        "red": "红色预警",
+        "orange": "橙色预警",
+        "yellow": "黄色观察",
+        "green": "绿色正常",
+        "gray": "灰色待复核",
+    }
+    saic_models = []
+    for item in payload.get("saic_vehicles") or []:
+        level = str(item.get("warning_level") or "gray")
+        if level not in level_labels:
+            raise ValueError(f"未知销量预警等级：{level}")
+        sales = int(item.get("sales_volume") or 0)
+        market_sales = int(item.get("segment_total_sales") or 0)
+        benchmark = float(item.get("benchmark_sales") or item.get("segment_median_sales") or 0)
+        red_line = int(item.get("red_line_sales") or round(benchmark * red_ratio))
+        yellow_line = int(round(benchmark * yellow_ratio))
+        green_line = int(item.get("green_line_sales") or round(benchmark * green_ratio))
+        body_type = str(item.get("body_type") or "待复核")
+        size_class = str(item.get("size_class") or "待复核")
+        energy_type = str(item.get("energy_type") or "待复核")
+        saic_models.append({
+            "seriesId": int(item.get("series_id") or 0),
+            "model": str(item.get("series_name") or "待复核车型"),
+            "brand": str(item.get("manufacturer") or "上汽集团"),
+            "bodyType": body_type,
+            "sizeClass": size_class,
+            "energyType": energy_type,
+            "segmentKey": str(item.get("segment_key") or ""),
+            "segmentLabel": " · ".join((body_type, size_class, energy_type)),
+            "sales": sales,
+            "rank": int(item.get("segment_rank") or 0),
+            "priceDisplay": str(item.get("price") or "价格待复核"),
+            "marketSales": market_sales,
+            "marketShare": round(sales / market_sales, 4) if market_sales else None,
+            "marketModelCount": int(item.get("segment_model_count") or 0),
+            "benchmark": benchmark,
+            "peerBasis": str(item.get("competitor_pool_rule") or "排除本品后，取同细分市场销量前3名竞品的销量中位数；不足3款不计算"),
+            "peerCount": int(item.get("benchmark_pool_count") or item.get("competitor_pool_count") or 0),
+            "marketPeerCount": int(item.get("competitor_pool_count") or 0),
+            "benchmarkMethod": str(item.get("benchmark_method") or "top_competitor_median"),
+            "benchmarkPeers": [
+                {
+                    "model": str(peer.get("series_name") or "待复核车型"),
+                    "sales": int(peer.get("sales_volume") or 0),
+                    "priceDisplay": str(peer.get("price") or "价格待复核"),
+                }
+                for peer in (item.get("benchmark_pool") or item.get("competitor_pool") or [])
+            ],
+            "benchmarkAuditPeers": [
+                {
+                    "model": str(peer.get("series_name") or "待复核车型"),
+                    "sales": int(peer.get("sales_volume") or 0),
+                    "priceDisplay": str(peer.get("price") or "价格待复核"),
+                }
+                for peer in (item.get("competitor_pool") or [])
+            ],
+            "vehicleStartPriceWan": item.get("vehicle_start_price_wan"),
+            "benchmarkAverageStartPriceWan": item.get("benchmark_average_start_price_wan"),
+            "benchmarkMinimumStartPriceWan": item.get("benchmark_minimum_start_price_wan"),
+            "benchmarkMaximumStartPriceWan": item.get("benchmark_maximum_start_price_wan"),
+            "benchmarkPriceSampleCount": int(item.get("benchmark_price_sample_count") or 0),
+            "startPricePremiumRate": item.get("start_price_premium_ratio"),
+            "performanceRate": float(item.get("performance_ratio") or 0),
+            "redLine": red_line,
+            "yellowLine": yellow_line,
+            "greenLine": green_line,
+            "gapToRedLine": max(0, red_line - sales),
+            "level": level,
+            "levelLabel": level_labels[level],
+            "qualityStatus": str(item.get("quality_status") or "unknown"),
+            "workflow": {
+                "status": "待认领" if level == "red" else "持续观察" if level in {"orange", "yellow"} else "正常监测" if level == "green" else "数据待复核",
+                "owner": "品牌与产品联合专项" if level == "red" else "品牌经营团队",
+                "nextReview": "下月16日自动复盘",
+                "closeCriteria": "连续2个月达到或高于头部竞争基准80%",
+            },
+        })
+
+    severity = {"red": 0, "orange": 1, "yellow": 2, "gray": 3, "green": 4}
+    saic_models.sort(key=lambda item: (severity[item["level"]], item["performanceRate"], item["model"]))
+    first = saic_models[0] if saic_models else {}
+    return {
+        "status": "available",
+        "mode": "full_segment_market",
+        "source": {
+            "provider": "懂车帝",
+            "period": period,
+            "capturedAt": payload.get("captured_at") or "",
+            "complete": True,
+        },
+        "segment": {
+            "id": "dynamic-by-selected-vehicle",
+            "label": "按所选车型动态切换",
+        },
+        "summary": {
+            "marketCount": int(payload.get("market_count") or 0),
+            "saicModelCount": len(saic_models),
+            "calculableModelCount": len(saic_models),
+            "redCount": sum(item["level"] == "red" for item in saic_models),
+            "orangeCount": sum(item["level"] == "orange" for item in saic_models),
+            "yellowCount": sum(item["level"] == "yellow" for item in saic_models),
+            "greenCount": sum(item["level"] == "green" for item in saic_models),
+            "grayCount": sum(item["level"] == "gray" for item in saic_models),
+            "warningCount": sum(item["level"] in {"red", "orange", "yellow"} for item in saic_models),
+            "method": "市场总量覆盖全部车型；预警基准为排除本品后的同细分市场销量前3名竞品中位数，少于3款不计算",
+            "levelRules": {
+                "red": f"头部基准达成率＜{red_ratio:.0%}",
+                "yellow": f"{red_ratio:.0%}≤头部基准达成率＜{green_ratio:.0%}",
+                "green": f"头部基准达成率≥{green_ratio:.0%}",
+                "gray": "数据冲突、能源形式待复核或头部竞品少于3款",
+            },
+        },
+        "thresholds": {
+            "redRatio": red_ratio,
+            "yellowRatio": yellow_ratio,
+            "greenRatio": green_ratio,
+        },
+        "qualityIssues": payload.get("quality_issues") or [],
+        "saicModels": saic_models,
+        "ranking": [],
+    }
+
+
+def _verified_observed_markets(path=SALES_WARNING_DEMO_PATH):
+    """Split the verified Dongchedi snapshot into exact size-level markets."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    source = payload.get("source") or {}
+    segment = payload.get("segment") or {}
+    if source.get("name") != "懂车帝销量榜" or not source.get("period"):
+        return {}
+    if segment.get("bodyType") != "轿车" or segment.get("energyType") != "纯电动":
+        return {}
+    grouped = defaultdict(list)
+    for row in payload.get("models") or []:
+        size_class = str(row.get("sizeClass") or "").strip()
+        sales = int(row.get("sales") or 0)
+        if size_class and sales >= 0:
+            grouped[size_class].append({
+                "series_name": str(row.get("model") or "").strip(),
+                "manufacturer": str(row.get("brand") or "").strip(),
+                "sales_volume": sales,
+                "price": f"{float(row.get('priceMin') or 0):.2f}—{float(row.get('priceMax') or row.get('priceMin') or 0):.2f}万元",
+            })
+    return {
+        f"轿车|{size_class}|纯电动": {
+            "period": str(source["period"]),
+            "source": source,
+            "rows": rows,
+        }
+        for size_class, rows in grouped.items()
+    }
+
+
+def build_sales_warning_observed(path=SALES_WARNING_OBSERVED_PATH, market_path=SALES_WARNING_DEMO_PATH):
+    """Expose verified focal observations and retain every already-verified market metric."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {"status": "missing", "source": {}, "segment": {}, "summary": {}, "saicModels": [], "ranking": []}
+    if payload.get("source") != "dongchedi_user_verified_observations" or not payload.get("period"):
+        raise ValueError("重点车型销量观察文件来源或月份无效")
+
+    verified_markets = _verified_observed_markets(market_path)
+    items = []
+    for source_item in payload.get("vehicles") or []:
+        model = str(source_item.get("series_name") or "").strip()
+        body_type = str(source_item.get("body_type") or "待核验").strip()
+        size_class = str(source_item.get("size_class") or "待核验").strip()
+        energy_type = str(source_item.get("energy_type") or "待核验").strip()
+        sales = int(source_item.get("sales_volume") or 0)
+        if not model or sales <= 0:
+            continue
+        item = {
+            "seriesId": int(source_item.get("series_id") or 0),
+            "model": model,
+            "brand": str(source_item.get("manufacturer") or "上汽集团"),
+            "bodyType": body_type,
+            "sizeClass": size_class,
+            "energyType": energy_type,
+            "segmentKey": "|".join((body_type, size_class, energy_type)),
+            "segmentLabel": " · ".join((body_type, size_class, energy_type)),
+            "sales": sales,
+            "rank": int(source_item.get("segment_rank") or 0),
+            "priceDisplay": str(source_item.get("price") or "价格待核验"),
+            "marketSales": None,
+            "marketShare": None,
+            "marketModelCount": None,
+            "benchmark": None,
+            "peerBasis": "懂车帝同车型种类×同尺寸×同动力形式，仅排除本品；完整竞品池待接入",
+            "peerCount": None,
+            "benchmarkPeers": [],
+            "benchmarkAuditPeers": [],
+            "performanceRate": None,
+            "redLine": None,
+            "greenLine": None,
+            "gapToRedLine": None,
+            "level": "gray",
+            "levelLabel": "竞品池待补齐",
+            "qualityStatus": "focal_sales_verified_competitor_pool_pending",
+            "evidence": source_item.get("evidence") or {},
+            "workflow": {
+                "status": "竞品池待补齐",
+                "owner": "销量数据运营",
+                "nextReview": "完整同月榜单接入后自动计算",
+                "closeCriteria": "同车型种类×同尺寸×同动力形式完整榜单通过门禁",
+            },
+        }
+        verified_market = verified_markets.get(item["segmentKey"])
+        market_rows = list((verified_market or {}).get("rows") or [])
+        market_own = next(
+            (row for row in market_rows if _model_identity_key(row.get("series_name")) == _model_identity_key(model)),
+            None,
+        )
+        if verified_market and verified_market.get("period") == str(payload.get("period")) and market_own:
+            ordered = sorted(market_rows, key=lambda row: (-int(row["sales_volume"]), row["series_name"]))
+            peers = [row for row in ordered if _model_identity_key(row["series_name"]) != _model_identity_key(model)]
+            benchmark = float(median([row["sales_volume"] for row in peers])) if peers else 0
+            performance_rate = round(sales / benchmark, 4) if benchmark else 0
+            level, level_label = _warning_level(performance_rate)
+            item.update({
+                "rank": next(index for index, row in enumerate(ordered, 1) if row is market_own),
+                "marketSales": sum(int(row["sales_volume"]) for row in market_rows),
+                "marketShare": round(sales / sum(int(row["sales_volume"]) for row in market_rows), 4),
+                "marketModelCount": len(market_rows),
+                "benchmark": benchmark,
+                "peerBasis": "懂车帝同车型种类×同尺寸×同动力形式完整榜单，仅排除本品",
+                "peerCount": len(peers),
+                "benchmarkPeers": [
+                    {"model": row["series_name"], "sales": row["sales_volume"], "priceDisplay": row["price"]}
+                    for row in peers[:3]
+                ],
+                "benchmarkAuditPeers": [
+                    {"model": row["series_name"], "sales": row["sales_volume"], "priceDisplay": row["price"]}
+                    for row in peers
+                ],
+                "performanceRate": performance_rate,
+                "redLine": round(benchmark * 0.25),
+                "yellowLine": round(benchmark * 0.5),
+                "greenLine": round(benchmark * 0.8),
+                "gapToRedLine": max(0, round(benchmark * 0.25) - sales),
+                "level": level,
+                "levelLabel": level_label,
+                "qualityStatus": "verified_complete_market",
+                "workflow": {
+                    "status": "待认领" if level in {"red", "orange"} else "持续观察" if level == "yellow" else "正常监测",
+                    "owner": "品牌与产品联合专项" if level in {"red", "orange"} else "品牌经营团队",
+                    "nextReview": "下月销量发布后复盘",
+                    "closeCriteria": "连续2个月达到细分市场竞品中位数80%",
+                },
+            })
+        items.append(item)
+    calculable_count = sum(item.get("performanceRate") is not None for item in items)
+    return {
+        "status": "available",
+        "mode": "observed_focal_models",
+        "source": {
+            "provider": "懂车帝",
+            "period": str(payload.get("period")),
+            "capturedAt": str(payload.get("captured_at") or ""),
+            "complete": False,
+            "scope": "重点车型销量与分类已核验；完整竞品池待接入",
+        },
+        "segment": {"id": "dynamic-by-selected-vehicle", "label": "按所选车型动态切换"},
+        "summary": {
+            "marketCount": 0,
+            "saicModelCount": len(items),
+            "calculableModelCount": calculable_count,
+            "redCount": sum(item["level"] == "red" for item in items),
+            "orangeCount": sum(item["level"] == "orange" for item in items),
+            "yellowCount": sum(item["level"] == "yellow" for item in items),
+            "greenCount": sum(item["level"] == "green" for item in items),
+            "grayCount": sum(item["level"] == "gray" for item in items),
+            "warningCount": sum(item["level"] in {"red", "orange", "yellow"} for item in items),
+            "method": "已存在完整同月市场数据的车型直接展示真实总量、中位数和预警；其余车型仅对缺失指标保留待补状态",
+            "levelRules": {"gray": "本品销量已识别，竞品池尚未通过完整性门禁"},
+        },
+        "thresholds": {"redRatio": 0.25, "yellowRatio": 0.5, "greenRatio": 0.8},
+        "qualityIssues": [],
+        "saicModels": items,
+        "ranking": [],
+    }
+
+
+def load_sales_warning(path=None, demo_path=SALES_WARNING_DEMO_PATH, observed_path=SALES_WARNING_OBSERVED_PATH):
+    """Prefer the verified full segment file, then focal observations; never present demo data as formal."""
+    path = Path(path or os.getenv("MMN_SALES_WARNING_PATH") or SALES_WARNING_LATEST_PATH)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return build_sales_warning_full(payload)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return build_sales_warning_observed(observed_path)
+
+
+def sales_warning_methodology(warning):
+    """Describe the active warning contract instead of retaining stale Demo copy."""
+    warning = warning or {}
+    summary = warning.get("summary") or {}
+    thresholds = warning.get("thresholds") or {}
+    method = str(summary.get("method") or "当前数据只展示已核验事实，缺失指标保持待补状态").rstrip("；。")
+    ratios = [thresholds.get(key) for key in ("redRatio", "yellowRatio", "greenRatio")]
+    if all(isinstance(value, (int, float)) and value > 0 for value in ratios):
+        ratio_text = "/".join(f"{value:.0%}" for value in ratios)
+        return f"销量预警：{method}；红/黄/绿参考线为头部竞争基准的 {ratio_text}。"
+    return f"销量预警：{method}。"
 
 
 def _period_key(label):
@@ -168,11 +599,16 @@ def parse_cpca_ice_market(payload):
 
 
 def _canonical_launch(model_name):
-    value = str(model_name or "").strip()
+    value = _model_identity_key(model_name)
     for launch in LAUNCH_MODELS:
-        if value in launch["aliases"]:
+        if value in {_model_identity_key(alias) for alias in launch["aliases"]}:
             return launch["model"]
     return ""
+
+
+def _model_identity_key(model_name):
+    """车型匹配只识别中英文字符，忽略所有空白与英文大小写。"""
+    return re.sub(r"\s+", "", str(model_name or "")).casefold()
 
 
 def _is_saic_sales_row(row):
@@ -369,6 +805,51 @@ def _rows_with_demo_fallback(conn, sql, org_id, edition, params=()):
     return conn.execute(sql, ("local", edition, *params)).fetchall(), True
 
 
+def _latest_model_cycles(conn, org_id, edition):
+    """Read retained T-cycle stages from MMN model-router projects, newest first."""
+    table = conn.execute(
+        "select 1 from sqlite_master where type='table' and name='model_router_decisions'"
+    ).fetchone()
+    if not table:
+        return {}
+    rows = conn.execute("""
+        select project_json, updated_at, created_at
+        from model_router_decisions
+        where edition=?
+        order by updated_at desc, created_at desc
+    """, (edition,)).fetchall()
+    projects = []
+    for row in rows:
+        project = _safe_json(row["project_json"], {})
+        if not isinstance(project, dict):
+            continue
+        project_org = str(project.get("_org_id") or "local")
+        if project_org not in {org_id, "local"}:
+            continue
+        projects.append((project_org != org_id, project, row))
+    projects.sort(key=lambda entry: entry[0])
+    latest = {}
+    for _, project, row in projects:
+        model = str(project.get("model") or "").strip()
+        stage = str(project.get("stage") or project.get("launchStage") or "").strip()
+        match = re.search(
+            r"T\s*(?:[+-]\s*\d+|0)(?:\s*[～~—–]\s*T?\s*(?:[+-]\s*)?\d+)?",
+            stage,
+            flags=re.IGNORECASE,
+        )
+        canonical = _canonical_launch(model) or _model_identity_key(model)
+        if not canonical or not match or canonical in latest:
+            continue
+        cycle = re.sub(r"\s+", "", match.group(0)).upper()
+        latest[canonical] = {
+            "cycle": cycle,
+            "stage": stage,
+            "source": "MMN数据库",
+            "updatedAt": row["updated_at"] or row["created_at"],
+        }
+    return latest
+
+
 def _latest_social_by_model(conn, org_id, edition):
     sql = """
         select keyword, result_json, created_at
@@ -398,25 +879,47 @@ def _latest_social_by_model(conn, org_id, edition):
 
 
 def _vertical_signals(conn, org_id, edition):
-    aliases = tuple(alias for launch in LAUNCH_MODELS for alias in launch["aliases"])
-    placeholders = ",".join("?" for _ in aliases)
-    sql = f"""
-        select platform, period, own_model, competitor_model, positive_rank, negative_rank, updated_at
+    """读取最新一份懂车帝正反向表；本品列同时定义销量预警监测集合。"""
+    sql = """
+        select platform, period, own_model, competitor_model, positive_rank, negative_rank,
+               compare_share, source_file, updated_at
         from vertical_rank_assets
-        where org_id=? and edition=? and own_model in ({placeholders})
+        where org_id=? and edition=? and platform='懂车帝' and source_file like ?
+        order by updated_at desc, period desc, own_model, competitor_model
     """
-    rows, fallback = _rows_with_demo_fallback(conn, sql, org_id, edition, aliases)
+    rows, fallback = _rows_with_demo_fallback(conn, sql, org_id, edition, (f"%{SALES_WARNING_MONITOR_SOURCE}%",))
+    latest_source = str(rows[0]["source_file"] or "") if rows else ""
+    if latest_source:
+        rows = [row for row in rows if str(row["source_file"] or "") == latest_source]
+
+    raw_models = []
+    seen_models = set()
+    for row in rows:
+        key = _model_identity_key(row["own_model"])
+        if not key or key in seen_models:
+            continue
+        seen_models.add(key)
+        raw_models.append(str(row["own_model"] or "").strip())
+    monitored_models = []
+    monitored_keys = {_model_identity_key(model) for model in raw_models}
+    for launch in LAUNCH_MODELS:
+        if any(_model_identity_key(alias) in monitored_keys for alias in launch["aliases"]):
+            monitored_models.append(launch["model"])
+    monitored_models.extend(
+        model for model in raw_models
+        if not _canonical_launch(model) and _model_identity_key(model) not in {_model_identity_key(item) for item in monitored_models}
+    )
+
     by_model_platform_period = defaultdict(list)
     for row in rows:
-        canonical = _canonical_launch(row["own_model"])
-        if not canonical:
-            continue
+        canonical = _canonical_launch(row["own_model"]) or str(row["own_model"] or "").strip()
         key = (canonical, row["platform"], row["period"])
         by_model_platform_period[key].append(row)
 
     output = {}
-    for launch in LAUNCH_MODELS:
-        model = launch["model"]
+    output_models = [launch["model"] for launch in LAUNCH_MODELS]
+    output_models.extend(model for model in monitored_models if model not in output_models)
+    for model in output_models:
         platform_periods = defaultdict(list)
         for candidate_model, platform, period in by_model_platform_period:
             if candidate_model == model:
@@ -431,27 +934,108 @@ def _vertical_signals(conn, org_id, edition):
         negatives = [row for row in latest_rows if row["negative_rank"] is not None]
         positive_leader = min(positives, key=lambda row: row["positive_rank"]) if positives else None
         risk_leader = min(negatives, key=lambda row: row["negative_rank"]) if negatives else None
+        period_count = max([len(set(periods)) for periods in platform_periods.values()] or [0])
+        rank_pairs = sum(row["positive_rank"] is not None and row["negative_rank"] is not None for row in latest_rows)
+        confidence = "高" if period_count >= 6 and rank_pairs else "中" if period_count >= 3 else "低"
+        leader_share = float(positive_leader["compare_share"]) if positive_leader and positive_leader["compare_share"] is not None else None
         output[model] = {
             "positiveTop10": sum(int(row["positive_rank"]) <= 10 for row in positives),
             "negativeTop10": sum(int(row["negative_rank"]) <= 10 for row in negatives),
             "positiveLeader": positive_leader["competitor_model"] if positive_leader else "待补数据",
             "riskLeader": risk_leader["competitor_model"] if risk_leader else "待补数据",
             "platformCount": len(platform_periods),
-            "periodCount": max([len(set(periods)) for periods in platform_periods.values()] or [0]),
+            "periodCount": period_count,
             "latestPeriods": latest_labels,
             "relationCount": len(latest_rows),
             "status": "available" if latest_rows else "missing",
+            "activeCompetitor": positive_leader["competitor_model"] if positive_leader else "待补数据",
+            "reverseCompetitor": risk_leader["competitor_model"] if risk_leader else "待补数据",
+            "activeRank": int(positive_leader["positive_rank"]) if positive_leader else None,
+            "reverseRank": int(risk_leader["negative_rank"]) if risk_leader else None,
+            "compareShare": leader_share,
+            "confidence": confidence,
+            "inference": (
+                f"{positive_leader['competitor_model']}是本品当前主动对比首位；"
+                f"{risk_leader['competitor_model']}是当前反向对比首位。"
+                if positive_leader and risk_leader
+                else "正反向关系数据不足，暂不形成竞争关系推论。"
+            ),
             "scopeNote": "垂媒正反向对比排名，作为 VOC 行为信号，不等同评论情绪",
         }
-    return output, fallback
+    monitoring = {
+        "status": "available" if monitored_models else "missing",
+        "platform": "懂车帝",
+        "source": latest_source,
+        "models": monitored_models,
+        "modelCount": len(monitored_models),
+        "updatedAt": str(rows[0]["updated_at"] or "") if rows else "",
+        "scopeNote": "监测对象仅取最新正反向表的本品车型；空格差异不影响车型匹配。",
+    }
+    return output, fallback, monitoring
+
+
+def _apply_vertical_monitoring(sales_warning, monitoring, signals):
+    """以表内本品收敛预警对象；销量事实与预警等级保持原计算结果。"""
+    warning = dict(sales_warning or {})
+    summary = dict(warning.get("summary") or {})
+    monitored_models = list(monitoring.get("models") or [])
+    monitored_keys = {_model_identity_key(model) for model in monitored_models}
+    items = []
+    for source_item in warning.get("saicModels") or []:
+        canonical = _canonical_launch(source_item.get("model")) or str(source_item.get("model") or "").strip()
+        if _model_identity_key(canonical) not in monitored_keys:
+            continue
+        item = dict(source_item)
+        item["comparisonSignal"] = signals.get(canonical) or {
+            "status": "missing",
+            "confidence": "低",
+            "inference": "正反向关系数据不足，暂不形成竞争关系推论。",
+            "scopeNote": "正反向关系只解释预警，不改写销量、市场口径或预警等级。",
+        }
+        items.append(item)
+    calculable_items = [item for item in items if item.get("performanceRate") is not None]
+    summary.update({
+        "saicModelCount": len(items),
+        "trackedModelCount": len(monitored_models),
+        "salesReadyModelCount": len(items),
+        "calculableModelCount": len(calculable_items),
+        "pendingModelCount": max(0, len(monitored_models) - len(items)),
+        "redCount": sum(item.get("level") == "red" for item in items),
+        "orangeCount": sum(item.get("level") == "orange" for item in items),
+        "yellowCount": sum(item.get("level") == "yellow" for item in items),
+        "greenCount": sum(item.get("level") == "green" for item in items),
+        "grayCount": sum(item.get("level") == "gray" for item in items),
+        "warningCount": sum(item.get("level") in {"red", "orange", "yellow"} for item in items),
+    })
+    warning["summary"] = summary
+    warning["saicModels"] = items
+    warning["monitoring"] = monitoring
+    return warning
 
 
 def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="china", fuel_market=None):
     market_dimensions = build_market_dimensions(sales_payload)
     apply_cpca_fuel_market(market_dimensions, fuel_market)
     product_evaluation = load_e7x_product_evaluation()
+    sales_warning = load_sales_warning()
     social, social_fallback = _latest_social_by_model(conn, org_id, edition)
-    voc, vertical_fallback = _vertical_signals(conn, org_id, edition)
+    voc, vertical_fallback, monitoring = _vertical_signals(conn, org_id, edition)
+    sales_warning = _apply_vertical_monitoring(sales_warning, monitoring, voc)
+    model_cycles = _latest_model_cycles(conn, org_id, edition)
+    for item in sales_warning.get("saicModels") or []:
+        canonical = _canonical_launch(item.get("model")) or _model_identity_key(item.get("model"))
+        retained = model_cycles.get(canonical)
+        if retained:
+            item.update({
+                "cycle": retained["cycle"],
+                "cycleStage": retained["stage"],
+                "cycleSource": retained["source"],
+                "cycleUpdatedAt": retained["updatedAt"],
+            })
+    sales_warning["cycleLookup"] = {
+        "rule": "MMN数据库留存优先；无留存数据才允许人工填写",
+        "databaseMatchedCount": sum(bool(item.get("cycle")) for item in sales_warning.get("saicModels") or []),
+    }
     launches = []
     for launch in LAUNCH_MODELS:
         model = launch["model"]
@@ -489,6 +1073,7 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
         },
         "marketDimensions": market_dimensions,
         "segments": market_dimensions[0]["items"],
+        "salesWarnings": sales_warning,
         "launches": launches,
         "productEvaluation": product_evaluation,
         "methodology": [
@@ -498,5 +1083,6 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
             "VOC：懂车帝与汽车之家正反向对比排名，仅作为用户比较行为信号。",
             "E7X产品评价：来自 AUDI E7X等5车产品评价_0710_v2.xlsx，数据期为2026年6月；声量、互动量和NSR均沿用工作簿定义。",
             "属性星图：横轴为E7X属性NSR，纵轴为E7X相对五车平均NSR的差值；工作簿未提供属性样本量，因此点大小不编码样本量。",
+            sales_warning_methodology(sales_warning),
         ],
     }

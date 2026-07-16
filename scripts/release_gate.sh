@@ -49,6 +49,7 @@ python3 -m unittest \
   tests.test_product_summary_import \
   tests.test_brand_penetration_module \
   tests.test_group_dashboard \
+  tests.test_sales_warning_review \
   tests.test_cpca_fuel_market \
   tests.test_model_judgment_highlights \
   tests.test_dongchedi_sales_freshness \

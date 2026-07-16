@@ -1,0 +1,103 @@
+{
+  "schema_version": "1.0",
+  "source": "dongchedi_user_verified_observations",
+  "period": "2026-06",
+  "captured_at": "2026-07-17T01:23:40+08:00",
+  "scope_note": "仅记录正反向表内八款本品已经核验的懂车帝车型分类与月销量；不以局部榜单推算完整竞品池。",
+  "vehicles": [
+    {
+      "series_id": 25058,
+      "series_name": "奥迪E5 Sportback",
+      "manufacturer": "上汽奥迪",
+      "body_type": "轿车",
+      "size_class": "中型车",
+      "energy_type": "纯电动",
+      "sales_volume": 270,
+      "price": "20.59—28.99万元",
+      "evidence": {"type": "user_verified_dongchedi_screenshot", "period": "2026-06"}
+    },
+    {
+      "series_id": 25846,
+      "series_name": "奥迪E7X",
+      "manufacturer": "上汽奥迪",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "纯电动",
+      "sales_volume": 4017,
+      "price": "29.80—31.60万元",
+      "segment_rank": 9,
+      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "mid_large_suv"}
+    },
+    {
+      "series_id": 25877,
+      "series_name": "智己LS8",
+      "manufacturer": "智己汽车",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "增程式",
+      "sales_volume": 1350,
+      "price": "24.98—29.98万元",
+      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "erev"}
+    },
+    {
+      "series_id": 5828,
+      "series_name": "MG4",
+      "manufacturer": "上汽集团",
+      "body_type": "轿车",
+      "size_class": "紧凑型车",
+      "energy_type": "纯电动",
+      "sales_volume": 14397,
+      "price": "6.58—9.98万元",
+      "segment_rank": 2,
+      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "compact_car+ev"}
+    },
+    {
+      "series_id": 1180,
+      "series_name": "荣威i6",
+      "manufacturer": "上汽集团",
+      "body_type": "轿车",
+      "size_class": "紧凑型车",
+      "energy_type": "燃油",
+      "sales_volume": 1408,
+      "price": "6.19—7.19万元",
+      "segment_rank": 26,
+      "evidence": {"type": "user_verified_dongchedi_screenshot", "period": "2026-06", "captured_at": "2026-07-17T01:23:40+08:00"}
+    },
+    {
+      "series_id": 25910,
+      "series_name": "别克至境E7",
+      "manufacturer": "上汽通用",
+      "body_type": "SUV",
+      "size_class": "中型SUV",
+      "energy_type": "插电式混动",
+      "sales_volume": 5555,
+      "price": "15.69—19.69万元",
+      "segment_rank": 13,
+      "evidence": {"type": "user_verified_dongchedi_screenshot", "period": "2026-06", "captured_at": "2026-07-17T01:22:45+08:00"}
+    },
+    {
+      "series_id": 25395,
+      "series_name": "ID.ERA 9X",
+      "manufacturer": "上汽大众",
+      "body_type": "SUV",
+      "size_class": "大型SUV",
+      "energy_type": "增程式",
+      "sales_volume": 3017,
+      "price": "29.98—34.98万元",
+      "segment_rank": 4,
+      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "erev"}
+    },
+    {
+      "series_id": 25920,
+      "series_name": "尚界Z7",
+      "manufacturer": "上汽集团",
+      "body_type": "轿车",
+      "size_class": "中大型车",
+      "energy_type": "纯电动",
+      "sales_volume": 6296,
+      "price": "21.98—29.98万元",
+      "segment_rank": 6,
+      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "mid_large_car"}
+    }
+  ]
+}

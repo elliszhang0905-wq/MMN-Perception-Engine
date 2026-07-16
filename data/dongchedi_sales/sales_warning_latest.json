@@ -1,0 +1,1591 @@
+{
+  "schema_version": "1.0",
+  "source": "dongchedi_public_rank_api",
+  "period": "2026-06",
+  "captured_at": "2026-07-16T18:01:15+00:00",
+  "generated_at": "2026-07-16T18:50:34+00:00",
+  "complete": true,
+  "thresholds": {
+    "red_ratio": 0.25,
+    "yellow_ratio": 0.5,
+    "green_ratio": 0.8
+  },
+  "required_page_count": 9,
+  "market_count": 22,
+  "saic_vehicle_count": 8,
+  "markets": {
+    "轿车|紧凑型车|燃油": {
+      "model_count": 37,
+      "total_sales": 104452,
+      "median_sales": 1265
+    },
+    "轿车|紧凑型车|纯电动": {
+      "model_count": 19,
+      "total_sales": 49802,
+      "median_sales": 617
+    },
+    "轿车|紧凑型车|插电式混动": {
+      "model_count": 4,
+      "total_sales": 23668,
+      "median_sales": 5753.5
+    },
+    "轿车|中型车|燃油": {
+      "model_count": 34,
+      "total_sales": 124638,
+      "median_sales": 1827.5
+    },
+    "轿车|中型车|纯电动": {
+      "model_count": 20,
+      "total_sales": 54665,
+      "median_sales": 1612.5
+    },
+    "轿车|中型车|插电式混动": {
+      "model_count": 15,
+      "total_sales": 30893,
+      "median_sales": 1013
+    },
+    "轿车|中大型车|纯电动": {
+      "model_count": 23,
+      "total_sales": 49784,
+      "median_sales": 400
+    },
+    "轿车|中大型车|燃油": {
+      "model_count": 18,
+      "total_sales": 44222,
+      "median_sales": 912.5
+    },
+    "轿车|中大型车|插电式混动": {
+      "model_count": 9,
+      "total_sales": 10652,
+      "median_sales": 1199
+    },
+    "轿车|中大型车|增程式": {
+      "model_count": 1,
+      "total_sales": 35,
+      "median_sales": 35
+    },
+    "SUV|中型SUV|纯电动": {
+      "model_count": 22,
+      "total_sales": 71779,
+      "median_sales": 322
+    },
+    "SUV|中型SUV|燃油": {
+      "model_count": 51,
+      "total_sales": 134742,
+      "median_sales": 1148
+    },
+    "SUV|中型SUV|插电式混动": {
+      "model_count": 22,
+      "total_sales": 36946,
+      "median_sales": 943.5
+    },
+    "SUV|中型SUV|增程式": {
+      "model_count": 1,
+      "total_sales": 49,
+      "median_sales": 49
+    },
+    "SUV|中大型SUV|纯电动": {
+      "model_count": 13,
+      "total_sales": 46028,
+      "median_sales": 240
+    },
+    "SUV|中大型SUV|插电式混动": {
+      "model_count": 18,
+      "total_sales": 36125,
+      "median_sales": 898
+    },
+    "SUV|中大型SUV|燃油": {
+      "model_count": 33,
+      "total_sales": 48639,
+      "median_sales": 436
+    },
+    "SUV|中大型SUV|增程式": {
+      "model_count": 7,
+      "total_sales": 5593,
+      "median_sales": 562
+    },
+    "SUV|大型SUV|燃油": {
+      "model_count": 7,
+      "total_sales": 29369,
+      "median_sales": 4012
+    },
+    "SUV|大型SUV|纯电动": {
+      "model_count": 6,
+      "total_sales": 27633,
+      "median_sales": 3771.5
+    },
+    "SUV|大型SUV|增程式": {
+      "model_count": 7,
+      "total_sales": 12059,
+      "median_sales": 739
+    },
+    "SUV|大型SUV|插电式混动": {
+      "model_count": 9,
+      "total_sales": 23727,
+      "median_sales": 1652
+    }
+  },
+  "saic_vehicles": [
+    {
+      "series_id": 25058,
+      "series_name": "奥迪E5 Sportback",
+      "manufacturer": "上汽奥迪",
+      "sales_volume": 270,
+      "price": "20.59—28.99万元",
+      "body_type": "轿车",
+      "size_class": "中型车",
+      "energy_type": "纯电动",
+      "segment_key": "轿车|中型车|纯电动",
+      "quality_status": "verified",
+      "segment_total_sales": 54665,
+      "segment_model_count": 20,
+      "segment_median_sales": 1815,
+      "benchmark_sales": 7837,
+      "segment_rank": 17,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 19,
+      "competitor_pool_sales": 54395,
+      "competitor_pool": [
+        {
+          "series_id": 3762,
+          "series_name": "Model 3",
+          "manufacturer": "特斯拉中国",
+          "sales_volume": 14266,
+          "price": "23.55-33.95万"
+        },
+        {
+          "series_id": 25172,
+          "series_name": "ZEEKR 007GT",
+          "manufacturer": "极氪",
+          "sales_volume": 7837,
+          "price": "20.29-25.29万"
+        },
+        {
+          "series_id": 25573,
+          "series_name": "极狐 贝塔S3",
+          "manufacturer": "北汽新能源",
+          "sales_volume": 7790,
+          "price": "7.98-12.08万"
+        },
+        {
+          "series_id": 25238,
+          "series_name": "海豹06EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 4255,
+          "price": "10.98-12.98万"
+        },
+        {
+          "series_id": 10205,
+          "series_name": "海豹06GT",
+          "manufacturer": "比亚迪",
+          "sales_volume": 4106,
+          "price": "12.89-18.28万"
+        },
+        {
+          "series_id": 25076,
+          "series_name": "秦L EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 3204,
+          "price": "10.78-12.78万"
+        },
+        {
+          "series_id": 5092,
+          "series_name": "红旗E-QM5",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 2277,
+          "price": "12.18-20.18万"
+        },
+        {
+          "series_id": 25188,
+          "series_name": "比亚迪e7",
+          "manufacturer": "比亚迪",
+          "sales_volume": 2178,
+          "price": "10.38-13.98万"
+        },
+        {
+          "series_id": 25989,
+          "series_name": "银河A7 EV",
+          "manufacturer": "吉利银河",
+          "sales_volume": 1835,
+          "price": "10.28-10.98万"
+        },
+        {
+          "series_id": 9126,
+          "series_name": "蔚来ET5T",
+          "manufacturer": "蔚来",
+          "sales_volume": 1815,
+          "price": "29.80-31.60万"
+        },
+        {
+          "series_id": 6126,
+          "series_name": "丰田bZ3",
+          "manufacturer": "一汽丰田",
+          "sales_volume": 1410,
+          "price": "9.38-15.98万"
+        },
+        {
+          "series_id": 4838,
+          "series_name": "宝马i3",
+          "manufacturer": "华晨宝马",
+          "sales_volume": 1039,
+          "price": "18.70-23.98万"
+        },
+        {
+          "series_id": 24588,
+          "series_name": "海豹07EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 627,
+          "price": "16.99-18.99万"
+        },
+        {
+          "series_id": 5409,
+          "series_name": "蔚来ET5",
+          "manufacturer": "蔚来",
+          "sales_volume": 610,
+          "price": "29.80-31.60万"
+        },
+        {
+          "series_id": 10154,
+          "series_name": "红旗天工05",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 438,
+          "price": "12.98-21.28万"
+        },
+        {
+          "series_id": 9234,
+          "series_name": "五菱星光EV",
+          "manufacturer": "上汽通用五菱",
+          "sales_volume": 373,
+          "price": "9.98-11.58万"
+        },
+        {
+          "series_id": 9125,
+          "series_name": "荣威D7 EV",
+          "manufacturer": "上汽集团",
+          "sales_volume": 265,
+          "price": "14.98-20.08万"
+        },
+        {
+          "series_id": 5579,
+          "series_name": "海豹",
+          "manufacturer": "比亚迪",
+          "sales_volume": 49,
+          "price": "16.78-23.18万"
+        },
+        {
+          "series_id": 9428,
+          "series_name": "灵悉L",
+          "manufacturer": "东风本田",
+          "sales_volume": 21,
+          "price": "8.98-9.58万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 3762,
+          "series_name": "Model 3",
+          "manufacturer": "特斯拉中国",
+          "sales_volume": 14266,
+          "price": "23.55-33.95万"
+        },
+        {
+          "series_id": 25172,
+          "series_name": "ZEEKR 007GT",
+          "manufacturer": "极氪",
+          "sales_volume": 7837,
+          "price": "20.29-25.29万"
+        },
+        {
+          "series_id": 25573,
+          "series_name": "极狐 贝塔S3",
+          "manufacturer": "北汽新能源",
+          "sales_volume": 7790,
+          "price": "7.98-12.08万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 20.59,
+      "benchmark_average_start_price_wan": 17.27,
+      "benchmark_minimum_start_price_wan": 7.98,
+      "benchmark_maximum_start_price_wan": 23.55,
+      "start_price_premium_ratio": 0.1922,
+      "red_line_sales": 1959,
+      "green_line_sales": 6270,
+      "performance_ratio": 0.0345,
+      "warning_level": "red",
+      "warning_reason": "车型销量270辆，同一懂车帝细分市场头部3款竞品销量中位数7837辆，头部基准达成率3.4%"
+    },
+    {
+      "series_id": 25877,
+      "series_name": "智己LS8",
+      "manufacturer": "智己汽车",
+      "sales_volume": 1350,
+      "price": "24.98—29.98万元",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "增程式",
+      "segment_key": "SUV|中大型SUV|增程式",
+      "quality_status": "verified",
+      "segment_total_sales": 5593,
+      "segment_model_count": 7,
+      "segment_median_sales": 525,
+      "benchmark_sales": 915,
+      "segment_rank": 2,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 6,
+      "competitor_pool_sales": 4243,
+      "competitor_pool": [
+        {
+          "series_id": 25620,
+          "series_name": "iCAR V27",
+          "manufacturer": "奇瑞新能源",
+          "sales_volume": 2219,
+          "price": "16.48-19.18万"
+        },
+        {
+          "series_id": 5845,
+          "series_name": "理想L6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 915,
+          "price": "24.98万"
+        },
+        {
+          "series_id": 6095,
+          "series_name": "理想L8",
+          "manufacturer": "理想汽车",
+          "sales_volume": 562,
+          "price": "36.98-42.98万"
+        },
+        {
+          "series_id": 9211,
+          "series_name": "深蓝G318",
+          "manufacturer": "深蓝汽车",
+          "sales_volume": 488,
+          "price": "17.99-22.49万"
+        },
+        {
+          "series_id": 9131,
+          "series_name": "极石01",
+          "manufacturer": "北京汽车制造厂",
+          "sales_volume": 35,
+          "price": "29.99-35.99万"
+        },
+        {
+          "series_id": 9647,
+          "series_name": "北京越野BJ60增程",
+          "manufacturer": "北京汽车",
+          "sales_volume": 24,
+          "price": "25.98-30.48万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 25620,
+          "series_name": "iCAR V27",
+          "manufacturer": "奇瑞新能源",
+          "sales_volume": 2219,
+          "price": "16.48-19.18万"
+        },
+        {
+          "series_id": 5845,
+          "series_name": "理想L6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 915,
+          "price": "24.98万"
+        },
+        {
+          "series_id": 6095,
+          "series_name": "理想L8",
+          "manufacturer": "理想汽车",
+          "sales_volume": 562,
+          "price": "36.98-42.98万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 24.98,
+      "benchmark_average_start_price_wan": 26.15,
+      "benchmark_minimum_start_price_wan": 16.48,
+      "benchmark_maximum_start_price_wan": 36.98,
+      "start_price_premium_ratio": -0.0447,
+      "red_line_sales": 229,
+      "green_line_sales": 732,
+      "performance_ratio": 1.4754,
+      "warning_level": "green",
+      "warning_reason": "车型销量1350辆，同一懂车帝细分市场头部3款竞品销量中位数915辆，头部基准达成率147.5%"
+    },
+    {
+      "series_id": 25925,
+      "series_name": "荣威i6",
+      "manufacturer": "上汽集团",
+      "sales_volume": 1408,
+      "price": "6.19—7.19万元",
+      "body_type": "轿车",
+      "size_class": "紧凑型车",
+      "energy_type": "燃油",
+      "segment_key": "轿车|紧凑型车|燃油",
+      "quality_status": "non_nev_unresolved",
+      "segment_total_sales": 104452,
+      "segment_model_count": 37,
+      "segment_median_sales": 1226,
+      "benchmark_sales": 10329,
+      "segment_rank": 16,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 36,
+      "competitor_pool_sales": 103044,
+      "competitor_pool": [
+        {
+          "series_id": 393,
+          "series_name": "朗逸",
+          "manufacturer": "上汽大众",
+          "sales_volume": 15444,
+          "price": "6.20-9.89万"
+        },
+        {
+          "series_id": 1145,
+          "series_name": "轩逸",
+          "manufacturer": "东风日产",
+          "sales_volume": 10329,
+          "price": "6.19-14.19万"
+        },
+        {
+          "series_id": 3476,
+          "series_name": "星瑞",
+          "manufacturer": "吉利汽车",
+          "sales_volume": 9542,
+          "price": "9.37-13.67万"
+        },
+        {
+          "series_id": 414,
+          "series_name": "速腾",
+          "manufacturer": "一汽-大众",
+          "sales_volume": 9221,
+          "price": "7.98-13.19万"
+        },
+        {
+          "series_id": 1455,
+          "series_name": "逸动",
+          "manufacturer": "长安汽车",
+          "sales_volume": 7912,
+          "price": "5.29-8.99万"
+        },
+        {
+          "series_id": 733,
+          "series_name": "帝豪",
+          "manufacturer": "吉利汽车",
+          "sales_volume": 7143,
+          "price": "4.88-8.89万"
+        },
+        {
+          "series_id": 5852,
+          "series_name": "艾瑞泽8",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 7127,
+          "price": "8.99-13.09万"
+        },
+        {
+          "series_id": 95,
+          "series_name": "奥迪A3",
+          "manufacturer": "一汽奥迪",
+          "sales_volume": 5284,
+          "price": "11.94-14.90万"
+        },
+        {
+          "series_id": 542,
+          "series_name": "卡罗拉",
+          "manufacturer": "一汽丰田",
+          "sales_volume": 5227,
+          "price": "8.08-15.58万"
+        },
+        {
+          "series_id": 1310,
+          "series_name": "伊兰特",
+          "manufacturer": "北京现代",
+          "sales_volume": 4480,
+          "price": "6.18-8.58万"
+        },
+        {
+          "series_id": 409,
+          "series_name": "宝来",
+          "manufacturer": "一汽-大众",
+          "sales_volume": 3299,
+          "price": "6.66-9.76万"
+        },
+        {
+          "series_id": 3172,
+          "series_name": "捷达VA3",
+          "manufacturer": "一汽-大众捷达",
+          "sales_volume": 3060,
+          "price": "6.78-9.48万"
+        },
+        {
+          "series_id": 1623,
+          "series_name": "领克03",
+          "manufacturer": "领克",
+          "sales_volume": 2816,
+          "price": "10.38-41.03万"
+        },
+        {
+          "series_id": 276,
+          "series_name": "思域",
+          "manufacturer": "东风本田",
+          "sales_volume": 1751,
+          "price": "9.79-14.79万"
+        },
+        {
+          "series_id": 410,
+          "series_name": "高尔夫",
+          "manufacturer": "一汽-大众",
+          "sales_volume": 1452,
+          "price": "11.79-14.69万"
+        },
+        {
+          "series_id": 1116,
+          "series_name": "起亚K3",
+          "manufacturer": "起亚",
+          "sales_volume": 1326,
+          "price": "6.84-9.94万"
+        },
+        {
+          "series_id": 5288,
+          "series_name": "长安UNI-V",
+          "manufacturer": "长安汽车",
+          "sales_volume": 1268,
+          "price": "9.69-11.39万"
+        },
+        {
+          "series_id": 31,
+          "series_name": "MG5",
+          "manufacturer": "上汽集团",
+          "sales_volume": 1265,
+          "price": "4.69-7.24万"
+        },
+        {
+          "series_id": 397,
+          "series_name": "凌渡",
+          "manufacturer": "上汽大众",
+          "sales_volume": 1187,
+          "price": "11.39-15.59万"
+        },
+        {
+          "series_id": 1081,
+          "series_name": "艾瑞泽5",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 1022,
+          "price": "4.69-5.29万"
+        },
+        {
+          "series_id": 3365,
+          "series_name": "奕炫",
+          "manufacturer": "东风乘用车",
+          "sales_volume": 691,
+          "price": "6.49-10.68万"
+        },
+        {
+          "series_id": 336,
+          "series_name": "标致408",
+          "manufacturer": "东风标致",
+          "sales_volume": 527,
+          "price": "8.07-8.97万"
+        },
+        {
+          "series_id": 1014,
+          "series_name": "马自达3 昂克赛拉",
+          "manufacturer": "长安马自达",
+          "sales_volume": 390,
+          "price": "8.69-12.99万"
+        },
+        {
+          "series_id": 3041,
+          "series_name": "荣威i5",
+          "manufacturer": "上汽集团",
+          "sales_volume": 247,
+          "price": "4.49-10.18万"
+        },
+        {
+          "series_id": 2928,
+          "series_name": "缤瑞",
+          "manufacturer": "吉利汽车",
+          "sales_volume": 225,
+          "price": "8.98-10.98万"
+        },
+        {
+          "series_id": 4787,
+          "series_name": "影豹",
+          "manufacturer": "广汽传祺",
+          "sales_volume": 141,
+          "price": "8.40-13.30万"
+        },
+        {
+          "series_id": 534,
+          "series_name": "雷凌",
+          "manufacturer": "广汽丰田",
+          "sales_volume": 129,
+          "price": "8.88-12.88万"
+        },
+        {
+          "series_id": 345,
+          "series_name": "威朗",
+          "manufacturer": "上汽通用别克",
+          "sales_volume": 128,
+          "price": "6.59-9.59万"
+        },
+        {
+          "series_id": 5340,
+          "series_name": "型格",
+          "manufacturer": "广汽本田",
+          "sales_volume": 110,
+          "price": "9.19-14.89万"
+        },
+        {
+          "series_id": 24893,
+          "series_name": "捷达VA7",
+          "manufacturer": "一汽-大众捷达",
+          "sales_volume": 106,
+          "price": "8.37-9.57万"
+        },
+        {
+          "series_id": 1143,
+          "series_name": "骐达TIIDA",
+          "manufacturer": "东风日产",
+          "sales_volume": 91,
+          "price": "7.99-10.59万"
+        },
+        {
+          "series_id": 1628,
+          "series_name": "启辰D60",
+          "manufacturer": "东风日产",
+          "sales_volume": 82,
+          "price": "8.88-9.98万"
+        },
+        {
+          "series_id": 32,
+          "series_name": "MG6",
+          "manufacturer": "上汽集团",
+          "sales_volume": 8,
+          "price": "9.38万"
+        },
+        {
+          "series_id": 5033,
+          "series_name": "轩度",
+          "manufacturer": "凯翼汽车",
+          "sales_volume": 7,
+          "price": "7.98-9.39万"
+        },
+        {
+          "series_id": 6147,
+          "series_name": "锐程PLUS",
+          "manufacturer": "长安汽车",
+          "sales_volume": 4,
+          "price": "9.99-12.29万"
+        },
+        {
+          "series_id": 2913,
+          "series_name": "奔驰A级",
+          "manufacturer": "北京奔驰",
+          "sales_volume": 3,
+          "price": "25.13-27.57万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 393,
+          "series_name": "朗逸",
+          "manufacturer": "上汽大众",
+          "sales_volume": 15444,
+          "price": "6.20-9.89万"
+        },
+        {
+          "series_id": 1145,
+          "series_name": "轩逸",
+          "manufacturer": "东风日产",
+          "sales_volume": 10329,
+          "price": "6.19-14.19万"
+        },
+        {
+          "series_id": 3476,
+          "series_name": "星瑞",
+          "manufacturer": "吉利汽车",
+          "sales_volume": 9542,
+          "price": "9.37-13.67万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 6.19,
+      "benchmark_average_start_price_wan": 7.25,
+      "benchmark_minimum_start_price_wan": 6.19,
+      "benchmark_maximum_start_price_wan": 9.37,
+      "start_price_premium_ratio": -0.1462,
+      "red_line_sales": 2582,
+      "green_line_sales": 8263,
+      "performance_ratio": 0.1363,
+      "warning_level": "red",
+      "warning_reason": "车型销量1408辆，同一懂车帝细分市场头部3款竞品销量中位数10329辆，头部基准达成率13.6%"
+    },
+    {
+      "series_id": 25395,
+      "series_name": "ID.ERA 9X",
+      "manufacturer": "上汽大众",
+      "sales_volume": 3017,
+      "price": "29.98—34.98万元",
+      "body_type": "SUV",
+      "size_class": "大型SUV",
+      "energy_type": "增程式",
+      "segment_key": "SUV|大型SUV|增程式",
+      "quality_status": "verified",
+      "segment_total_sales": 12059,
+      "segment_model_count": 7,
+      "segment_median_sales": 509.5,
+      "benchmark_sales": 1630,
+      "segment_rank": 2,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 6,
+      "competitor_pool_sales": 9042,
+      "competitor_pool": [
+        {
+          "series_id": 5227,
+          "series_name": "理想L9",
+          "manufacturer": "理想汽车",
+          "sales_volume": 6106,
+          "price": "45.98-50.98万"
+        },
+        {
+          "series_id": 9436,
+          "series_name": "风云T11",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 1630,
+          "price": "17.69-22.99万"
+        },
+        {
+          "series_id": 25607,
+          "series_name": "智己LS9",
+          "manufacturer": "智己汽车",
+          "sales_volume": 739,
+          "price": "32.28-35.28万"
+        },
+        {
+          "series_id": 25136,
+          "series_name": "深蓝S09",
+          "manufacturer": "深蓝汽车",
+          "sales_volume": 280,
+          "price": "22.99-29.99万"
+        },
+        {
+          "series_id": 25717,
+          "series_name": "仰望U8L",
+          "manufacturer": "仰望",
+          "sales_volume": 172,
+          "price": "130.00万"
+        },
+        {
+          "series_id": 6235,
+          "series_name": "仰望U8",
+          "manufacturer": "仰望",
+          "sales_volume": 115,
+          "price": "100.80万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 5227,
+          "series_name": "理想L9",
+          "manufacturer": "理想汽车",
+          "sales_volume": 6106,
+          "price": "45.98-50.98万"
+        },
+        {
+          "series_id": 9436,
+          "series_name": "风云T11",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 1630,
+          "price": "17.69-22.99万"
+        },
+        {
+          "series_id": 25607,
+          "series_name": "智己LS9",
+          "manufacturer": "智己汽车",
+          "sales_volume": 739,
+          "price": "32.28-35.28万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 29.98,
+      "benchmark_average_start_price_wan": 31.98,
+      "benchmark_minimum_start_price_wan": 17.69,
+      "benchmark_maximum_start_price_wan": 45.98,
+      "start_price_premium_ratio": -0.0625,
+      "red_line_sales": 408,
+      "green_line_sales": 1304,
+      "performance_ratio": 1.8509,
+      "warning_level": "green",
+      "warning_reason": "车型销量3017辆，同一懂车帝细分市场头部3款竞品销量中位数1630辆，头部基准达成率185.1%"
+    },
+    {
+      "series_id": 25846,
+      "series_name": "奥迪E7X",
+      "manufacturer": "上汽奥迪",
+      "sales_volume": 4017,
+      "price": "29.80—31.60万元",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "纯电动",
+      "segment_key": "SUV|中大型SUV|纯电动",
+      "quality_status": "verified",
+      "segment_total_sales": 46028,
+      "segment_model_count": 13,
+      "segment_median_sales": 213,
+      "benchmark_sales": 14324,
+      "segment_rank": 4,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 12,
+      "competitor_pool_sales": 42011,
+      "competitor_pool": [
+        {
+          "series_id": 25557,
+          "series_name": "理想i6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 21453,
+          "price": "24.98-26.98万"
+        },
+        {
+          "series_id": 20041,
+          "series_name": "小米YU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 14324,
+          "price": "23.35-38.99万"
+        },
+        {
+          "series_id": 25994,
+          "series_name": "钛7 EV",
+          "manufacturer": "方程豹",
+          "sales_volume": 4545,
+          "price": "19.98-23.98万"
+        },
+        {
+          "series_id": 10178,
+          "series_name": "理想i8",
+          "manufacturer": "理想汽车",
+          "sales_volume": 779,
+          "price": "33.98万"
+        },
+        {
+          "series_id": 5461,
+          "series_name": "小鹏G9",
+          "manufacturer": "小鹏汽车",
+          "sales_volume": 265,
+          "price": "24.88-27.88万"
+        },
+        {
+          "series_id": 9345,
+          "series_name": "昊铂HT",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 240,
+          "price": "16.99-19.99万"
+        },
+        {
+          "series_id": 6271,
+          "series_name": "别克E5",
+          "manufacturer": "上汽通用别克",
+          "sales_volume": 186,
+          "price": "14.69-16.69万"
+        },
+        {
+          "series_id": 25185,
+          "series_name": "唐L EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 87,
+          "price": "22.28-27.28万"
+        },
+        {
+          "series_id": 4869,
+          "series_name": "智己LS7",
+          "manufacturer": "智己汽车",
+          "sales_volume": 47,
+          "price": "32.99万"
+        },
+        {
+          "series_id": 6172,
+          "series_name": "沃尔沃EX90",
+          "manufacturer": "沃尔沃亚太",
+          "sales_volume": 45,
+          "price": "45.99-52.99万"
+        },
+        {
+          "series_id": 5358,
+          "series_name": "IQ锐歌",
+          "manufacturer": "上汽通用凯迪拉克",
+          "sales_volume": 22,
+          "price": "39.99万"
+        },
+        {
+          "series_id": 8835,
+          "series_name": "红旗天工08",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 18,
+          "price": "暂无报价"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 25557,
+          "series_name": "理想i6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 21453,
+          "price": "24.98-26.98万"
+        },
+        {
+          "series_id": 20041,
+          "series_name": "小米YU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 14324,
+          "price": "23.35-38.99万"
+        },
+        {
+          "series_id": 25994,
+          "series_name": "钛7 EV",
+          "manufacturer": "方程豹",
+          "sales_volume": 4545,
+          "price": "19.98-23.98万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 29.8,
+      "benchmark_average_start_price_wan": 22.77,
+      "benchmark_minimum_start_price_wan": 19.98,
+      "benchmark_maximum_start_price_wan": 24.98,
+      "start_price_premium_ratio": 0.3087,
+      "red_line_sales": 3581,
+      "green_line_sales": 11459,
+      "performance_ratio": 0.2804,
+      "warning_level": "yellow",
+      "warning_reason": "车型销量4017辆，同一懂车帝细分市场头部3款竞品销量中位数14324辆，头部基准达成率28.0%"
+    },
+    {
+      "series_id": 25910,
+      "series_name": "别克至境E7",
+      "manufacturer": "上汽通用",
+      "sales_volume": 5555,
+      "price": "15.69—19.69万元",
+      "body_type": "SUV",
+      "size_class": "中型SUV",
+      "energy_type": "插电式混动",
+      "segment_key": "SUV|中型SUV|插电式混动",
+      "quality_status": "verified",
+      "segment_total_sales": 36946,
+      "segment_model_count": 22,
+      "segment_median_sales": 919,
+      "benchmark_sales": 4545,
+      "segment_rank": 1,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 21,
+      "competitor_pool_sales": 31391,
+      "competitor_pool": [
+        {
+          "series_id": 25399,
+          "series_name": "海狮06DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 5309,
+          "price": "12.99-15.99万"
+        },
+        {
+          "series_id": 25828,
+          "series_name": "风云T9L",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 4545,
+          "price": "12.99-18.69万"
+        },
+        {
+          "series_id": 20012,
+          "series_name": "宋L DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 4304,
+          "price": "13.68-15.38万"
+        },
+        {
+          "series_id": 26027,
+          "series_name": "宋Ultra DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 3225,
+          "price": "12.99-15.99万"
+        },
+        {
+          "series_id": 25132,
+          "series_name": "长安启源Q07",
+          "manufacturer": "长安启源",
+          "sales_volume": 3097,
+          "price": "11.98-16.98万"
+        },
+        {
+          "series_id": 8884,
+          "series_name": "豹5",
+          "manufacturer": "方程豹",
+          "sales_volume": 2171,
+          "price": "23.98-32.98万"
+        },
+        {
+          "series_id": 8796,
+          "series_name": "领克08 EM-P",
+          "manufacturer": "领克",
+          "sales_volume": 2123,
+          "price": "15.88-20.98万"
+        },
+        {
+          "series_id": 25436,
+          "series_name": "捷途山海L7 PLUS",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 1859,
+          "price": "10.69-15.29万"
+        },
+        {
+          "series_id": 311,
+          "series_name": "唐DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 1670,
+          "price": "15.68-18.68万"
+        },
+        {
+          "series_id": 6204,
+          "series_name": "蓝电E5",
+          "manufacturer": "赛力斯蓝电汽车",
+          "sales_volume": 968,
+          "price": "9.98-15.19万"
+        },
+        {
+          "series_id": 8795,
+          "series_name": "哈弗枭龙MAX",
+          "manufacturer": "长城汽车",
+          "sales_volume": 919,
+          "price": "11.18-15.48万"
+        },
+        {
+          "series_id": 6124,
+          "series_name": "哈弗大狗PLUS PHEV",
+          "manufacturer": "长城汽车",
+          "sales_volume": 339,
+          "price": "12.28-15.78万"
+        },
+        {
+          "series_id": 25841,
+          "series_name": "探岳L PHEV",
+          "manufacturer": "一汽-大众",
+          "sales_volume": 273,
+          "price": "16.99-18.19万"
+        },
+        {
+          "series_id": 25604,
+          "series_name": "smart精灵#5 EHD超级电混",
+          "manufacturer": "smart",
+          "sales_volume": 260,
+          "price": "16.49-21.49万"
+        },
+        {
+          "series_id": 6305,
+          "series_name": "昆仑iHD",
+          "manufacturer": "凯翼汽车",
+          "sales_volume": 108,
+          "price": "10.99-21.98万"
+        },
+        {
+          "series_id": 25138,
+          "series_name": "悦意07",
+          "manufacturer": "一汽奔腾",
+          "sales_volume": 104,
+          "price": "9.98-12.69万"
+        },
+        {
+          "series_id": 4867,
+          "series_name": "摩卡PHEV",
+          "manufacturer": "长城汽车",
+          "sales_volume": 55,
+          "price": "18.58万"
+        },
+        {
+          "series_id": 1792,
+          "series_name": "沃尔沃XC60 PHEV",
+          "manufacturer": "沃尔沃亚太",
+          "sales_volume": 28,
+          "price": "28.49-36.99万"
+        },
+        {
+          "series_id": 8967,
+          "series_name": "星途瑶光C-DM",
+          "manufacturer": "星途",
+          "sales_volume": 16,
+          "price": "12.49-21.88万"
+        },
+        {
+          "series_id": 5871,
+          "series_name": "创维HT-i",
+          "manufacturer": "创维汽车",
+          "sales_volume": 14,
+          "price": "11.68-29.98万"
+        },
+        {
+          "series_id": 5216,
+          "series_name": "长安UNI-K 智电iDD",
+          "manufacturer": "长安汽车",
+          "sales_volume": 4,
+          "price": "17.29-20.09万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 25399,
+          "series_name": "海狮06DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 5309,
+          "price": "12.99-15.99万"
+        },
+        {
+          "series_id": 25828,
+          "series_name": "风云T9L",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 4545,
+          "price": "12.99-18.69万"
+        },
+        {
+          "series_id": 20012,
+          "series_name": "宋L DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 4304,
+          "price": "13.68-15.38万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 15.69,
+      "benchmark_average_start_price_wan": 13.22,
+      "benchmark_minimum_start_price_wan": 12.99,
+      "benchmark_maximum_start_price_wan": 13.68,
+      "start_price_premium_ratio": 0.1868,
+      "red_line_sales": 1136,
+      "green_line_sales": 3636,
+      "performance_ratio": 1.2222,
+      "warning_level": "green",
+      "warning_reason": "车型销量5555辆，同一懂车帝细分市场头部3款竞品销量中位数4545辆，头部基准达成率122.2%"
+    },
+    {
+      "series_id": 25920,
+      "series_name": "尚界Z7",
+      "manufacturer": "上汽集团",
+      "sales_volume": 6296,
+      "price": "21.98—29.98万元",
+      "body_type": "轿车",
+      "size_class": "中大型车",
+      "energy_type": "纯电动",
+      "segment_key": "轿车|中大型车|纯电动",
+      "quality_status": "verified",
+      "segment_total_sales": 49784,
+      "segment_model_count": 23,
+      "segment_median_sales": 370,
+      "benchmark_sales": 4826,
+      "segment_rank": 2,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 22,
+      "competitor_pool_sales": 43488,
+      "competitor_pool": [
+        {
+          "series_id": 6187,
+          "series_name": "小米SU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 20414,
+          "price": "21.99-30.39万"
+        },
+        {
+          "series_id": 10070,
+          "series_name": "腾势Z9GT EV",
+          "manufacturer": "腾势汽车",
+          "sales_volume": 4826,
+          "price": "26.98-38.48万"
+        },
+        {
+          "series_id": 26005,
+          "series_name": "尚界Z7T",
+          "manufacturer": "上汽集团",
+          "sales_volume": 4030,
+          "price": "22.98-30.98万"
+        },
+        {
+          "series_id": 26030,
+          "series_name": "领克10",
+          "manufacturer": "领克",
+          "sales_volume": 2313,
+          "price": "16.99-23.59万"
+        },
+        {
+          "series_id": 4300,
+          "series_name": "汉EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 2026,
+          "price": "15.78-21.38万"
+        },
+        {
+          "series_id": 3352,
+          "series_name": "小鹏P7",
+          "manufacturer": "小鹏汽车",
+          "sales_volume": 1881,
+          "price": "20.38-30.18万"
+        },
+        {
+          "series_id": 5015,
+          "series_name": "ZEEKR 001",
+          "manufacturer": "极氪",
+          "sales_volume": 1844,
+          "price": "26.98-36.50万"
+        },
+        {
+          "series_id": 9657,
+          "series_name": "铂智7",
+          "manufacturer": "广汽丰田",
+          "sales_volume": 1757,
+          "price": "15.48-20.98万"
+        },
+        {
+          "series_id": 25094,
+          "series_name": "日产N7",
+          "manufacturer": "东风日产",
+          "sales_volume": 1417,
+          "price": "10.99-14.49万"
+        },
+        {
+          "series_id": 9660,
+          "series_name": "智己L6",
+          "manufacturer": "智己汽车",
+          "sales_volume": 1238,
+          "price": "18.99-24.99万"
+        },
+        {
+          "series_id": 8947,
+          "series_name": "红旗EH7",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 400,
+          "price": "19.58-29.68万"
+        },
+        {
+          "series_id": 25187,
+          "series_name": "汉L EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 340,
+          "price": "20.28-26.28万"
+        },
+        {
+          "series_id": 9224,
+          "series_name": "宝马i5",
+          "manufacturer": "华晨宝马",
+          "sales_volume": 249,
+          "price": "29.98-42.83万"
+        },
+        {
+          "series_id": 9225,
+          "series_name": "智界S7",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 212,
+          "price": "22.98-29.98万"
+        },
+        {
+          "series_id": 6137,
+          "series_name": "飞凡F7",
+          "manufacturer": "飞凡汽车",
+          "sales_volume": 190,
+          "price": "16.29-18.01万"
+        },
+        {
+          "series_id": 8858,
+          "series_name": "银河E8",
+          "manufacturer": "吉利银河",
+          "sales_volume": 178,
+          "price": "12.18-17.08万"
+        },
+        {
+          "series_id": 24611,
+          "series_name": "宝骏享境EV",
+          "manufacturer": "上汽通用五菱",
+          "sales_volume": 57,
+          "price": "10.38-18.88万"
+        },
+        {
+          "series_id": 4870,
+          "series_name": "智己L7",
+          "manufacturer": "智己汽车",
+          "sales_volume": 32,
+          "price": "29.19万"
+        },
+        {
+          "series_id": 25226,
+          "series_name": "沃尔沃ES90",
+          "manufacturer": "沃尔沃亚太",
+          "sales_volume": 27,
+          "price": "38.99-45.99万"
+        },
+        {
+          "series_id": 6311,
+          "series_name": "昊铂GT",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 26,
+          "price": "14.58-17.79万"
+        },
+        {
+          "series_id": 4797,
+          "series_name": "比亚迪e9",
+          "manufacturer": "比亚迪",
+          "sales_volume": 20,
+          "price": "16.98万"
+        },
+        {
+          "series_id": 3478,
+          "series_name": "蔚来ET7",
+          "manufacturer": "蔚来",
+          "sales_volume": 11,
+          "price": "42.80-45.80万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 6187,
+          "series_name": "小米SU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 20414,
+          "price": "21.99-30.39万"
+        },
+        {
+          "series_id": 10070,
+          "series_name": "腾势Z9GT EV",
+          "manufacturer": "腾势汽车",
+          "sales_volume": 4826,
+          "price": "26.98-38.48万"
+        },
+        {
+          "series_id": 26005,
+          "series_name": "尚界Z7T",
+          "manufacturer": "上汽集团",
+          "sales_volume": 4030,
+          "price": "22.98-30.98万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 21.98,
+      "benchmark_average_start_price_wan": 23.98,
+      "benchmark_minimum_start_price_wan": 21.99,
+      "benchmark_maximum_start_price_wan": 26.98,
+      "start_price_premium_ratio": -0.0834,
+      "red_line_sales": 1206,
+      "green_line_sales": 3861,
+      "performance_ratio": 1.3046,
+      "warning_level": "green",
+      "warning_reason": "车型销量6296辆，同一懂车帝细分市场头部3款竞品销量中位数4826辆，头部基准达成率130.5%"
+    },
+    {
+      "series_id": 5828,
+      "series_name": "MG4",
+      "manufacturer": "上汽集团",
+      "sales_volume": 14397,
+      "price": "6.58—9.98万元",
+      "body_type": "轿车",
+      "size_class": "紧凑型车",
+      "energy_type": "纯电动",
+      "segment_key": "轿车|紧凑型车|纯电动",
+      "quality_status": "verified",
+      "segment_total_sales": 49802,
+      "segment_model_count": 19,
+      "segment_median_sales": 541.5,
+      "benchmark_sales": 4669,
+      "segment_rank": 1,
+      "competitor_pool_rule": "排除本品后，取同细分市场销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 18,
+      "competitor_pool_sales": 35405,
+      "competitor_pool": [
+        {
+          "series_id": 10170,
+          "series_name": "小鹏MONA M03",
+          "manufacturer": "小鹏汽车",
+          "sales_volume": 14160,
+          "price": "11.98-15.18万"
+        },
+        {
+          "series_id": 25682,
+          "series_name": "零跑Lafa5",
+          "manufacturer": "零跑汽车",
+          "sales_volume": 4669,
+          "price": "9.38-12.78万"
+        },
+        {
+          "series_id": 24800,
+          "series_name": "AION RT",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 4502,
+          "price": "9.30-12.20万"
+        },
+        {
+          "series_id": 9266,
+          "series_name": "零跑B01",
+          "manufacturer": "零跑汽车",
+          "sales_volume": 3497,
+          "price": "8.98-11.78万"
+        },
+        {
+          "series_id": 4899,
+          "series_name": "秦PLUS EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 2846,
+          "price": "8.78-16.38万"
+        },
+        {
+          "series_id": 25140,
+          "series_name": "荣威D6",
+          "manufacturer": "上汽集团",
+          "sales_volume": 1842,
+          "price": "7.98-11.98万"
+        },
+        {
+          "series_id": 4391,
+          "series_name": "e爱丽舍",
+          "manufacturer": "神龙汽车",
+          "sales_volume": 1003,
+          "price": "13.98-17.98万"
+        },
+        {
+          "series_id": 5217,
+          "series_name": "大众ID.3",
+          "manufacturer": "上汽大众",
+          "sales_volume": 680,
+          "price": "11.89-14.49万"
+        },
+        {
+          "series_id": 24932,
+          "series_name": "长安欧尚520",
+          "manufacturer": "长安汽车",
+          "sales_volume": 617,
+          "price": "16.68万"
+        },
+        {
+          "series_id": 3101,
+          "series_name": "AION S",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 466,
+          "price": "6.88-15.49万"
+        },
+        {
+          "series_id": 4076,
+          "series_name": "比亚迪e3",
+          "manufacturer": "比亚迪",
+          "sales_volume": 411,
+          "price": "15.48万"
+        },
+        {
+          "series_id": 5151,
+          "series_name": "枫叶60s",
+          "manufacturer": "睿蓝汽车",
+          "sales_volume": 227,
+          "price": "14.98-15.98万"
+        },
+        {
+          "series_id": 25194,
+          "series_name": "羿驰05",
+          "manufacturer": "江铃集团新能源",
+          "sales_volume": 170,
+          "price": "7.98-17.98万"
+        },
+        {
+          "series_id": 3359,
+          "series_name": "微蓝6",
+          "manufacturer": "上汽通用别克",
+          "sales_volume": 131,
+          "price": "8.48-14.09万"
+        },
+        {
+          "series_id": 8930,
+          "series_name": "曹操60",
+          "manufacturer": "曹操汽车",
+          "sales_volume": 113,
+          "price": "12.98-16.98万"
+        },
+        {
+          "series_id": 25389,
+          "series_name": "奔驰CLA EV",
+          "manufacturer": "北京奔驰",
+          "sales_volume": 35,
+          "price": "22.90-29.99万"
+        },
+        {
+          "series_id": 1820,
+          "series_name": "秦EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 23,
+          "price": "16.88万"
+        },
+        {
+          "series_id": 9792,
+          "series_name": "爱跑",
+          "manufacturer": "江汽集团",
+          "sales_volume": 13,
+          "price": "15.29-18.99万"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 10170,
+          "series_name": "小鹏MONA M03",
+          "manufacturer": "小鹏汽车",
+          "sales_volume": 14160,
+          "price": "11.98-15.18万"
+        },
+        {
+          "series_id": 25682,
+          "series_name": "零跑Lafa5",
+          "manufacturer": "零跑汽车",
+          "sales_volume": 4669,
+          "price": "9.38-12.78万"
+        },
+        {
+          "series_id": 24800,
+          "series_name": "AION RT",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 4502,
+          "price": "9.30-12.20万"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 6.58,
+      "benchmark_average_start_price_wan": 10.22,
+      "benchmark_minimum_start_price_wan": 9.3,
+      "benchmark_maximum_start_price_wan": 11.98,
+      "start_price_premium_ratio": -0.3562,
+      "red_line_sales": 1167,
+      "green_line_sales": 3735,
+      "performance_ratio": 3.0835,
+      "warning_level": "green",
+      "warning_reason": "车型销量14397辆，同一懂车帝细分市场头部3款竞品销量中位数4669辆，头部基准达成率308.4%"
+    }
+  ],
+  "quality_issues": []
+}

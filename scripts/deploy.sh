@@ -50,6 +50,15 @@ docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sale
 if [[ -f data/e7x_product_evaluation_2026-06.json ]]; then
   docker compose --env-file .env cp data/e7x_product_evaluation_2026-06.json mmn-app:/app/data/e7x_product_evaluation_2026-06.json
 fi
+if [[ -f data/sales_warning_demo_2026-06.json ]]; then
+  docker compose --env-file .env cp data/sales_warning_demo_2026-06.json mmn-app:/app/data/sales_warning_demo_2026-06.json
+fi
+if [[ -f data/dongchedi_sales/sales_warning_observed_2026-06.json ]]; then
+  docker compose --env-file .env cp data/dongchedi_sales/sales_warning_observed_2026-06.json mmn-app:/app/data/dongchedi_sales/sales_warning_observed_2026-06.json
+fi
+if [[ -f data/dongchedi_sales/sales_warning_latest.json ]]; then
+  docker compose --env-file .env cp data/dongchedi_sales/sales_warning_latest.json mmn-app:/app/data/dongchedi_sales/sales_warning_latest.json
+fi
 if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
   docker compose --env-file .env cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json
 fi

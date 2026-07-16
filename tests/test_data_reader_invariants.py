@@ -89,6 +89,26 @@ class DataReaderInvariantTest(unittest.TestCase):
         self.assertEqual(dataset["periods"], ["7.2-7.8"])
         self.assertEqual(dataset["items"][0]["share"], 0)
 
+    def test_saic_eight_model_weekly_filename_is_identified_as_dongchedi(self):
+        cells = {
+            (1, 1): "本品车系名称",
+            (1, 2): "正向排名",
+            (1, 3): "竞品车系名称",
+            (1, 4): "车系对比次数占比",
+            (1, 5): "反向排名",
+            (2, 1): "奥迪E7X",
+            (2, 2): 1,
+            (2, 3): "Model Y",
+            (2, 4): 0.1579,
+            (2, 5): 3,
+        }
+        filename = "上汽集团八车周对比次数正反向排名(1).xlsx"
+        with patch.object(server, "read_xlsx_cells", return_value={"7.9-7.15": cells}):
+            dataset = server.build_vertical_media_dataset_from_workbook(b"fixture", filename)
+
+        self.assertEqual(dataset["platform"], "懂车帝")
+        self.assertEqual(dataset["items"][0]["platform"], "懂车帝")
+
     def test_video_export_without_title_uses_traceable_social_text_fallback(self):
         cells = {
             (1, 1): "抖音视频导出",
