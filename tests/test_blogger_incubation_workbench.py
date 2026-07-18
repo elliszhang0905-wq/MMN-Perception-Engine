@@ -42,6 +42,45 @@ class FakeCreatorRepository:
 
 
 class BloggerIncubationWorkbenchTest(unittest.TestCase):
+    def test_social_assistant_fields_are_attributed_to_creator(self):
+        row = {
+            "视频ID": "7348040890440551707",
+            "视频链接": "https://www.douyin.com/video/7348040890440551707",
+            "视频描述": "帮粉丝大哥整备一台老车",
+            "达人UID": "104332721863",
+            "达人昵称": "猴哥说车",
+            "发布时间": 45370.84258101852,
+        }
+
+        source = server.normalize_blogger_source(
+            row, "【社媒助手】达人「猴哥说车」的视频数据.xlsx", "digest"
+        )
+
+        self.assertEqual(source["author"], "猴哥说车")
+        self.assertEqual(source["title"], row["视频描述"])
+        self.assertEqual(source["content_id"], row["视频ID"])
+        self.assertEqual(source["source_url"], row["视频链接"])
+        self.assertEqual(source["publish_time"], "2024-03-19 20:13:19")
+        self.assertEqual(source["source_origin"], "social_assistant")
+        self.assertEqual(source["raw_payload"]["_mmn_source_origin"], "social_assistant")
+
+    def test_social_assistant_import_keeps_full_export(self):
+        rows = [{"视频ID": str(i)} for i in range(100)]
+        normalized = {
+            "title": "样本", "content": "正文", "source_url": "https://example.com/video"
+        }
+        with patch.object(server, "generic_rows_from_file", return_value=rows), \
+                patch.object(server, "normalize_blogger_source", return_value=normalized) as normalize, \
+                patch.object(server, "save_blogger_skill_items", return_value={}), \
+                patch.object(server, "blogger_skill_payload", return_value={"ok": True}):
+            result = server.import_blogger_skill_file(
+                b"xlsx", "【社媒助手】达人「猴哥说车」的视频数据.xlsx", limit=30
+            )
+
+        self.assertEqual(normalize.call_count, 100)
+        self.assertEqual(result["sourceMode"], "social_assistant")
+        self.assertEqual(result["sourcePriority"], "primary")
+
     def test_dual_model_gate_requires_shared_evidence(self):
         profile = server.blogger_skill_profile_from_samples([], blogger_name="测试达人")
         samples = [{
@@ -139,6 +178,10 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         self.assertIn("error_message||task.degraded_reason", app)
         self.assertIn('api("/api/creator-distillation/tasks"', app)
         self.assertIn("未经人工确认的 DNA 不作为最终孵化结论", app)
+        self.assertIn("导入社媒助手数据（主来源）", html)
+        self.assertIn("TikHub 补充采集（可选）", html)
+        self.assertIn("不覆盖社媒助手主证据", html)
+        self.assertIn("TikHub 补充采集任务", app)
 
     def test_blogger_workbench_visual_scope_survives_content_view_mount(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")

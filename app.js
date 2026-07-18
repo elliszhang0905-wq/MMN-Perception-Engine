@@ -3897,7 +3897,7 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
  const root=document.querySelector("#blogger-incubation-workbench"),status=document.querySelector("#blogger-incubation-status");if(!root)return;
  if(!workbench){
   if(status)status.textContent=profile?"能力 Skill 已存在，等待关联平台档案":"等待选择孵化对象";
-  root.innerHTML=profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>粘贴该博主的抖音或小红书主页链接，即可关联真实平台档案、代表作证据和异步任务状态；不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`;
+  root.innerHTML=profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>社媒助手数据作为主证据；如仍缺少平台档案，可用 TikHub 补充账号字段和异步任务状态，且不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`;
   return;
  }
  const platformProfile=workbench.platformProfile||{},dna=workbench.dna||{},incubation=workbench.incubation||{},task=workbench.latestTask||{};
@@ -3912,10 +3912,10 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
  const list=(items,empty)=>(items||[]).length?`<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>`:`<p class="empty">${empty}</p>`;
  const taskError=task.error_message||task.degraded_reason||"",taskCopy=task.id?clip(`${creatorTaskStageLabel(task.stage)} · ${taskProgress}%${taskError?` · ${taskError}`:""}`,60):"暂无关联任务记录";
  const taskPanel=task.id?`<section class="blogger-task-progress ${taskFailed?"failed":taskComplete?"completed":"running"}" aria-live="polite">
-  <div><span>新达人蒸馏任务</span><b>${escapeHtml(workbench.displayName)} · ${escapeHtml(creatorTaskStageLabel(task.stage))}</b><small>任务 ID：${escapeHtml(task.id)}</small></div>
+  <div><span>TikHub 补充采集任务</span><b>${escapeHtml(workbench.displayName)} · ${escapeHtml(creatorTaskStageLabel(task.stage))}</b><small>任务 ID：${escapeHtml(task.id)}</small></div>
   <div class="blogger-task-progress-meter"><progress max="100" value="${taskProgress}" aria-label="${escapeAttr(workbench.displayName)}蒸馏进度"></progress><strong>${taskProgress}%</strong></div>
   ${taskError?`<p>${escapeHtml(taskError)}</p>`:""}
-  ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">修正后重试</button>`:""}
+  ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">重试 TikHub 补充</button>`:""}
  </section>`:"";
  root.innerHTML=`<div class="blogger-incubation-head"><div><span>${assetPlatformName(workbench.platform)}平台档案</span><h3>${escapeHtml(workbench.displayName)}</h3><p>${escapeHtml(platformProfile.signature||dna.summary||"等待补充账号说明")}</p></div><b class="blogger-readiness ${workbench.lifecycleStatus}">${statusText}</b></div>
  ${taskPanel}
@@ -3988,14 +3988,15 @@ async function scanBloggerSkillImports(){
 async function importBloggerSkillFile(file){
  if(!file)return;
  try{
-  toast("正在导入并蒸馏样本…");
+  const socialAssistant=file.name.includes("社媒助手");
+  toast(socialAssistant?"正在导入社媒助手主证据并蒸馏…":"正在导入补充样本并蒸馏…");
   const res=await fetch(`/api/blogger-skill/import-file?edition=${encodeURIComponent(activeEdition())}&filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
   bloggerSkillState={...bloggerSkillState,...json};
   mergeDistilledCreatorLibraries(json.creatorLibraries);
   contentAssetView="bloggerDistill";
   renderBloggerSkill();renderCreatorLibrary();renderStrategyKb();showPage("videos");
-  toast(`MMN已完成样本蒸馏与交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
+  toast(`${json.sourceMode==="social_assistant"?"社媒助手主证据":"补充样本"}已入库并完成交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
  }catch(err){toast(`样本导入失败：${err.message}`)}
 }
 function contentCapabilityQueryString(){

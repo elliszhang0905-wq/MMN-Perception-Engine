@@ -123,7 +123,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260719-creator-progress-1"
+APP_VERSION_CODE = "beta-1.02-20260719-social-assistant-primary-1"
 APP_RELEASE_DATE = "2026-07-19"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -9131,6 +9131,15 @@ def field_value(row, aliases, default=""):
         return default
     return str(value).strip()
 
+def raw_field_value(row, aliases, default=""):
+    if not isinstance(row, dict):
+        return default
+    idx = generic_header_index(list(row.keys()), aliases)
+    if idx is None:
+        return default
+    value = row.get(list(row.keys())[idx])
+    return default if value is None else value
+
 def infer_blogger_platform(row, filename):
     hay = " ".join(str(x or "") for x in [filename, row.get("source_url"), row.get("url"), row.get("笔记链接"), row.get("平台"), row.get("source_platform")])
     return infer_platform(hay) or field_value(row, ["平台", "来源平台", "source_platform", "platform"], "公开内容")
@@ -9192,12 +9201,14 @@ def infer_sample_model(title, content):
     return ""
 
 def normalize_blogger_source(row, filename, file_digest, edition="china"):
-    title = field_value(row, ["笔记标题", "标题", "视频标题", "作品标题", "内容标题", "title"], Path(filename).stem)
-    content = field_value(row, ["笔记内容", "正文", "内容", "文案", "描述", "text", "content", "desc"], "")
-    source_url = field_value(row, ["笔记链接", "内容链接", "链接", "source_url", "url", "URL"], "")
-    author = field_value(row, ["博主昵称", "作者", "账号名", "博主", "达人", "author", "source_account_name"], "")
-    publish_time = field_value(row, ["发布时间", "发布日期", "publish_time", "published_at", "date"], "")
-    content_id = field_value(row, ["笔记ID", "内容ID", "作品ID", "id", "content_id"], "")
+    social_assistant = "社媒助手" in str(filename or "")
+    title = field_value(row, ["笔记标题", "标题", "视频标题", "视频描述", "作品标题", "内容标题", "title"], Path(filename).stem)
+    content = field_value(row, ["笔记内容", "视频描述", "正文", "内容", "文案", "描述", "text", "content", "desc"], "")
+    source_url = field_value(row, ["笔记链接", "视频链接", "内容链接", "链接", "source_url", "url", "URL"], "")
+    author = field_value(row, ["达人昵称", "博主昵称", "用户昵称", "账号昵称", "作者", "账号名", "博主", "达人", "author", "source_account_name"], "")
+    publish_value = raw_field_value(row, ["发布时间", "发布日期", "publish_time", "published_at", "date"], "")
+    publish_time = excel_datetime_text(publish_value) if publish_value != "" else ""
+    content_id = field_value(row, ["视频ID", "笔记ID", "内容ID", "作品ID", "id", "content_id"], "")
     platform = infer_blogger_platform({**row, "source_url": source_url}, filename)
     text = f"{title}\n{content}"
     vertical_domain = infer_skill_domain(text)
@@ -9218,7 +9229,13 @@ def normalize_blogger_source(row, filename, file_digest, edition="china"):
         "ingest_time": now(),
         "status": "fetched" if content else "manual_required",
         "raw_payload_hash": digest,
-        "raw_payload": row
+        "source_origin": "social_assistant" if social_assistant else "file_import",
+        "verification_status": "page_export_verified" if social_assistant else "imported",
+        "raw_payload": {
+            **row,
+            "_mmn_source_origin": "social_assistant" if social_assistant else "file_import",
+            "_mmn_verification_status": "page_export_verified" if social_assistant else "imported",
+        }
     }
 
 def distill_blogger_sample(source):
@@ -9560,15 +9577,22 @@ def save_blogger_skill_items(sources, edition="china"):
 def import_blogger_skill_file(data, filename, edition="china", limit=30):
     digest = file_hash(data)
     rows = generic_rows_from_file(data, filename)
+    social_assistant = "社媒助手" in str(filename or "")
+    effective_limit = 500 if social_assistant else max(1, min(int(limit or 30), 30))
     sources = []
-    for row in rows[:max(1, min(int(limit or 30), 30))]:
+    for row in rows[:effective_limit]:
         source = normalize_blogger_source(row, filename, digest, edition=edition)
         if source.get("title") or source.get("content") or source.get("source_url"):
             sources.append(source)
     if not sources:
         raise ValueError("未识别到可蒸馏的内容样本。请确认文件包含标题、正文、作者或链接字段。")
     result = save_blogger_skill_items(sources, edition=edition)
-    return blogger_skill_payload(edition=edition, imported=len(sources), result=result)
+    payload = blogger_skill_payload(edition=edition, imported=len(sources), result=result)
+    payload.update({
+        "sourceMode": "social_assistant" if social_assistant else "file_import",
+        "sourcePriority": "primary" if social_assistant else "supplemental",
+    })
+    return payload
 
 def scan_blogger_skill_imports(edition="china", limit=30):
     allowed = {".xlsx", ".csv", ".json", ".txt", ".md", ".markdown"}
