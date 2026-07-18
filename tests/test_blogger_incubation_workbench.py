@@ -102,6 +102,26 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         self.assertEqual(rows[0]["latestTask"]["id"], "task-1")
         self.assertIn("不复制原文", rows[0]["incubation"]["boundary"])
 
+    def test_new_creator_task_is_visible_before_creator_profile_exists(self):
+        class PendingTaskRepository:
+            def list_creators(self, org_id): return []
+            def list_tasks(self, org_id):
+                return [{
+                    "id": "task-new", "creator_url": "https://v.douyin.com/new/", "platform": "douyin",
+                    "status": "failed", "stage": "collect", "progress": 8,
+                    "error_category": "invalid_link", "error_message": "短链接解析失败",
+                    "capabilities": {"expectedCreatorName": "超哥超车"},
+                }]
+
+        rows = server.creator_incubation_workbenches([], [], repository=PendingTaskRepository())
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["displayName"], "超哥超车")
+        self.assertIsNone(rows[0]["creatorId"])
+        self.assertEqual(rows[0]["lifecycleStatus"], "failed")
+        self.assertEqual(rows[0]["latestTask"]["progress"], 8)
+        self.assertEqual(rows[0]["latestTask"]["error_message"], "短链接解析失败")
+
     def test_existing_blogger_page_contains_account_intake_and_workbench(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         app = (ROOT / "app.js").read_text(encoding="utf-8")
@@ -113,6 +133,10 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         self.assertNotIn('data-page="creatorassets">达人蒸馏与档案', html)
         self.assertIn("博主蒸馏孵化", html)
         self.assertIn("createBloggerCreatorTask", app)
+        self.assertIn("pollBloggerCreatorTask", app)
+        self.assertIn('role="progressbar"', app)
+        self.assertIn("data-blogger-task-retry", app)
+        self.assertIn("error_message||task.degraded_reason", app)
         self.assertIn('api("/api/creator-distillation/tasks"', app)
         self.assertIn("未经人工确认的 DNA 不作为最终孵化结论", app)
 

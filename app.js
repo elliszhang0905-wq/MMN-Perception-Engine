@@ -113,7 +113,7 @@ let strategyKb=loadStrategyKb();
 let modelJudgments=loadModelJudgments();
 let modelIdentities=loadModelIdentities(),modelIdentitySyncing=false;
 let founderState=loadFounderState(),founderSearch="",founderFilters={brand:"all",person:"all",topic:"all"};
-let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]},bloggerSkillPersonFilter="";
+let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]},bloggerSkillPersonFilter="",bloggerTaskPollToken=0;
 let contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]},contentCapabilitySearch="",contentCapabilitySelectedTags=[];
 let selectedKnowledgeCluster="";
 let ragResultsExpanded=false;
@@ -669,7 +669,7 @@ function resetBrowserScopeTransientState(){
  if(socialTrendState.stageTimer)clearInterval(socialTrendState.stageTimer);if(socialTrendState.progressTimer)clearInterval(socialTrendState.progressTimer);
  Object.assign(socialTrendState,{loading:false,result:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:socialTrendState.runToken+1,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"own"});
  Object.assign(creatorAssetState,{tab:"distill",tasks:[],creators:[],methods:[],selectedCreator:null,selectedAsset:null,processingAssetId:"",loading:false,error:""});
- bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]};bloggerSkillPersonFilter="";
+ bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]};bloggerSkillPersonFilter="";bloggerTaskPollToken++;
  contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]};contentCapabilitySearch="";contentCapabilitySelectedTags=[];
  workspaceState=defaultWorkspaceState();
 }
@@ -3901,7 +3901,8 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
   return;
  }
  const platformProfile=workbench.platformProfile||{},dna=workbench.dna||{},incubation=workbench.incubation||{},task=workbench.latestTask||{};
- const statusText=bloggerIncubationStatusLabel(workbench.lifecycleStatus);if(status)status.textContent=statusText;
+ const taskProgress=Math.max(0,Math.min(100,Number(task.progress)||0)),taskFailed=["failed","degraded"].includes(task.status),taskComplete=task.status==="completed";
+ const statusText=taskFailed?"采集失败":task.id&&!taskComplete?`${creatorTaskStageLabel(task.stage)} ${taskProgress}%`:bloggerIncubationStatusLabel(workbench.lifecycleStatus);if(status)status.textContent=statusText;
  const steps=[
   ["账号档案",Boolean(workbench.creatorId),workbench.identityStatus==="needs_review"?"待身份复核":"已建立"],
   ["代表作证据",workbench.assetCount>0,`${workbench.assetCount||0} 条作品`],
@@ -3909,8 +3910,15 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
   ["账号孵化",workbench.lifecycleStatus==="incubation_ready",workbench.lifecycleStatus==="incubation_ready"?"可执行":"待人工审核"],
  ];
  const list=(items,empty)=>(items||[]).length?`<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>`:`<p class="empty">${empty}</p>`;
- const taskCopy=task.id?clip(`${creatorTaskStageLabel(task.stage)} · ${task.progress||0}%${task.degraded_reason?` · ${creatorDegradedMessage(task.degraded_reason)}`:""}`,60):"暂无关联任务记录";
+ const taskError=task.error_message||task.degraded_reason||"",taskCopy=task.id?clip(`${creatorTaskStageLabel(task.stage)} · ${taskProgress}%${taskError?` · ${taskError}`:""}`,60):"暂无关联任务记录";
+ const taskPanel=task.id?`<section class="blogger-task-progress ${taskFailed?"failed":taskComplete?"completed":"running"}" aria-live="polite">
+  <div><span>新达人蒸馏任务</span><b>${escapeHtml(workbench.displayName)} · ${escapeHtml(creatorTaskStageLabel(task.stage))}</b><small>任务 ID：${escapeHtml(task.id)}</small></div>
+  <div class="blogger-task-progress-meter"><progress max="100" value="${taskProgress}" aria-label="${escapeAttr(workbench.displayName)}蒸馏进度"></progress><strong>${taskProgress}%</strong></div>
+  ${taskError?`<p>${escapeHtml(taskError)}</p>`:""}
+  ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">修正后重试</button>`:""}
+ </section>`:"";
  root.innerHTML=`<div class="blogger-incubation-head"><div><span>${assetPlatformName(workbench.platform)}平台档案</span><h3>${escapeHtml(workbench.displayName)}</h3><p>${escapeHtml(platformProfile.signature||dna.summary||"等待补充账号说明")}</p></div><b class="blogger-readiness ${workbench.lifecycleStatus}">${statusText}</b></div>
+ ${taskPanel}
  <div class="blogger-incubation-steps">${steps.map(([name,done,note])=>`<div class="${done?"done":"pending"}"><i></i><b>${name}</b><small>${escapeHtml(note)}</small></div>`).join("")}</div>
  <div class="blogger-profile-metrics"><div><span>粉丝</span><b>${bloggerPlatformMetric(platformProfile,"followers")}</b></div><div><span>公开作品</span><b>${bloggerPlatformMetric(platformProfile,"postCount")}</b></div><div><span>获赞与收藏</span><b>${bloggerPlatformMetric(platformProfile,"likesAndCollects")}</b></div><div><span>最新任务</span><b>${escapeHtml(taskCopy)}</b></div></div>
  <div class="blogger-incubation-grid">
@@ -3920,12 +3928,38 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
   <section><span>PRODUCTION ASSETS</span><h4>可调用策略与脚本资产</h4>${list([...(incubation.strategyAssets||[]),...(incubation.scriptAssets||[])],"完成样本蒸馏后生成 brief 与脚本资产。")}</section>
  </div><p class="blogger-incubation-boundary">${escapeHtml(incubation.boundary||"只迁移方法论，不复制原文或个人身份。")}</p>`;
 }
+async function pollBloggerCreatorTask(taskId,expectedName){
+ const token=++bloggerTaskPollToken,deadline=Date.now()+20*60*1000;
+ while(token===bloggerTaskPollToken&&Date.now()<deadline){
+  const data=await api(`/api/creator-distillation/tasks/${encodeURIComponent(taskId)}`),task=data.task;
+  if(expectedName)bloggerSkillPersonFilter=expectedName;
+  await loadBloggerSkill();
+  if(!task)throw new Error("蒸馏任务状态不可用");
+  if(["completed","failed","degraded","paused"].includes(task.status)){
+   toast(task.status==="completed"?`${expectedName||"新达人"}蒸馏完成`:`${expectedName||"新达人"}蒸馏${task.status==="paused"?"已暂停":"失败"}：${task.error_message||task.degraded_reason||"请查看任务详情"}`);
+   return task;
+  }
+  await new Promise(resolve=>setTimeout(resolve,900));
+ }
+ if(token===bloggerTaskPollToken)throw new Error("蒸馏任务超过20分钟，请检查任务状态后重试");
+}
+async function retryBloggerCreatorTask(button){
+ const taskId=button.dataset.bloggerTaskRetry,expectedName=button.dataset.bloggerName||"新达人";
+ button.disabled=true;button.textContent="正在重新排队…";
+ try{
+  const data=await api(`/api/creator-distillation/tasks/${encodeURIComponent(taskId)}/retry`,{method:"POST",body:"{}"});
+  bloggerSkillPersonFilter=expectedName;await loadBloggerSkill();toast(`${expectedName}已重新进入蒸馏队列`);
+  pollBloggerCreatorTask(data.task?.id||taskId,expectedName).catch(err=>toast(`任务跟踪失败：${err.message}`));
+ }catch(err){toast(`重新采集失败：${err.message}`);button.disabled=false;button.textContent="修正后重试"}
+}
 async function createBloggerCreatorTask(e){
  e.preventDefault();const form=e.currentTarget,f=new FormData(form),url=f.get("creatorUrl"),expectedCreatorName=f.get("expectedCreatorName");
  try{
   await api(`/api/creator-distillation/preflight?url=${encodeURIComponent(url)}`);
-  await api("/api/creator-distillation/tasks",{method:"POST",body:JSON.stringify({creatorUrl:url,expectedCreatorName,range:"180",sampleCount:50})});
-  toast("账号已进入蒸馏队列；档案生成后会自动关联当前工作台");form.reset();await Promise.all([loadBloggerSkill(),loadCreatorAssets()]);
+  const data=await api("/api/creator-distillation/tasks",{method:"POST",body:JSON.stringify({creatorUrl:url,expectedCreatorName,range:"180",sampleCount:50})}),task=data.task;
+  if(!task?.id)throw new Error("任务未成功创建");
+  bloggerSkillPersonFilter=expectedCreatorName;form.reset();await Promise.all([loadBloggerSkill(),loadCreatorAssets()]);toast(`${expectedCreatorName}已进入蒸馏队列，正在显示实时进度`);
+  pollBloggerCreatorTask(task.id,expectedCreatorName).catch(err=>toast(`任务跟踪失败：${err.message}`));
  }catch(err){toast(`账号导入失败：${err.message}`)}
 }
 async function importBloggerSkillUrl(){
@@ -4467,6 +4501,7 @@ bindSocialTrendSegments();
 const socialImportButton=document.querySelector("#social-trend-import"),socialImportFile=document.querySelector("#social-trend-import-file");if(socialImportButton&&socialImportFile){socialImportButton.onclick=()=>socialImportFile.click();socialImportFile.onchange=async()=>{const file=socialImportFile.files?.[0];if(file)await importSocialTrendFile(file);socialImportFile.value=""}}
 const socialThresholdReset=document.querySelector("#social-threshold-reset");if(socialThresholdReset)socialThresholdReset.onclick=()=>{document.querySelector("#social-threshold-douyin").value=8000;document.querySelector("#social-threshold-xiaohongshu").value=500;document.querySelector("#social-threshold-weibo").value=500};
 document.addEventListener("click",async e=>{
+ const bloggerRetry=e.target.closest("[data-blogger-task-retry]");if(bloggerRetry){await retryBloggerCreatorTask(bloggerRetry);return}
  const tab=e.target.closest("[data-creator-asset-tab]");if(tab){creatorAssetState.tab=tab.dataset.creatorAssetTab;renderCreatorAssets();return}
  const action=e.target.closest("[data-creator-action]");if(!action)return;
  try{

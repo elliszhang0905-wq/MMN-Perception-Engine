@@ -9663,7 +9663,13 @@ def creator_incubation_workbenches(profiles, samples, org_id="local", repository
     samples_by_name = {}
     for item in samples:
         samples_by_name.setdefault(normalized_creator_name(item.get("blogger_name")), []).append(item)
+    task_fields = (
+        "id", "status", "stage", "progress", "degraded_reason", "error_category",
+        "error_message", "updated_at", "creator_url", "platform"
+    )
+    task_summary = lambda row: ({key: row.get(key) for key in task_fields} if row else None)
     workbenches = []
+    linked_task_ids = set()
     for creator in creators:
         detail = repo.creator_detail(creator.get("id")) or {}
         public_profile = creator.get("profile") or {}
@@ -9677,9 +9683,9 @@ def creator_incubation_workbenches(profiles, samples, org_id="local", repository
         source_urls = {str(identity.get(key) or "") for key in ("sourceUrl", "resolvedUrl")}
         related_tasks = [task for task in tasks if str(task.get("creator_url") or "") in source_urls]
         latest_task_row = related_tasks[0] if related_tasks else None
-        latest_task = ({key: latest_task_row.get(key) for key in (
-            "id", "status", "stage", "progress", "degraded_reason", "error_message", "updated_at"
-        )} if latest_task_row else None)
+        latest_task = task_summary(latest_task_row)
+        if latest_task_row:
+            linked_task_ids.add(latest_task_row.get("id"))
         themes = [item.get("name") for item in (dna.get("contentThemes") or []) if item.get("name") and item.get("name") != "未分类"]
         framework = blogger_profile.get("evaluation_framework") or []
         pillars = (framework[:4] or themes[:4] or [blogger_profile.get("vertical_domain") or "内容定位待人工确认"])
@@ -9720,6 +9726,41 @@ def creator_incubation_workbenches(profiles, samples, org_id="local", repository
                 "boundary": "只迁移选题逻辑、判断框架和脚本结构；不复制原文、不冒充原账号、不搬运素材。",
             },
         })
+    known_names = {normalized_creator_name(item.get("displayName")) for item in workbenches}
+    for task in tasks:
+        if task.get("id") in linked_task_ids:
+            continue
+        expected_name = str((task.get("capabilities") or {}).get("expectedCreatorName") or "").strip()
+        name_key = normalized_creator_name(expected_name)
+        if not name_key or name_key in known_names:
+            continue
+        blogger_profile = profile_by_name.get(name_key) or {}
+        blogger_samples = samples_by_name.get(name_key) or []
+        status = str(task.get("status") or "queued")
+        lifecycle = "failed" if status in {"failed", "degraded"} else ("evidence_ready" if status == "completed" else "collecting")
+        workbenches.append({
+            "creatorId": None,
+            "displayName": expected_name,
+            "platform": task.get("platform"),
+            "platformProfile": {},
+            "identityStatus": "pending",
+            "profileStatus": "pending",
+            "lifecycleStatus": lifecycle,
+            "assetCount": 0,
+            "sampleCount": len(blogger_samples),
+            "latestTask": task_summary(task),
+            "dna": {},
+            "incubation": {
+                "positioning": blogger_profile.get("professional_background") or "等待账号采集完成后建立独立内容定位。",
+                "contentPillars": (blogger_profile.get("evaluation_framework") or [])[:4],
+                "benchmarkTopics": [],
+                "strategyAssets": [],
+                "scriptAssets": [],
+                "phases": [],
+                "boundary": "只迁移方法论，不复制原文或个人身份。",
+            },
+        })
+        known_names.add(name_key)
     return workbenches
 
 
