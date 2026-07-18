@@ -33,7 +33,8 @@ async function main() {
   await page.waitForFunction(() => /销量|懂车帝|Top/.test(document.querySelector("#sales-marquee-track")?.innerText || ""), null, { timeout: 15000 }).catch(() => {});
   add("sales marquee has sales copy", await page.locator("#sales-marquee-track").innerText().then(t => t.includes("销量") || t.includes("懂车帝") || t.includes("Top")).catch(() => false));
 
-  const pages = ["dashboard", "data", "cognition", "vertical", "videos", "actions", "knowhow", "strategykb", "learning", "architecture", "workspace", "config"];
+  add("action budget is hidden", await page.locator('#nav button[data-page="actions"]').isHidden() && await page.locator("#actions").isHidden());
+  const pages = ["dashboard", "data", "cognition", "vertical", "videos", "knowhow", "strategykb", "learning", "architecture", "workspace", "config"];
   for (const pageName of pages) {
     await page.locator(`#nav button[data-page="${pageName}"]`).click();
     add(`nav opens ${pageName}`, await page.locator(`#${pageName}.page.active`).count() === 1);

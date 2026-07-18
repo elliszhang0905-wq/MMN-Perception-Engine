@@ -172,6 +172,7 @@ button.permission-locked,.file-button.permission-locked{
   box-shadow:none!important;
 }
 .page{display:none;padding:24px 34px 48px}.page.active{display:block}
+#nav [data-page="actions"][hidden],#actions[hidden]{display:none!important}
 .project-strip{background:#1d2227;color:#fff;border-radius:12px;padding:18px 22px;display:grid;grid-template-columns:2fr 1.1fr 1.35fr .9fr;gap:18px;box-shadow:var(--shadow)}
 .project-strip span,.project-strip b{display:block}.project-strip span{font-size:11px;color:#b9c0c5;margin-bottom:7px}.project-strip b{font-size:15px}
 .dashboard-flow{
