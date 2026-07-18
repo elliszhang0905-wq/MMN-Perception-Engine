@@ -65,6 +65,19 @@ class CreatorDistillationTest(unittest.TestCase):
         self.assertTrue(xhs["capabilities"]["imageNote"])
         with self.assertRaises(AdapterError): self.service.preflight("https://example.com/user/1")
 
+    def test_douyin_short_link_normalizes_iesdouyin_share_url(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self,*_): return False
+            def geturl(self):
+                return "https://www.iesdouyin.com/share/user/SEC-USER-1?sec_uid=SEC-USER-1"
+
+        with patch("creator_distillation.adapters.urlopen",return_value=FakeResponse()):
+            reference=DouyinAdapter().creator_reference("https://v.douyin.com/abc/")
+
+        self.assertEqual(reference["resolvedUrl"],"https://www.douyin.com/user/SEC-USER-1")
+        self.assertEqual(reference["secUserId"],"SEC-USER-1")
+
     def test_task_defaults_to_180_days_and_50_samples(self):
         task=self.service.create_task({"creatorUrl":"https://v.douyin.com/abc/",
                                        "expectedCreatorName":"测试达人"},"org-a")

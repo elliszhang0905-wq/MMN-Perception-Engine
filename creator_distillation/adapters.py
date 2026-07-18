@@ -244,6 +244,15 @@ class DouyinAdapter(PlatformAdapter):
                 resolved = response.geturl()
         except (HTTPError, URLError, TimeoutError) as exc:
             raise AdapterError(f"抖音短链接解析失败: {exc}", "link_resolution", True, True) from exc
+        resolved_parsed = urlparse(resolved)
+        resolved_host = resolved_parsed.netloc.lower().split(":")[0]
+        if resolved_host in {"iesdouyin.com", "www.iesdouyin.com"}:
+            query = parse_qs(resolved_parsed.query)
+            path_match = re.search(r"/share/user/([^/?#]+)", resolved_parsed.path)
+            sec_user_id = (path_match.group(1) if path_match else "") or (query.get("sec_uid") or [""])[0]
+            if not sec_user_id:
+                raise AdapterError("抖音短链接解析后缺少 sec_user_id", "identity_resolution", False, True)
+            resolved = f"https://www.douyin.com/user/{sec_user_id}"
         self.parse_link(resolved)
         return resolved
 
