@@ -178,10 +178,13 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         self.assertIn("error_message||task.degraded_reason", app)
         self.assertIn('api("/api/creator-distillation/tasks"', app)
         self.assertIn("未经人工确认的 DNA 不作为最终孵化结论", app)
-        self.assertIn("导入社媒助手数据（主来源）", html)
-        self.assertIn("TikHub 补充采集（可选）", html)
-        self.assertIn("不覆盖社媒助手主证据", html)
-        self.assertIn("TikHub 补充采集任务", app)
+        self.assertIn("导入公开数据（主来源）", html)
+        self.assertIn("补充采集（可选）", html)
+        self.assertIn("不覆盖主证据", html)
+        self.assertIn("账号补充采集任务", app)
+        self.assertNotIn("社媒助手主采集", html)
+        self.assertNotIn("TikHub 补充采集", html)
+        self.assertNotIn("Qwen + DeepSeek 共同证据质检通过", app)
 
     def test_blogger_workbench_visual_scope_survives_content_view_mount(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")

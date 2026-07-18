@@ -43,6 +43,7 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_douyin_creator_collector.js
 "$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 "$NODE_BIN" tests/test_ensure_local_mmn.js
+"$NODE_BIN" tests/test_public_vendor_names.js
 python3 -m py_compile server.py group_dashboard.py product_whitepaper.py bf_factory/*.py
 python3 -m unittest \
   tests.test_product_whitepaper \

@@ -123,7 +123,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260719-social-assistant-primary-1"
+APP_VERSION_CODE = "beta-1.02-20260719-hide-vendor-names-1"
 APP_RELEASE_DATE = "2026-07-19"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))

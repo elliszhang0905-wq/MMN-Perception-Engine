@@ -2692,7 +2692,7 @@ function renderCognitionMmnStrategy(a){
  if(!box)return;
  const ctx=cognitionStrategyContext(a),result=cognitionStrategyState.result||{text:localCognitionStrategyDraft(ctx),parts:{rules:localCognitionStrategyDraft(ctx)},context:ctx};
  if(status)status.textContent=cognitionStrategyState.loading?"MMN正在交叉验证":mmnTraceLabel(result);
- const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||k}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+ const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||publicMmnProviderLabel(k)}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${publicMmnProviderLabel(k)}: ${publicMmnText(v)}</p>`).join("")}</section>`:""}</details>`:"";
  box.innerHTML=`<div class="content-mmn-head"><div><b>${cognitionStrategyState.loading?"MMN正在生成认知策略":"MMN多模态策略输出"}</b><span>决策驾驶舱 + 声量数据中心 + 垂媒竞争格局｜${ctx.project.brand} / ${canonicalModelLabel(ctx.project.model)}｜MMN交叉验证</span></div><button type="button" class="primary" id="run-cognition-mmn-strategy" ${cognitionStrategyState.loading?"disabled":""}>${cognitionStrategyState.loading?"生成中…":"生成/刷新MMN策略"}</button></div><div class="content-mmn-output">${consultingMarkdown(String(result.text||""))}</div>${cognitionStrategyState.error?`<p class="empty">模型生成失败，已使用MMN本地策略输出：${cognitionStrategyState.error}</p>`:""}${parts}`;
  const btn=document.querySelector("#run-cognition-mmn-strategy");
  if(btn)btn.onclick=()=>runCognitionMmnStrategy();
@@ -2781,7 +2781,7 @@ async function runVerticalAiLearning(context){
  try{
   const data=await api("/api/ai/vertical-rank-learning",{method:"POST",body:JSON.stringify({edition:activeEdition(),context:{...context,rows:context.rows.slice(0,30).map(x=>({competitor:x.competitor,positiveRank:x.positiveRank,negativeRank:x.negativeRank,share:x.share,status:rankStatus(x)}))}})});
   if(data.knowledgeItem)mergeStrategyKnowledge([data.knowledgeItem]);
-  const trace=data.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(data.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",rules:"MMN本地规则记录"}[k]||k}</b>${consultingMarkdown(String(v))}</section>`).join("")}${data.errors&&Object.keys(data.errors).length?`<section><b>缺席/错误</b>${Object.entries(data.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+  const trace=data.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(data.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",rules:"MMN本地规则记录"}[k]||publicMmnProviderLabel(k)}</b>${consultingMarkdown(String(v))}</section>`).join("")}${data.errors&&Object.keys(data.errors).length?`<section><b>缺席/错误</b>${Object.entries(data.errors).map(([k,v])=>`<p>${publicMmnProviderLabel(k)}: ${publicMmnText(v)}</p>`).join("")}</section>`:""}</details>`:"";
   if(box)box.innerHTML=`<article class="rag-card mmn-consulting-card"><span>MMN学习完成｜${context.platform}｜${context.period}｜交叉验证完成</span><b>${context.model} 正反向竞争格局学习</b><div class="mmn-consulting-body">${consultingMarkdown(data.text)}</div><small>已写入RAG知识库，可被巡检和MMN策略召回。</small>${trace}</article>`;
   renderStrategyKb();
   toast("MMN已学习正反向排名，并写入RAG知识库");
@@ -3283,7 +3283,7 @@ function renderContentMmnStrategy(){
  if(!box)return;
  const ctx=contentAssetStrategyContext(),result=contentStrategyState.result||{text:localContentStrategyDraft(ctx),parts:{rules:localContentStrategyDraft(ctx)},context:ctx};
  if(status)status.textContent=contentStrategyState.loading?"MMN正在交叉验证":mmnTraceLabel(result);
- const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||k}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${k}: ${v}</p>`).join("")}</section>`:""}</details>`:"";
+ const parts=result.parts?`<details class="model-parts content-mmn-trace"><summary>查看MMN交叉验证过程</summary>${Object.entries(result.parts).filter(([,v])=>v).map(([k,v])=>`<section><b>${{qwen:"MMN主控执行记录",deepseek:"MMN策略质检记录",openai:"MMN外部网关记录",rules:"MMN本地规则记录"}[k]||publicMmnProviderLabel(k)}</b>${markdownish(String(v))}</section>`).join("")}${result.errors&&Object.keys(result.errors).length?`<section><b>缺席/错误</b>${Object.entries(result.errors).map(([k,v])=>`<p>${publicMmnProviderLabel(k)}: ${publicMmnText(v)}</p>`).join("")}</section>`:""}</details>`:"";
  box.innerHTML=`<div class="content-mmn-head"><div><b>${contentStrategyState.loading?"MMN正在生成营销策略":"MMN模型输出策略"}</b><span>决策驾驶舱 + 声量数据中心 + 垂媒竞争格局｜内容资产 ${ctx.summary.contentSamples.toLocaleString()} 条｜主类：${ctx.summary.topCategory}</span></div><button type="button" class="primary" id="run-content-mmn-strategy" ${contentStrategyState.loading?"disabled":""}>${contentStrategyState.loading?"生成中…":"生成/刷新MMN策略"}</button></div><div class="content-mmn-output">${consultingMarkdown(String(result.text||""))}</div>${contentStrategyState.error?`<p class="empty">模型生成失败，已使用MMN本地策略输出：${contentStrategyState.error}</p>`:""}${parts}`;
  const btn=document.querySelector("#run-content-mmn-strategy");
  if(btn)btn.onclick=()=>runContentMmnStrategy();
@@ -3622,10 +3622,20 @@ function markdownish(text){
  return publicMmnText(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").split(/\n{2,}/).map(block=>`<p>${block.replace(/\n/g,"<br>")}</p>`).join("");
 }
 function escapeHtml(text){
- return String(text??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+ return publicMmnText(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 function publicMmnText(text){
- return String(text||"").trim().replace(/Qwen|千问/gi,"MMN主控").replace(/DeepSeek/gi,"MMN质检");
+ return String(text||"").trim()
+  .replace(/Qwen|千问/gi,"MMN主控")
+  .replace(/DeepSeek/gi,"MMN质检")
+  .replace(/TikHub/gi,"补充采集服务")
+  .replace(/社媒助手/gi,"公开数据工具")
+  .replace(/Kimi/gi,"MMN校验")
+  .replace(/OpenAI|ChatGPT/gi,"MMN外部网关");
+}
+function publicMmnProviderLabel(value){
+ const key=String(value||"").trim().toLowerCase();
+ return({qwen:"MMN主控",deepseek:"MMN质检",kimi:"MMN校验",openai:"MMN外部网关",tikhub:"补充采集服务",rules:"MMN本地规则"})[key]||publicMmnText(value)||"能力服务";
 }
 function consultingMarkdown(text){
  const safe=publicMmnText(text).replace(/\*\*/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -3671,7 +3681,7 @@ function renderMmnStrategyBubble({query,references,data,cached=false}){
  const qaHtml=qa?`<div class="agent-run-panel ${qaClass}"><div><b>${qaLabel}</b><span>Run ${data.run_id||data.agentRun?.id||"local"} · 证据 ${qa.evidence_count??evidence.length} 条 · 诊断 ${qa.diagnostic_count??0} 项</span></div>${findings.length?`<ul>${findings.map(x=>`<li>${String(x.message||x.category||"QA提示").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</li>`).join("")}</ul>`:""}</div>`:"";
  const isReviewPending=conflict?.status==="review_pending"||data.reviewStatus==="queued"||data.reviewStatus==="running";
  const reviewActions=isReviewPending?`<div class="router-review-actions"><button type="button" class="primary" data-router-deep-review="${decision.id||data.id||""}">深度复核</button><button type="button" class="ghost" data-router-refresh-review="${decision.id||data.id||""}">刷新复核</button></div>`:conflict?.status==="needs_human_review"?`<div class="router-review-actions"><button type="button" class="ghost" data-router-choice="primary">采纳主分析</button><button type="button" class="ghost" data-router-choice="reviewer">采纳复核意见</button><button type="button" class="primary" data-router-choice="manual">保存人工结论</button></div>`:"";
- const conflictHtml=conflict?`<div class="agent-run-panel ${conflict.status==="aligned"?"pass":"review"}"><div><b>${conflict.label||"MMN交叉复核"}</b><span>任务：${decision.taskType||data.taskType||"strategy"} · 置信度 ${Math.round((conflict.confidence||0)*100)}% · 主分析 ${decision.model||data.model||"MMN"} · 复核 ${decision.reviewer||data.reviewer||"后台critic"}</span></div>${reviewActions}</div>`:"";
+ const conflictHtml=conflict?`<div class="agent-run-panel ${conflict.status==="aligned"?"pass":"review"}"><div><b>${conflict.label||"MMN交叉复核"}</b><span>任务：${decision.taskType||data.taskType||"strategy"} · 置信度 ${Math.round((conflict.confidence||0)*100)}% · 主分析与独立复核</span></div>${reviewActions}</div>`:"";
  const phaseCopy=isReviewPending?"后台深度复核进行中，初版结果可先使用":data.cached?"命中缓存":data.asyncReview?"已进入后台复核":"策略链路完成";
  box.innerHTML=`<div class="mmn-strategy-chat"><div class="mmn-user-bubble">${escapeHtml(query)}</div><article class="mmn-ai-bubble"><div class="mmn-ai-head"><b>${data.modelLabel||"MMN智能策略"}</b><span>RAG巡检 + ${modelCopy}${cachedCopy} · ${phaseCopy}</span></div>${qaHtml}${conflictHtml}<div class="mmn-ai-content">${consultingMarkdown(data.text)}</div>${renderTopicPlanPanel(topicPlan)}<button type="button" class="rag-summary-pill" id="rag-results-toggle"><b>查看引用依据：${evidence.length||references.length} 条</b><span>点击展开本次策略引用了哪些知识</span></button><div class="mmn-engine-signature">该策略由MMN营销引擎输出</div></article></div>`;
  document.querySelector("#rag-results-toggle").onclick=()=>{ragResultsExpanded=!ragResultsExpanded;renderRagResults();if(ragResultsExpanded)setTimeout(()=>pulseFocus(".rag-card"),80)};
@@ -3796,7 +3806,7 @@ async function runFounderWeeklyCrawl(){
 	  if(count){
 	   toast(`周度巡检完成：新增 ${count} 条可蒸馏公开表达`);
 	  }else{
-	   toast("本次未发现可蒸馏公开表达；媒体首页和导航页已自动拦截，请用社媒助手导出内容或补充具体文章链接");
+	   toast("本次未发现可蒸馏公开表达；媒体首页和导航页已自动拦截，请导入公开数据文件或补充具体文章链接");
 	  }
 	 }catch(err){toast(`周度抓取失败：${err.message}`)}
  finally{if(btn){btn.disabled=false;btn.textContent=old}}
@@ -3897,7 +3907,7 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
  const root=document.querySelector("#blogger-incubation-workbench"),status=document.querySelector("#blogger-incubation-status");if(!root)return;
  if(!workbench){
   if(status)status.textContent=profile?"能力 Skill 已存在，等待关联平台档案":"等待选择孵化对象";
-  root.innerHTML=profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>社媒助手数据作为主证据；如仍缺少平台档案，可用 TikHub 补充账号字段和异步任务状态，且不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`;
+  root.innerHTML=profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>公开导出数据作为主证据；如仍缺少平台档案，可按需补充账号字段和异步任务状态，且不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`;
   return;
  }
  const platformProfile=workbench.platformProfile||{},dna=workbench.dna||{},incubation=workbench.incubation||{},task=workbench.latestTask||{};
@@ -3910,19 +3920,19 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
   ["账号孵化",workbench.lifecycleStatus==="incubation_ready",workbench.lifecycleStatus==="incubation_ready"?"可执行":"待人工审核"],
  ];
  const list=(items,empty)=>(items||[]).length?`<ul>${items.map(item=>`<li>${escapeHtml(item)}</li>`).join("")}</ul>`:`<p class="empty">${empty}</p>`;
- const taskError=task.error_message||task.degraded_reason||"",taskCopy=task.id?clip(`${creatorTaskStageLabel(task.stage)} · ${taskProgress}%${taskError?` · ${taskError}`:""}`,60):"暂无关联任务记录";
+ const taskError=publicMmnText(task.error_message||task.degraded_reason||""),taskCopy=task.id?clip(`${creatorTaskStageLabel(task.stage)} · ${taskProgress}%${taskError?` · ${taskError}`:""}`,60):"暂无关联任务记录";
  const taskPanel=task.id?`<section class="blogger-task-progress ${taskFailed?"failed":taskComplete?"completed":"running"}" aria-live="polite">
-  <div><span>TikHub 补充采集任务</span><b>${escapeHtml(workbench.displayName)} · ${escapeHtml(creatorTaskStageLabel(task.stage))}</b><small>任务 ID：${escapeHtml(task.id)}</small></div>
+  <div><span>账号补充采集任务</span><b>${escapeHtml(workbench.displayName)} · ${escapeHtml(creatorTaskStageLabel(task.stage))}</b><small>任务 ID：${escapeHtml(task.id)}</small></div>
   <div class="blogger-task-progress-meter"><progress max="100" value="${taskProgress}" aria-label="${escapeAttr(workbench.displayName)}蒸馏进度"></progress><strong>${taskProgress}%</strong></div>
   ${taskError?`<p>${escapeHtml(taskError)}</p>`:""}
-  ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">重试 TikHub 补充</button>`:""}
+  ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">重试补充采集</button>`:""}
  </section>`:"";
  root.innerHTML=`<div class="blogger-incubation-head"><div><span>${assetPlatformName(workbench.platform)}平台档案</span><h3>${escapeHtml(workbench.displayName)}</h3><p>${escapeHtml(platformProfile.signature||dna.summary||"等待补充账号说明")}</p></div><b class="blogger-readiness ${workbench.lifecycleStatus}">${statusText}</b></div>
  ${taskPanel}
  <div class="blogger-incubation-steps">${steps.map(([name,done,note])=>`<div class="${done?"done":"pending"}"><i></i><b>${name}</b><small>${escapeHtml(note)}</small></div>`).join("")}</div>
  <div class="blogger-profile-metrics"><div><span>粉丝</span><b>${bloggerPlatformMetric(platformProfile,"followers")}</b></div><div><span>公开作品</span><b>${bloggerPlatformMetric(platformProfile,"postCount")}</b></div><div><span>获赞与收藏</span><b>${bloggerPlatformMetric(platformProfile,"likesAndCollects")}</b></div><div><span>最新任务</span><b>${escapeHtml(taskCopy)}</b></div></div>
  <div class="blogger-incubation-grid">
-  <section><span>CONTENT DNA</span><h4>能力证据与账号定位</h4><p>${escapeHtml(clip(incubation.positioning||dna.summary,220))}</p><div class="blogger-pillars">${(incubation.contentPillars||[]).map(item=>`<em>${escapeHtml(item)}</em>`).join("")}</div><small>${dna.contentValidation?.status==="aligned"?"Qwen + DeepSeek 共同证据质检通过；":"模型质检未通过，禁止发布；"}${dna.generationMode?` 当前草稿：${escapeHtml(dna.generationMode)}；`:""}未经人工确认的 DNA 不作为最终孵化结论。</small></section>
+  <section><span>CONTENT DNA</span><h4>能力证据与账号定位</h4><p>${escapeHtml(clip(incubation.positioning||dna.summary,220))}</p><div class="blogger-pillars">${(incubation.contentPillars||[]).map(item=>`<em>${escapeHtml(item)}</em>`).join("")}</div><small>${dna.contentValidation?.status==="aligned"?"双模型共同证据质检通过；":"模型质检未通过，禁止发布；"}${dna.generationMode?` 当前草稿：${escapeHtml(dna.generationMode)}；`:""}未经人工确认的 DNA 不作为最终孵化结论。</small></section>
   <section><span>30-DAY INCUBATION</span><h4>首月账号孵化节奏</h4>${list(incubation.phases,"完成内容 DNA 审核后生成首月孵化节奏。")}</section>
   <section><span>TOPIC BENCHMARK</span><h4>首批选题参考</h4>${list(incubation.benchmarkTopics,"代表作证据不足，暂不生成选题。")}</section>
   <section><span>PRODUCTION ASSETS</span><h4>可调用策略与脚本资产</h4>${list([...(incubation.strategyAssets||[]),...(incubation.scriptAssets||[])],"完成样本蒸馏后生成 brief 与脚本资产。")}</section>
@@ -3989,14 +3999,14 @@ async function importBloggerSkillFile(file){
  if(!file)return;
  try{
   const socialAssistant=file.name.includes("社媒助手");
-  toast(socialAssistant?"正在导入社媒助手主证据并蒸馏…":"正在导入补充样本并蒸馏…");
+  toast(socialAssistant?"正在导入公开主证据并蒸馏…":"正在导入补充样本并蒸馏…");
   const res=await fetch(`/api/blogger-skill/import-file?edition=${encodeURIComponent(activeEdition())}&filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
   bloggerSkillState={...bloggerSkillState,...json};
   mergeDistilledCreatorLibraries(json.creatorLibraries);
   contentAssetView="bloggerDistill";
   renderBloggerSkill();renderCreatorLibrary();renderStrategyKb();showPage("videos");
-  toast(`${json.sourceMode==="social_assistant"?"社媒助手主证据":"补充样本"}已入库并完成交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
+  toast(`${json.sourceMode==="social_assistant"?"公开主证据":"补充样本"}已入库并完成交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
  }catch(err){toast(`样本导入失败：${err.message}`)}
 }
 function contentCapabilityQueryString(){
@@ -4068,7 +4078,7 @@ function renderContentCapabilityKb(){
   </div>
   <div class="capability-tags">${(asset.tags||[]).slice(0,16).map(tag=>`<em>${tag}</em>`).join("")}</div>
   <small>${asset.asset_status||"已加入MMN达人库资产候选"}｜${asset.rag_status||"已进入MMN RAG"}｜${asset.transfer_boundary||"仅迁移方法论，不复刻原文"}</small>
- </article>`).join(""):`<p class="empty">还没有达人DNA资产包。导入社媒助手文件或输入账号后，MMN会自动沉淀账号定位、内容母题、选题公式、脚本结构、语言风格和调用场景。</p>`;
+ </article>`).join(""):`<p class="empty">还没有达人DNA资产包。导入公开数据文件或输入账号后，MMN会自动沉淀账号定位、内容母题、选题公式、脚本结构、语言风格和调用场景。</p>`;
  root.querySelectorAll("[data-dna-action]").forEach(btn=>btn.onclick=()=>{
   const asset=(contentCapabilityState.creatorAssets||[]).find(x=>x.id===btn.dataset.dnaId);
   if(asset)toast(dnaText(asset,btn.dataset.dnaAction));
@@ -4438,7 +4448,7 @@ window.addEventListener("message",event=>{const frame=document.querySelector("#b
 function creatorTaskStageLabel(stage){return({preflight:"链接预检",awaiting_worker:"等待任务 Worker",resolve_identity:"账号身份解析",collect:"数据采集",normalize:"字段标准化与评分",persist:"资产入库",review:"等待人工审核",media:"素材获取",transcribe:"转写",ocr:"OCR",shots:"镜头与视觉",comments:"评论采集",opinion:"车型舆情辅助验证",evidence:"证据结构化",dna:"DNA 生成",paused:"已暂停",retry:"等待重试"})[stage]||stage||"等待处理"}
 function creatorAvailabilityLabel(value){return value==="available"?"可用":value==="not_returned"?"接口未返回":value||"未知"}
 function creatorEvidenceLabel(type){return({comment:"评论",transcript:"字幕转写",ocr:"画面文字",shot:"镜头",visual_summary:"视觉摘要",visual_structure:"内容结构"})[type]||type||"证据"}
-function creatorDegradedMessage(value){const text=String(value||"");if(text.includes("Download multimodal file timed out"))return `${text.split("；媒体处理部分降级")[0]}；部分媒体源下载超时，其他代表作已继续处理`;return text.length>260?`${text.slice(0,260)}…`:text}
+function creatorDegradedMessage(value){const text=publicMmnText(value);if(text.includes("Download multimodal file timed out"))return `${text.split("；媒体处理部分降级")[0]}；部分媒体源下载超时，其他代表作已继续处理`;return text.length>260?`${text.slice(0,260)}…`:text}
 function creatorOpinionStatusLabel(value){return value==="aligned"?"双模型共同证据已通过":"待复核，不发布为正式判断"}
 function creatorOpinionScopeLabel(value){return value==="platform_candidate"?"达人受众中的平台级候选":value==="content_signal"?"内容级信号":"证据范围未确认"}
 function renderCreatorOpinionPanel(opinion,comments,creatorId){
@@ -4448,7 +4458,7 @@ function renderCreatorOpinionPanel(opinion,comments,creatorId){
  const signalRows=signals.map(item=>`<div class="creator-opinion-issue"><div><b>${escapeHtml(item.label||item.issueKey)}</b><span>${item.opinionCount||0} 位用户 · ${item.workCount||0} 条作品</span></div><p>${item.dominantStance==="concern"?"主要表现为担忧":item.dominantStance==="question"?"主要表现为疑问":item.dominantStance==="correction"?"存在专业纠偏":"存在正向或混合反馈"}${item.purchaseImpactCount?` · ${item.purchaseImpactCount} 条明确涉及购买决策`:""}</p>${(item.vehicleEntities||[]).length?`<small>关联车型：${item.vehicleEntities.map(escapeHtml).join("、")}</small>`:""}</div>`).join("");
  const judgmentRows=judgments.map(item=>`<div class="creator-opinion-judgment"><span>${escapeHtml(item.label)} · ${Math.round((item.confidence||0)*100)}%</span><b>${escapeHtml(item.conclusion||"共同证据支持该议题方向")}</b><p>购买影响：${escapeHtml(item.purchaseImpact||"未明确")}</p>${item.correction?`<p>专业纠偏：${escapeHtml(item.correction)}</p>`:""}<small>共同证据 ${item.evidenceIds?.length||0} 条</small></div>`).join("");
  const raw=comments.slice(0,30).map(item=>`<div class="creator-evidence-item"><b>评论证据</b><p>${escapeHtml(item.quote_text||"")}</p><small>置信度 ${item.confidence??"—"} · ${escapeHtml(item.provenance?.sourceEndpoint||"来源已记录")}</small></div>`).join("");
- return `<article class="panel creator-opinion-panel"><div class="panel-title"><div><span>VEHICLE OPINION AUXILIARY VALIDATION</span><h2>重点车型舆情辅助验证</h2></div><em>${creatorOpinionStatusLabel(opinion?.status)}</em></div>${opinion?`<div class="creator-monitoring-fit"><b>当前重点车型：${escapeHtml(monitoredModel)}</b><span>${directMatch?"本批评论存在直接车型提及，可作为辅助验证":"本批评论未直接提及，不计入该车型正式监测结论"}</span>${detectedModels.length?`<small>评论识别车型：${detectedModels.map(escapeHtml).join("、")}</small>`:""}</div><div class="creator-opinion-summary"><span>${creatorOpinionScopeLabel(opinion.scope)}</span><h3>${escapeHtml(opinion.summary||"")}</h3><p>有效汽车评论 ${completeness.validAutomotiveCommentCount||0}/${completeness.rawCommentCount||0} · 独立用户 ${completeness.uniqueUserCount||0} · 覆盖作品 ${completeness.worksCovered||0}/${completeness.creatorAssetCount||0}</p></div>${judgmentRows||`<div class="creator-opinion-warning">已形成议题线索，但 Qwen+DeepSeek 尚未在共同证据上达成一致，当前不发布为正式判断。</div>`}<div class="creator-opinion-issues">${signalRows||'<p class="empty">尚未识别到可用的车型或汽车部件议题。</p>'}</div><small class="creator-opinion-boundary">评论只用于车型营销监测的辅助验证，不进入博主内容 DNA；单达人样本不能外推为全市场舆情。模型完成：${(validation.completedProviders||[]).join(" + ")||"无"}。</small>`:`<p class="empty">尚未生成评论舆情判断。可直接使用已入库评论生成，不会重新调用 TikHub。</p>`}<button class="ghost" data-creator-action="opinion" data-id="${creatorId||""}">${opinion?"重新校验判断":"生成舆情辅助判断"}</button>${comments.length?`<details class="creator-raw-evidence"><summary>查看原始评论证据（当前作品 ${comments.length} 条）</summary><div class="creator-evidence-list">${raw}</div>${comments.length>30?`<p class="creator-evidence-limit">仅展示前 30 条；完整评论保存在资产 API。</p>`:""}</details>`:""}</article>`;
+ return `<article class="panel creator-opinion-panel"><div class="panel-title"><div><span>VEHICLE OPINION AUXILIARY VALIDATION</span><h2>重点车型舆情辅助验证</h2></div><em>${creatorOpinionStatusLabel(opinion?.status)}</em></div>${opinion?`<div class="creator-monitoring-fit"><b>当前重点车型：${escapeHtml(monitoredModel)}</b><span>${directMatch?"本批评论存在直接车型提及，可作为辅助验证":"本批评论未直接提及，不计入该车型正式监测结论"}</span>${detectedModels.length?`<small>评论识别车型：${detectedModels.map(escapeHtml).join("、")}</small>`:""}</div><div class="creator-opinion-summary"><span>${creatorOpinionScopeLabel(opinion.scope)}</span><h3>${escapeHtml(opinion.summary||"")}</h3><p>有效汽车评论 ${completeness.validAutomotiveCommentCount||0}/${completeness.rawCommentCount||0} · 独立用户 ${completeness.uniqueUserCount||0} · 覆盖作品 ${completeness.worksCovered||0}/${completeness.creatorAssetCount||0}</p></div>${judgmentRows||`<div class="creator-opinion-warning">已形成议题线索，但双模型尚未在共同证据上达成一致，当前不发布为正式判断。</div>`}<div class="creator-opinion-issues">${signalRows||'<p class="empty">尚未识别到可用的车型或汽车部件议题。</p>'}</div><small class="creator-opinion-boundary">评论只用于车型营销监测的辅助验证，不进入博主内容 DNA；单达人样本不能外推为全市场舆情。已完成 ${(validation.completedProviders||[]).length} 路模型验证。</small>`:`<p class="empty">尚未生成评论舆情判断。可直接使用已入库评论生成，不会重新调用外部采集服务。</p>`}<button class="ghost" data-creator-action="opinion" data-id="${creatorId||""}">${opinion?"重新校验判断":"生成舆情辅助判断"}</button>${comments.length?`<details class="creator-raw-evidence"><summary>查看原始评论证据（当前作品 ${comments.length} 条）</summary><div class="creator-evidence-list">${raw}</div>${comments.length>30?`<p class="creator-evidence-limit">仅展示前 30 条；完整评论保存在资产 API。</p>`:""}</details>`:""}</article>`;
 }
 async function loadCreatorAssets(){
  creatorAssetState.loading=true;creatorAssetState.error="";renderCreatorAssets();
@@ -4486,7 +4496,7 @@ async function createCreatorDistillationTask(e){
  e.preventDefault();const f=new FormData(e.target);const payload={creatorUrl:f.get("creatorUrl"),expectedCreatorName:f.get("expectedCreatorName"),range:f.get("range"),sampleCount:+f.get("sampleCount")};
  try{await api(`/api/creator-distillation/preflight?url=${encodeURIComponent(payload.creatorUrl)}`);await api("/api/creator-distillation/tasks",{method:"POST",body:JSON.stringify(payload)});toast("达人蒸馏任务已进入后台队列");await loadCreatorAssets()}catch(err){toast(`任务创建失败：${err.message}`)}
 }
-function toast(text){const t=document.querySelector("#toast");t.textContent=text;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1700)}
+function toast(text){const t=document.querySelector("#toast");t.textContent=publicMmnText(text);t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1700)}
 function pulseFocus(target){
  const el=typeof target==="string"?document.querySelector(target):target;
  if(!el)return;
@@ -4509,7 +4519,7 @@ document.addEventListener("click",async e=>{
   if(action.dataset.creatorAction==="reload")return loadCreatorAssets();
   if(action.dataset.creatorAction==="pause"||action.dataset.creatorAction==="retry"){await api(`/api/creator-distillation/tasks/${action.dataset.id}/${action.dataset.creatorAction}`,{method:"POST",body:"{}"});return loadCreatorAssets()}
   if(action.dataset.creatorAction==="opinion"){
-   action.disabled=true;action.textContent="Qwen+DeepSeek 校验中…";
+   action.disabled=true;action.textContent="双模型校验中…";
    const result=await api(`/api/creator-distillation/creators/${action.dataset.id}/opinion-judgment`,{method:"POST",body:"{}"});
    creatorAssetState.selectedCreator.opinionJudgment=result.opinionJudgment;renderCreatorAssets();toast("车型舆情辅助判断已更新");return
   }
