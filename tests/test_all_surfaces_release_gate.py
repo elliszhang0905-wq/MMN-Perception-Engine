@@ -20,6 +20,8 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn("390", source)
         self.assertIn("runtimeErrors", source)
         self.assertIn("failedResponses", source)
+        self.assertIn("MMN_USERNAME", source)
+        self.assertIn("#cloud-login-screen", source)
 
     def test_global_release_version_busts_changed_customer_assets(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")

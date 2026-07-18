@@ -2,6 +2,8 @@ const { chromium } = require("playwright");
 
 const baseUrl = process.env.MMN_URL || "http://localhost:8765/";
 const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const username = process.env.MMN_USERNAME || "";
+const password = process.env.MMN_PASSWORD || "";
 const viewports = [
   { name: "desktop", width: 1440, height: 1000 },
   { name: "mobile", width: 390, height: 844 },
@@ -11,6 +13,20 @@ const checks = [];
 const runtimeErrors = [];
 const failedResponses = [];
 const add = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+
+async function ensureAuthenticated(page) {
+  const loginScreen = page.locator("#cloud-login-screen");
+  await page.waitForFunction(() => {
+    const screen = document.querySelector("#cloud-login-screen");
+    return !screen || screen.hidden || document.body.classList.contains("cloud-auth-required");
+  });
+  if (!(await loginScreen.isVisible())) return;
+  if (!username || !password) throw new Error("Cloud login is required; set MMN_USERNAME and MMN_PASSWORD for this gate.");
+  await page.locator('#cloud-login-form input[name="username"]').fill(username);
+  await page.locator('#cloud-login-form input[name="password"]').fill(password);
+  await page.locator("#cloud-login-form button[type=submit]").click();
+  await loginScreen.waitFor({ state: "hidden" });
+}
 
 async function auditViewport(browser, viewport) {
   const page = await browser.newPage({ viewport: { width: viewport.width, height: viewport.height } });
@@ -29,6 +45,7 @@ async function auditViewport(browser, viewport) {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.setItem("mmnEngineEdition", "china"));
     await page.reload({ waitUntil: "domcontentloaded" });
+    await ensureAuthenticated(page);
     await page.waitForSelector("#dashboard");
     await page.waitForTimeout(500);
 
