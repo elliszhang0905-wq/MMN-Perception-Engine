@@ -123,8 +123,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260718-ui-health-2"
-APP_RELEASE_DATE = "2026-07-18"
+APP_VERSION_CODE = "beta-1.02-20260719-creator-progress-1"
+APP_RELEASE_DATE = "2026-07-19"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
