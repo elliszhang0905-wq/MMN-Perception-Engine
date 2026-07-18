@@ -601,5 +601,8 @@ beta 1.01｜整体平台NSR与属性NSR拆分
 - 发布版本：`beta-1.02-20260718-overnight-iteration-1`。
 - 发布范围：MMN Eval v0.1 与可视化、Policy Intelligence、咨询输出框架、销售预警六个月历史、8 车上市周期持久化、DeepSeek V4 模型档位，以及对应管理层/驾驶舱 UI 与 API。
 - 数据保护：车型上市日期只在服务器无持久化文件时初始化；已有服务器记录不会被仓库版本覆盖。销售预警历史保留缺失月份，不补零。
-- 本地完整测试 324/324 通过；发布门禁 131 项业务专项及浏览器检查通过，`failed: []`、`runtimeErrors: []`；语法、空白和敏感信息检查通过。
-- 生产同步、备份、线上业务流和文件一致性证据将在部署完成后补记。
+- 首轮本地完整测试 324/324 通过；生产首发修复后工作区完整测试 333/333 通过，发布门禁 131 项业务专项及浏览器检查通过，`failed: []`、`runtimeErrors: []`；语法、空白和敏感信息检查通过。
+- GitHub 发布提交：`5060d56 feat: ship overnight MMN decision iteration`、`2e3e766 fix: bootstrap production decision dashboards`、`ec18050 fix: publish Eval fixtures to persistent volume`。
+- ECS 于 2026-07-18 14:14（Asia/Shanghai）完成最终应用重建；代码备份 `backups/code_before_2e3e766_20260718_141313.tar.gz`，环境备份 `backups/env_before_deepseek_v4_20260718_141313`，运行数据备份 `backups/mmn_backup_20260718_141341.tar.gz`。
+- 生产管理员真实业务流验证：集团驾驶舱 8 台监测车型、Eval 种子 10 案例、Policy Intelligence 6 条生效政策均返回 200；DeepSeek 生产档位为 `deepseek-v4-flash` / `deepseek-v4-pro`，6 个服务全部运行且核心服务健康。
+- 公网 IP `http://121.40.60.90` 的首页与健康接口通过。`mmnsh.com` 的 HTTP-01 请求被云侧 `403` 阻断，当前无法签发独立 HTTPS 证书；域名 443 仍会命中既有 Credo 证书，不能作为本次 MMN 验收入口。该问题不影响 IP 入口与应用服务，但需要完成域名备案/云侧放行后再签发证书。

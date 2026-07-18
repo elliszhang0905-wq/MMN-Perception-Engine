@@ -646,3 +646,8 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 咨询输出统一执行金字塔结构、MECE 检查、事实/推断/假设分层与证据引用；不满足框架检查的结果不作为正式 MMN 模型输出策略。
 - 本地发布证据：完整 `unittest` 324/324 通过，`scripts/release_gate.sh` 通过 131 项业务专项与浏览器检查，`failed: []`、`runtimeErrors: []`；JS/Python 语法、`git diff --check` 和敏感信息扫描通过。
 - 生成截图、Playwright 会话文件和 `output/mmn-eval-seed-report.*` 属验收产物，不进入发布提交；种子数据合同、研发档案、脚本和测试进入 GitHub。
+- GitHub `main` 已同步至 `ec18050`；其中 `2e3e766` 修复 Eval 首次启动缺少生成报告及登录租户无政策基线，`ec18050` 确保 Eval 种子 JSONL 随部署进入 `/app/data` 持久化卷。
+- ECS 最终应用重建时间为 2026-07-18 14:14。回滚点：`backups/code_before_2e3e766_20260718_141313.tar.gz`、`backups/env_before_deepseek_v4_20260718_141313`、`backups/mmn_backup_20260718_141341.tar.gz`。
+- 生产管理员登录后验证：集团驾驶舱监测 8 车、Eval 运行 `seed-v0.1` 共 10 案例、Policy Intelligence 生效政策 6 条，三个业务接口均为 200；DeepSeek 快/深档分别为 `deepseek-v4-flash`、`deepseek-v4-pro`。
+- 6 个 Docker 服务均运行，应用、数据库、Redis、达人 Worker、调度器健康；公网 IP 健康接口返回版本 `beta-1.02-20260718-overnight-iteration-1`。
+- 公网域名剩余基础设施问题：`mmnsh.com` 的 ACME HTTP-01 被云侧返回 403，无法签发 MMN 独立证书；443 会命中同机既有 Credo 证书。当前正式验收入口使用 `http://121.40.60.90`，待备案/云侧放行后再补域名 HTTPS，不得复用 Credo 证书或改写 Credo 路由。
