@@ -111,6 +111,42 @@ class MmnEvalDashboardTest(unittest.TestCase):
         self.assertIsNone(payload["comparison"])
         self.assertEqual(payload["sourceKind"], "seed_fixture")
 
+    def test_dashboard_bootstraps_seed_report_when_generated_output_is_missing(self):
+        outputs = [
+            {
+                "caseId": item["id"],
+                "claims": [],
+                "modelValidation": {"completedProviders": [], "commonEvidenceIds": []},
+                "dimensions": {
+                    "evidence": 0.9,
+                    "reasoning": 0.85,
+                    "actionability": 0.82,
+                    "fit": 0.8,
+                    "uncertainty": 0.88,
+                },
+                "flags": {},
+                "metadata": {"gradingSource": "synthetic_fixture"},
+            }
+            for item in self.cases
+        ]
+        self.outputs_path.write_text(
+            "\n".join(json.dumps(item, ensure_ascii=False) for item in outputs) + "\n",
+            encoding="utf-8",
+        )
+        self.report_path.unlink()
+
+        payload = load_dashboard_payload(
+            self.report_path,
+            self.cases_path,
+            self.reviews_path,
+            outputs_path=self.outputs_path,
+            org_id="org-a",
+        )
+
+        self.assertTrue(self.report_path.exists())
+        self.assertEqual(payload["report"]["runName"], "seed-v0.1")
+        self.assertEqual(payload["report"]["summary"]["evaluated"], 2)
+
     def test_human_review_is_saved_and_returned_only_for_same_org(self):
         saved = save_human_review(
             "review-case",

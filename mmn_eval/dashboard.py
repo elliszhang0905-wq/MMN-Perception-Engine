@@ -72,8 +72,16 @@ def load_dashboard_payload(
     cases_path=DEFAULT_CASES_PATH,
     reviews_path=DEFAULT_REVIEWS_PATH,
     *,
+    outputs_path=DEFAULT_OUTPUTS_PATH,
     org_id="local",
 ):
+    if not Path(report_path).exists():
+        report = evaluate_dataset(
+            load_jsonl(cases_path),
+            load_jsonl(outputs_path),
+            run_name="seed-v0.1",
+        )
+        _write_json_atomic(report_path, report)
     report = _read_json(report_path)
     cases_by_id = _case_lookup(cases_path)
     org_reviews = [item for item in _load_reviews(reviews_path) if item.get("orgId") == org_id]
@@ -115,7 +123,13 @@ def run_seed_dashboard(
         run_name="seed-v0.1",
     )
     _write_json_atomic(report_path, report)
-    return load_dashboard_payload(report_path, cases_path, reviews_path, org_id=org_id)
+    return load_dashboard_payload(
+        report_path,
+        cases_path,
+        reviews_path,
+        outputs_path=outputs_path,
+        org_id=org_id,
+    )
 
 
 def save_human_review(

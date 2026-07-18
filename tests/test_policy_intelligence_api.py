@@ -19,6 +19,15 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
         self.assertIn("seed_policy_mvp(conn", self.server)
         self.assertNotIn("create table if not exists policy_records", self.server)
 
+    def test_login_seeds_policy_baseline_for_the_authenticated_org(self):
+        login_route = self.server.split('parsed.path == "/api/login"', 1)[1].split(
+            "trial_post_allowed = {", 1
+        )[0]
+        self.assertEqual(
+            login_route.count('seed_policy_mvp(conn, org_id=org_id, edition="china")'),
+            2,
+        )
+
     def test_dashboard_and_policy_list_get_routes_are_registered(self):
         self.assertIn('parsed.path == "/api/policy-intelligence/dashboard"', self.server)
         self.assertIn('parsed.path == "/api/policy-intelligence/policies"', self.server)

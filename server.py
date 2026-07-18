@@ -11596,6 +11596,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 user_id = user["id"]
                         ensure_workspace(conn, scoped_org_id(org_id, "china"), org_name)
                         ensure_workspace(conn, scoped_org_id(org_id, "global"), org_name)
+                        seed_policy_mvp(conn, org_id=org_id, edition="china")
                     if account["role"] == "admin":
                         ensure_legacy_vertical_claim(org_id)
                     self.send_json({"ok": True, "session": {
@@ -11631,6 +11632,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         user_id = user["id"]
                     ensure_workspace(conn, scoped_org_id(org_id, "china"), org_name)
                     ensure_workspace(conn, scoped_org_id(org_id, "global"), org_name)
+                    seed_policy_mvp(conn, org_id=org_id, edition="china")
                 self.send_json({"ok": True, "session": {"org_id": org_id, "org": org_name, "user_id": user_id, "email": email, "name": name}})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
