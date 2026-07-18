@@ -57,6 +57,10 @@ for (const monitoredModel of ["奥迪E7X", "奥迪E5 Sportback", "智己LS8", "M
 }
 assert(!source.includes('state.model = button.dataset.policyModel'), "点击竞品气泡不得改变本品身份");
 assert(source.includes("state.focusModel = button.dataset.policyModel"), "点击气泡只应切换对比焦点");
+assert(source.includes('target.dataset.submitting === "true" || target.dataset.submitted === "true"'), "Policy Eval必须阻止请求中和已成功评分的重复提交");
+assert(source.includes('button.textContent = "评分提交中…"'), "Policy Eval点击后必须立即提供提交中反馈");
+assert(source.includes("评分已保存但未通过"), "未通过的Policy Eval必须明确说明保存结果与知识版本状态");
+assert(source.includes("当前结果未进入可用知识版本"), "Policy Eval未通过时不得让用户误以为已发布结论");
 
 const groupSource = fs.readFileSync(path.join(root, "group-dashboard.js"), "utf8");
 assert(groupSource.includes("policy.ownModelOptions"), "管理看板本品选择器必须来自销量预警监测车型清单");

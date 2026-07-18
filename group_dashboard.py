@@ -59,12 +59,76 @@ SALES_WARNING_LATEST_PATH = Path(__file__).with_name("data") / "dongchedi_sales"
 SALES_WARNING_OBSERVED_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_observed_2026-06.json"
 SALES_WARNING_MONITOR_SOURCE = "周对比次数正反向排名"
 
+# 销量预警量价图的电池租用口径。这里保留懂车帝经销商报价原值，
+# 仅在图表价格视图中扣除当前车型对应的 BaaS 电池价值。
+BAAS_DISCOUNT_WAN = {
+    "nio": 10.8,
+    "onvo_l60": 5.7,
+    "onvo": 8.6,
+    "firefly": 4.0,
+}
+
 
 def _safe_json(value, fallback):
     try:
         return json.loads(value or "")
     except (TypeError, ValueError, json.JSONDecodeError):
         return fallback
+
+
+def _baas_discount_view(model, manufacturer):
+    """Return the current BaaS deduction rule for NIO's three brands."""
+    model_text = str(model or "").strip()
+    maker_text = str(manufacturer or "").strip()
+    identity = f"{maker_text} {model_text}".lower()
+    if "萤火虫" in identity or "firefly" in identity:
+        return {"brand": "萤火虫", "discountWan": BAAS_DISCOUNT_WAN["firefly"]}
+    if "乐道" in identity or "onvo" in identity:
+        key = "onvo_l60" if re.search(r"(?:^|\D)l60(?:\D|$)", model_text.lower()) else "onvo"
+        return {"brand": "乐道", "discountWan": BAAS_DISCOUNT_WAN[key]}
+    if "蔚来" in identity or re.search(r"(?:^|\W)nio(?:\W|$)", identity):
+        return {"brand": "蔚来", "discountWan": BAAS_DISCOUNT_WAN["nio"]}
+    return {"brand": "", "discountWan": 0.0}
+
+
+def _baas_price_view(model, manufacturer, price_display, price_source=""):
+    """Build a traceable dealer-price view, applying BaaS only to three brands."""
+    dealer_price_display = str(price_display or "价格待复核")
+    prices = [
+        float(value)
+        for value in re.findall(r"\d+(?:\.\d+)?", dealer_price_display.replace(",", ""))
+    ]
+    dealer_start_price = prices[0] if prices else None
+    rule = _baas_discount_view(model, manufacturer)
+    discount = float(rule["discountWan"])
+    baas_applied = dealer_start_price is not None and discount > 0
+    adjusted_prices = [round(max(0.0, price - discount), 2) for price in prices[:2]] if baas_applied else prices[:2]
+    if baas_applied:
+        adjusted_display = (
+            f"{adjusted_prices[0]:.2f}-{adjusted_prices[1]:.2f}万（BaaS后）"
+            if len(adjusted_prices) > 1
+            else f"{adjusted_prices[0]:.2f}万（BaaS后）"
+        )
+        adjusted_source = "dongchedi_dealer_price_baas_adjusted"
+        price_basis = (
+            f"懂车帝经销商报价扣除{rule['brand']}BaaS电池价值{discount:.2f}万元"
+        )
+    else:
+        adjusted_display = dealer_price_display
+        adjusted_source = str(price_source or "")
+        price_basis = "懂车帝经销商报价"
+    return {
+        "priceDisplay": adjusted_display,
+        "startPriceWan": adjusted_prices[0] if adjusted_prices else None,
+        "priceSource": adjusted_source,
+        "priceBasis": price_basis,
+        "dealerPriceDisplay": dealer_price_display,
+        "dealerStartPriceWan": dealer_start_price,
+        "dealerPriceSource": str(price_source or ""),
+        "baasApplied": baas_applied,
+        "baasBrand": rule["brand"],
+        "baasDiscountWan": discount if baas_applied else 0.0,
+    }
 
 
 def load_e7x_product_evaluation(path=E7X_EVALUATION_PATH):
@@ -255,23 +319,57 @@ def build_sales_warning_full(payload):
             ),
         )[:3]
 
-        def comparison_peer(peer, role):
-            price_display = str(peer.get("price") or "价格待复核")
-            price_match = re.search(r"(\d+(?:\.\d+)?)", price_display.replace(",", ""))
+        def comparison_peer(peer, role, apply_baas=False):
+            model = str(peer.get("series_name") or "待复核车型")
+            manufacturer = str(peer.get("manufacturer") or "待复核厂商")
+            price_view = _baas_price_view(
+                model,
+                manufacturer,
+                peer.get("price"),
+                peer.get("price_source"),
+            )
+            if not apply_baas and price_view["baasApplied"]:
+                price_view = {
+                    **price_view,
+                    "priceDisplay": price_view["dealerPriceDisplay"],
+                    "startPriceWan": price_view["dealerStartPriceWan"],
+                    "priceSource": price_view["dealerPriceSource"],
+                }
             return {
                 "seriesId": int(peer.get("series_id") or 0),
-                "model": str(peer.get("series_name") or "待复核车型"),
-                "manufacturer": str(peer.get("manufacturer") or "待复核厂商"),
+                "model": model,
+                "manufacturer": manufacturer,
                 "sales": int(peer.get("sales_volume") or 0),
-                "priceDisplay": price_display,
-                "startPriceWan": float(price_match.group(1)) if price_match else None,
-                "priceSource": str(peer.get("price_source") or ""),
+                **price_view,
                 "role": role,
-                "roleLabel": "细分市场销量前三" if role == "top3" else "接近细分市场中位数",
+                "roleLabel": {
+                    "top3": "细分市场销量前三",
+                    "median": "接近细分市场中位数",
+                    "market": "同细分市场车型",
+                }.get(role, "同细分市场车型"),
             }
 
         top_peers = [comparison_peer(peer, "top3") for peer in benchmark_pool]
         median_peers = [comparison_peer(peer, "median") for peer in median_pool]
+        benchmark_audit_peers = [comparison_peer(peer, "market", apply_baas=True) for peer in competitor_pool]
+        adjusted_benchmark_peers = [comparison_peer(peer, "market", apply_baas=True) for peer in benchmark_pool]
+        adjusted_benchmark_prices = [
+            peer["startPriceWan"]
+            for peer in adjusted_benchmark_peers
+            if peer["startPriceWan"] is not None
+        ]
+        adjusted_benchmark_average = (
+            round(sum(adjusted_benchmark_prices) / len(adjusted_benchmark_prices), 2)
+            if adjusted_benchmark_prices
+            else None
+        )
+        own_price_view = _baas_price_view(
+            item.get("series_name"),
+            item.get("manufacturer"),
+            item.get("price"),
+            vehicle_start_price_source,
+        )
+        chart_vehicle_start_price = own_price_view["startPriceWan"]
         saic_models.append({
             "seriesId": int(item.get("series_id") or 0),
             "model": str(item.get("series_name") or "待复核车型"),
@@ -283,7 +381,12 @@ def build_sales_warning_full(payload):
             "segmentLabel": " · ".join((body_type, size_class, energy_type)),
             "sales": sales,
             "rank": int(item.get("segment_rank") or 0),
-            "priceDisplay": str(item.get("price") or "价格待复核"),
+            "priceDisplay": own_price_view["priceDisplay"],
+            "dealerPriceDisplay": own_price_view["dealerPriceDisplay"],
+            "dealerStartPriceWan": own_price_view["dealerStartPriceWan"],
+            "baasApplied": own_price_view["baasApplied"],
+            "baasBrand": own_price_view["baasBrand"],
+            "baasDiscountWan": own_price_view["baasDiscountWan"],
             "marketSales": market_sales,
             "marketShare": round(sales / market_sales, 4) if market_sales else None,
             "marketModelCount": int(item.get("segment_model_count") or 0),
@@ -296,21 +399,19 @@ def build_sales_warning_full(payload):
             "benchmarkPeers": top_peers,
             "medianPeers": median_peers,
             "comparisonPeers": top_peers + median_peers,
-            "benchmarkAuditPeers": [
-                {
-                    "model": str(peer.get("series_name") or "待复核车型"),
-                    "sales": int(peer.get("sales_volume") or 0),
-                    "priceDisplay": str(peer.get("price") or "价格待复核"),
-                }
-                for peer in (item.get("competitor_pool") or [])
-            ],
-            "vehicleStartPriceWan": vehicle_start_price,
-            "vehicleStartPriceSource": vehicle_start_price_source,
-            "benchmarkAverageStartPriceWan": item.get("benchmark_average_start_price_wan"),
-            "benchmarkMinimumStartPriceWan": item.get("benchmark_minimum_start_price_wan"),
-            "benchmarkMaximumStartPriceWan": item.get("benchmark_maximum_start_price_wan"),
-            "benchmarkPriceSampleCount": int(item.get("benchmark_price_sample_count") or 0),
-            "startPricePremiumRate": item.get("start_price_premium_ratio"),
+            "benchmarkAuditPeers": benchmark_audit_peers,
+            "vehicleStartPriceWan": chart_vehicle_start_price,
+            "vehicleStartPriceSource": own_price_view["priceSource"],
+            "vehiclePriceBasis": own_price_view["priceBasis"],
+            "benchmarkAverageStartPriceWan": adjusted_benchmark_average,
+            "benchmarkMinimumStartPriceWan": min(adjusted_benchmark_prices) if adjusted_benchmark_prices else None,
+            "benchmarkMaximumStartPriceWan": max(adjusted_benchmark_prices) if adjusted_benchmark_prices else None,
+            "benchmarkPriceSampleCount": len(adjusted_benchmark_prices),
+            "startPricePremiumRate": (
+                round(chart_vehicle_start_price / adjusted_benchmark_average - 1, 4)
+                if chart_vehicle_start_price is not None and adjusted_benchmark_average
+                else None
+            ),
             "performanceRate": float(item.get("performance_ratio") or 0),
             "redLine": red_line,
             "yellowLine": yellow_line,

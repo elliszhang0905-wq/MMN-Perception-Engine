@@ -179,13 +179,35 @@
 
   async function submitEvaluation(event) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget), scores = {};
+    const target = event.currentTarget;
+    if (target.dataset.submitting === "true" || target.dataset.submitted === "true") return;
+    const form = new FormData(target), scores = {};
     ["sourceReliability","parsingAccuracy","vehicleMatch","marketingLogic","actionValue"].forEach(key => { scores[key] = Number(form.get(key)); });
-    const message = event.currentTarget.querySelector("[data-eval-message]");
+    const message = target.querySelector("[data-eval-message]");
+    const button = target.querySelector('button[type="submit"]');
+    const idleLabel = button?.textContent || "提交人工评分";
+    target.dataset.submitting = "true";
+    target.setAttribute("aria-busy", "true");
+    if (button) { button.disabled = true; button.textContent = "评分提交中…"; }
+    message.className = "pending";
+    message.textContent = "正在保存评分与修改记录…";
     try {
       const result = await jsonFetch("/api/policy-intelligence/evaluate", { method: "POST", body: JSON.stringify({ analysisId: state.analysisId, scores, note: form.get("note") || "" }) });
-      message.textContent = `已保存：${result.evaluation.totalScore}/100 · ${result.evaluation.reviewStatus} · v${result.evaluation.finalVersion}`;
-    } catch (error) { message.textContent = error.message; }
+      const evaluation = result.evaluation;
+      target.dataset.submitted = "true";
+      message.className = evaluation.reviewStatus === "evaluated" ? "success" : "needs-revision";
+      message.textContent = evaluation.reviewStatus === "evaluated"
+        ? `评分已保存并通过：${evaluation.totalScore}/100 · v${evaluation.finalVersion}，已进入可用知识版本。`
+        : `评分已保存但未通过：${evaluation.totalScore}/100 · v${evaluation.finalVersion}。修改要求已记录，当前结果未进入可用知识版本。`;
+      if (button) button.textContent = "评分已提交";
+    } catch (error) {
+      message.className = "error";
+      message.textContent = `提交失败：${error.message}`;
+      if (button) { button.disabled = false; button.textContent = idleLabel; }
+    } finally {
+      delete target.dataset.submitting;
+      target.removeAttribute("aria-busy");
+    }
   }
 
   window.PolicyIntelligenceModule = {

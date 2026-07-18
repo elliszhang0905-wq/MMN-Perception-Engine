@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.02-20260718-overnight-iteration-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-20260718-ui-health-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
   <link rel="stylesheet" href="douyin-hot-demo.css?v=collector-8">
-  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-20260718-overnight-iteration-1">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-20260718-ui-health-1">
   <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-20260718-overnight-iteration-1">
-  <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.02-20260718-overnight-iteration-1">
+  <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.02-20260718-ui-health-1">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -50,7 +50,7 @@
         <span>核心工作流</span>
         <details class="nav-subsection cockpit-nav" open>
           <summary><button class="active nav-parent-link" data-page="dashboard">决策驾驶舱</button></summary>
-          <button data-page="brandpenetration">品牌传播穿透</button>
+          <button data-page="brandpenetration">品牌穿透中心</button>
           <button data-page="socialtrends">社媒趋势中心</button>
           <button data-page="policyintelligence">政策环境分析</button>
         </details>
@@ -72,8 +72,7 @@
         <summary>资产沉淀</summary>
         <details class="nav-subsection" open>
           <summary>达人资产库</summary>
-          <button data-page="creatorassets">达人蒸馏与档案</button>
-          <button data-page="bloggerskill">博主策略卡与脚本</button>
+          <button data-page="bloggerskill">博主蒸馏孵化</button>
         </details>
         <button data-page="strategykb">RAG资产库</button>
         <button data-page="bflibrary">BF资产库</button>
@@ -321,12 +320,12 @@
 
     <section class="page" id="brandpenetration">
       <div class="section-intro brand-penetration-intro">
-        <div><p class="eyebrow">BRAND COMMUNICATION PENETRATION</p><h2>品牌传播穿透</h2><p>以客户项目为边界，穿透本品与竞品近30天的品牌动作、平台事件、热度证据与传播关系。</p></div>
+        <div><p class="eyebrow">BRAND COMMUNICATION PENETRATION</p><h2>品牌穿透中心</h2><p>以客户项目为边界，穿透本品与竞品近30天的品牌动作、平台事件、热度证据与传播关系。</p></div>
         <div class="brand-penetration-status"><span id="brand-penetration-snapshot-state">正在读取真实快照</span><b>上汽奥迪 × 5个竞品</b><small id="brand-penetration-snapshot-meta">MMN 三平台 · 数据库快照</small></div>
       </div>
       <article class="panel brand-penetration-frame-panel">
         <div class="brand-penetration-frame-head"><div><span>项目快照</span><b>上汽奥迪近30天竞争传播验证</b></div><p>真实快照只增不覆盖；平台原文可下钻，事件分类仍保留人工复核标记。</p></div>
-        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html?v=beta-1.02-dashboard-clarity-12" title="上汽奥迪品牌传播穿透真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html?v=beta-1.02-dual-model-gate-2" title="品牌穿透中心真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
       </article>
     </section>
 
@@ -784,7 +783,7 @@
     <section class="page" id="creatorassets">
       <div class="creator-assets-shell">
         <article class="panel creator-assets-hero">
-          <div><p class="eyebrow">MMN CREATOR ASSET LIBRARY</p><h2>达人账号蒸馏</h2><p>把公开达人账号持续沉淀为可检索、可验证、可复用的内容资产。支持抖音与小红书，平台字段缺失会明确标记，不以 0 代替。</p></div>
+          <div><p class="eyebrow">MMN CREATOR ASSET LIBRARY</p><h2>达人账号蒸馏</h2><p>把抖音与小红书公开达人账号持续沉淀为可检索、可验证、可复用的内容资产。平台字段缺失会明确标记，不以 0 代替。</p></div>
           <div class="creator-policy-note">原创生成仅参考内容方法论、结构与用户洞察，不复制原作品，不模仿特定真人身份或固定表达。</div>
         </article>
         <div class="creator-asset-tabs" role="tablist">
@@ -934,6 +933,11 @@
           <span>公开内容样本 / 专业判断框架 / RAG chunk / Agent Prompt</span>
           <h2>把汽车垂直博主的专业判断能力，沉淀为 MMN 可调用的策略资产和脚本资产</h2>
           <p>蒸馏结果一方面辅助 MMN 做车型策略、达人推荐和 brief 生成，另一方面帮助 MCN 为新签约达人直接输出选题、短视频脚本和小红书图文结构；不复刻原文、不模仿个人身份。</p>
+          <ol class="blogger-value-chain" aria-label="博主能力资产生成链">
+            <li><small>01</small><b>公开证据样本</b></li>
+            <li><small>02</small><b>专业判断框架</b></li>
+            <li><small>03</small><b>可调用策略资产</b></li>
+          </ol>
         </div>
         <div class="founder-status">
           <b id="blogger-skill-rag-count">0</b>
@@ -943,10 +947,23 @@
       </div>
       <div class="toolbar blogger-skill-toolbar">
         <div class="field"><label>蒸馏博主 / 达人</label><select id="blogger-skill-person-select"></select></div>
-        <p class="notice">先选择蒸馏对象，再查看这个人的样本拆解、能力画像和 RAG 知识片段。</p>
+        <p class="notice">先选择孵化对象，再在同一工作台查看平台档案、样本拆解、内容 DNA、孵化方案和生产资产。</p>
       </div>
+      <article class="panel blogger-account-intake">
+        <div class="panel-title"><div><span>MCN CREATOR INTAKE</span><h2>导入博主账号，建立可持续更新的孵化档案</h2></div><em>抖音 / 小红书公开主页</em></div>
+        <form id="blogger-creator-form">
+          <div class="field"><label>博主主页链接</label><input name="creatorUrl" type="url" required placeholder="https://www.douyin.com/user/... 或 https://www.xiaohongshu.com/user/profile/..."></div>
+          <div class="field"><label>主页显示的博主名称（身份校验）</label><input name="expectedCreatorName" required placeholder="请与平台主页名称完全一致"></div>
+          <button class="primary" type="submit">采集并建立档案</button>
+          <small>采集前强制核对主页 ID 与博主名称；任一不一致即停止且不入库。</small>
+        </form>
+      </article>
+      <article class="panel blogger-incubation-panel">
+        <div class="panel-title"><div><span>MCN CREATOR INCUBATION WORKBENCH</span><h2>博主档案 × 能力蒸馏 × 账号孵化</h2></div><em id="blogger-incubation-status">等待选择孵化对象</em></div>
+        <div id="blogger-incubation-workbench"><p class="empty">选择博主后加载平台档案与孵化准备状态。</p></div>
+      </article>
       <article class="panel">
-        <div class="panel-title"><div><span>链接导入</span><h2>记录公开内容链接，正文可后续人工补全</h2></div><em>不绕过登录、验证码、反爬或付费墙</em></div>
+        <div class="panel-title"><div><span>单篇内容补样本</span><h2>记录公开内容链接，正文可后续人工补全</h2></div><em>不绕过登录、验证码、反爬或付费墙</em></div>
         <div class="rag-console">
           <div class="search"><input id="blogger-skill-url" placeholder="粘贴小红书、知乎、抖音、懂车帝、汽车之家等公开内容链接"></div>
           <button class="primary" id="import-blogger-skill-url">记录链接</button>
@@ -965,7 +982,7 @@
           <div id="blogger-skill-samples" class="founder-archive-list"></div>
         </article>
         <article class="panel">
-          <div class="panel-title"><div><span>底盘工程蒸馏 Skill</span><h2>能力画像、标签体系与判断规则</h2></div><em>MMN内部能力</em></div>
+          <div class="panel-title"><div><span>博主能力蒸馏 Skill</span><h2>能力画像、标签体系与判断规则</h2></div><em>MMN内部能力</em></div>
           <div id="blogger-skill-profile" class="founder-profile"></div>
         </article>
       </div>
@@ -1231,9 +1248,9 @@
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
   <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
-  <script src="app.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
-  <script src="group-dashboard.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
-  <script src="policy-intelligence.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
+  <script src="app.js?v=beta-1.02-20260718-ui-health-1"></script>
+  <script src="group-dashboard.js?v=beta-1.02-20260718-ui-health-1"></script>
+  <script src="policy-intelligence.js?v=beta-1.02-20260718-ui-health-1"></script>
   <script src="douyin-hot-demo.js?v=collector-8"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>

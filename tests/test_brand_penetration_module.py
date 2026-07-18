@@ -13,11 +13,11 @@ class BrandPenetrationModuleTest(unittest.TestCase):
     def test_navigation_and_page_are_registered(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         app = (ROOT / "app.js").read_text(encoding="utf-8")
-        self.assertIn('data-page="brandpenetration">品牌传播穿透</button>', html)
+        self.assertIn('data-page="brandpenetration">品牌穿透中心</button>', html)
         self.assertIn('class="page" id="brandpenetration"', html)
         self.assertIn('src="demo-brand-weekly-radar.html?', html)
         self.assertIn('sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"', html)
-        self.assertIn('brandpenetration:"品牌传播穿透"', app)
+        self.assertIn('brandpenetration:"品牌穿透中心"', app)
         self.assertIn('loadBrandPenetrationSnapshot()', app)
 
     def test_real_snapshot_is_preserved(self):
@@ -34,7 +34,7 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         self.assertNotIn(".slice(0,2).map(([p,n])", demo)
         self.assertIn('id="projectConfigForm"', demo)
         self.assertIn('id="competitorInput"', demo)
-        self.assertIn("mmnBrandPenetrationProject", demo)
+        self.assertIn("mmn-brand-penetration-project-config", demo)
         self.assertIn("mmn-brand-penetration-project-request", demo)
 
     def test_canonical_snapshot_contains_unique_validated_records(self):
@@ -98,13 +98,49 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         demo = (ROOT / "demo-brand-weekly-radar.html").read_text(encoding="utf-8")
         app = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("function snapshotDisplayItems(result)", demo)
-        self.assertIn("result?.comparisonItems?.length", demo)
+        self.assertIn('result?.qa?.dualModel?.status!=="aligned"', demo)
+        self.assertIn("result?.verifiedComparisonItems||[]", demo)
         self.assertIn("item?.normalizedModel", demo)
         self.assertIn("const items=snapshotDisplayItems(result)", demo)
+        self.assertIn("mentionedProjectBrands(text).length>1", demo)
+        self.assertIn("item.validatedModelName", demo)
         self.assertIn("function brandPenetrationDisplayItems(result)", app)
+        self.assertIn('result?.qa?.dualModel?.status!=="aligned"', app)
+        self.assertIn("result?.verifiedComparisonItems||[]", app)
+        self.assertIn("本轮快照已拦截", demo)
+        self.assertIn("function resetPlatformCounts()", demo)
+        self.assertIn("'全部平台 · 0条'", demo)
         self.assertIn("function brandPenetrationSnapshotKeyword(config)", app)
         self.assertIn("encodeURIComponent(keyword)", app)
         self.assertIn("条品牌匹配内容", app)
+
+    def test_project_configuration_cannot_be_overwritten_by_a_late_snapshot(self):
+        demo = (ROOT / "demo-brand-weekly-radar.html").read_text(encoding="utf-8")
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        config_post = 'postMessage({type:"mmn-brand-penetration-project-config",config},"*")'
+        fetch_start = 'const data=await api(`/api/social-trends/latest?keyword='
+        self.assertLess(app.index(config_post), app.index(fetch_start))
+        self.assertEqual(app.count(config_post), 1)
+        self.assertIn("品牌穿透中心</h1>", demo)
+        self.assertNotIn("<h1>上汽奥迪与竞品", demo)
+
+    def test_snapshot_query_and_result_are_scoped_to_the_current_brand_set(self):
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertIn("&competitor=${encodeURIComponent(brand)}", app)
+        self.assertIn("brandPenetrationResultMatchesProject(result,config)", app)
+        self.assertIn("已阻止旧结果覆盖", app)
+        self.assertIn("新结果返回前不会继续展示旧项目数据", (ROOT / "demo-brand-weekly-radar.html").read_text(encoding="utf-8"))
+
+    def test_latest_snapshot_can_select_an_exact_project_configuration(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        server.init_social_trend_schema(conn)
+        base = {"keyword": "智己", "items": [], "modelComparisons": []}
+        conn.execute("insert into social_trend_snapshots values (?, ?, ?, ?, ?, ?, ?, ?)", ("matching", "local", "china", "智己", json.dumps({"timeRange": "7d", "competitors": ["零跑", "问界"]}, ensure_ascii=False), json.dumps(base, ensure_ascii=False), "test", "2026-07-18T10:00:00+00:00"))
+        conn.execute("insert into social_trend_snapshots values (?, ?, ?, ?, ?, ?, ?, ?)", ("newer-mismatch", "local", "china", "智己", json.dumps({"timeRange": "7d", "competitors": ["理想", "蔚来"]}, ensure_ascii=False), json.dumps(base, ensure_ascii=False), "test", "2026-07-18T11:00:00+00:00"))
+        result = server.latest_social_trend_snapshot(conn, "智己", "local", "china", {"timeRange": "7d", "competitors": ["零跑", "问界"]})
+        conn.close()
+        self.assertEqual(result["snapshot"]["filters"]["competitors"], ["零跑", "问界"])
 
 
 if __name__ == "__main__":

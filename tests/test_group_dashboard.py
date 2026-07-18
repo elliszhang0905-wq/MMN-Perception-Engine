@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from group_dashboard import (
+    _baas_price_view,
     build_group_dashboard_payload,
     build_market_dimensions,
     build_sales_warning_demo,
@@ -21,6 +22,29 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_baas_price_view_covers_all_three_nio_brands(self):
+        cases = (
+            ("蔚来ET5", "蔚来", "29.80-31.60万", 10.8, "19.00-20.80万（BaaS后）"),
+            ("乐道L60", "乐道", "19.28万", 5.7, "13.58万（BaaS后）"),
+            ("乐道L80", "乐道", "24.28万", 8.6, "15.68万（BaaS后）"),
+            ("乐道L90", "ONVO", "26.58万", 8.6, "17.98万（BaaS后）"),
+            ("firefly萤火虫", "萤火虫", "11.98-12.58万", 4.0, "7.98-8.58万（BaaS后）"),
+        )
+
+        for model, manufacturer, dealer_price, discount, expected in cases:
+            with self.subTest(model=model):
+                view = _baas_price_view(model, manufacturer, dealer_price, "dongchedi_dealer_price")
+                self.assertTrue(view["baasApplied"])
+                self.assertEqual(view["baasDiscountWan"], discount)
+                self.assertEqual(view["priceDisplay"], expected)
+                self.assertEqual(view["dealerPriceDisplay"], dealer_price)
+                self.assertEqual(view["priceSource"], "dongchedi_dealer_price_baas_adjusted")
+
+        regular = _baas_price_view("Model 3", "特斯拉", "23.55-33.95万", "dongchedi_dealer_price")
+        self.assertFalse(regular["baasApplied"])
+        self.assertEqual(regular["priceDisplay"], "23.55-33.95万")
+        self.assertEqual(regular["startPriceWan"], 23.55)
+
     def test_sales_warning_automatically_selects_latest_period_monitoring_list(self):
         with TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -156,6 +180,37 @@ class GroupDashboardTest(unittest.TestCase):
         )
         self.assertTrue(all(item["startPriceWan"] > 0 for item in own["comparisonPeers"]))
         self.assertEqual(own["salesMedian"], raw_own["segment_median_sales"])
+        self.assertEqual(len(own["benchmarkAuditPeers"]) + 1, own["marketModelCount"])
+        self.assertTrue(all(item["startPriceWan"] > 0 for item in own["benchmarkAuditPeers"]))
+        self.assertTrue(all(
+            item["priceSource"] in {"dongchedi_dealer_price", "dongchedi_dealer_price_baas_adjusted"}
+            for item in own["benchmarkAuditPeers"]
+        ))
+        self.assertTrue(all(item["role"] == "market" for item in own["benchmarkAuditPeers"]))
+
+    def test_all_nio_brand_models_in_all_segment_markets_use_baas_price(self):
+        source_path = ROOT / "data" / "dongchedi_sales" / "sales_warning_latest.json"
+        result = load_sales_warning(path=source_path)
+        affected = [
+            peer
+            for market in result["saicModels"]
+            for peer in market["benchmarkAuditPeers"]
+            if peer["manufacturer"] in {"蔚来", "乐道", "萤火虫", "NIO", "ONVO", "firefly"}
+        ]
+
+        self.assertEqual({item["model"] for item in affected}, {"蔚来ET5", "蔚来ET5T", "蔚来ET7"})
+        self.assertTrue(all(item["baasApplied"] for item in affected))
+        self.assertTrue(all("BaaS后" in item["priceDisplay"] for item in affected))
+        for item in affected:
+            self.assertAlmostEqual(
+                item["dealerStartPriceWan"] - item["baasDiscountWan"],
+                item["startPriceWan"],
+                places=2,
+            )
+        prices = {item["model"]: item["priceDisplay"] for item in affected}
+        self.assertEqual(prices["蔚来ET5"], "19.00-20.80万（BaaS后）")
+        self.assertEqual(prices["蔚来ET5T"], "19.00-20.80万（BaaS后）")
+        self.assertEqual(prices["蔚来ET7"], "32.00-35.00万（BaaS后）")
 
     def test_incomplete_full_segment_file_falls_back_to_verified_focal_observations(self):
         with TemporaryDirectory() as tmp:

@@ -29,12 +29,14 @@ class CreatorRepository:
             create table if not exists creator_profiles(id text primary key, creator_id text, version integer, status text, dna_json text, evidence_json text, corrected_by text, correction_note text, created_at text, unique(creator_id,version));
             create table if not exists assets(id text primary key, creator_id text, task_id text, platform text, asset_type text, source_id text, source_url text, title text, published_at text, metrics_json text, provenance_json text, analysis_json text, performance_score real, sample_role text, capabilities_json text, degraded_reason text, created_at text, updated_at text, unique(platform,source_id));
             create table if not exists evidence(id text primary key, asset_id text, creator_profile_id text, evidence_type text, start_ms integer, end_ms integer, quote_text text, frame_url text, comment_id text, confidence real, provenance_json text, created_at text);
+            create table if not exists opinion_judgments(id text primary key, creator_id text, version integer, status text, scope text, judgment_json text, model_validation_json text, evidence_ids_json text, created_at text, unique(creator_id,version));
             create table if not exists task_events(id text primary key, task_id text, stage text, status text, progress integer, message text, retryable integer, created_at text);
             create table if not exists raw_api_responses(id text primary key, task_id text, platform text, endpoint text, endpoint_version text, status_code integer, response_json text, fetched_at text);
             create table if not exists methodology_assets(id text primary key, methodology_type text, title text, body_json text, source_creator_ids_json text, evidence_ids_json text, created_at text, updated_at text);
             create index if not exists idx_tasks_org_status on distillation_tasks(org_id,status,updated_at);
             create index if not exists idx_assets_creator_score on assets(creator_id,performance_score desc);
             create index if not exists idx_evidence_asset_time on evidence(asset_id,start_ms);
+            create index if not exists idx_opinion_creator_version on opinion_judgments(creator_id,version desc);
             """)
 
     @staticmethod
@@ -91,14 +93,169 @@ class CreatorRepository:
         with self.connect() as conn:
             creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
             profile=conn.execute("select * from creator_profiles where creator_id=? order by version desc limit 1",(creator_id,)).fetchone()
+            opinion=conn.execute("select * from opinion_judgments where creator_id=? order by version desc limit 1",(creator_id,)).fetchone()
             assets=conn.execute("select * from assets where creator_id=? order by performance_score desc",(creator_id,)).fetchall()
-        return {"creator":self._row(creator),"profile":self._row(profile),"assets":[self._row(x) for x in assets]}
+        opinion_row=self._row(opinion)
+        judgment=(opinion_row or {}).get("judgment")
+        if judgment:
+            judgment={**judgment,"version":opinion_row.get("version"),"recordId":opinion_row.get("id")}
+        return {"creator":self._row(creator),"profile":self._row(profile),
+                "opinionJudgment":judgment,"assets":[self._row(x) for x in assets]}
 
-    def asset_detail(self, asset_id):
+    def creator_opinion_inputs(self, creator_id):
+        """Return comment-only evidence for opinion analysis; media evidence never enters this path."""
         with self.connect() as conn:
-            asset=conn.execute("select * from assets where id=?",(asset_id,)).fetchone()
+            assets=conn.execute("select id,source_id,title from assets where creator_id=?",(creator_id,)).fetchall()
+            comments=conn.execute(
+                """select e.*,a.source_id from evidence e join assets a on a.id=e.asset_id
+                   where a.creator_id=? and e.evidence_type='comment' order by e.created_at""",(creator_id,)
+            ).fetchall()
+        return {"assetCount":len(assets),"assets":[dict(x) for x in assets],
+                "comments":[self._row(x) for x in comments]}
+
+    def creator_content_inputs(self, creator_id):
+        """Return persisted evidence IDs and provenance for the content release gate."""
+        with self.connect() as conn:
+            creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
+            assets=conn.execute(
+                "select id,source_id,title,asset_type from assets where creator_id=? order by performance_score desc",
+                (creator_id,),
+            ).fetchall()
+            evidence=conn.execute(
+                """select e.*,a.source_id from evidence e join assets a on a.id=e.asset_id
+                   where a.creator_id=? and e.evidence_type!='comment' order by e.created_at,e.id""",
+                (creator_id,),
+            ).fetchall()
+        if not creator:
+            raise KeyError("达人档案不存在")
+        return {"creator":self._row(creator),"assets":[self._row(x) for x in assets],
+                "evidence":[self._row(x) for x in evidence]}
+
+    def save_opinion_judgment(self, creator_id, judgment):
+        """Append a versioned judgment; raw evidence remains immutable and separately queryable."""
+        with self.connect() as conn:
+            creator=conn.execute("select id from creators where id=?",(creator_id,)).fetchone()
+            if not creator:
+                raise KeyError("达人档案不存在")
+            latest=conn.execute("select max(version) as version from opinion_judgments where creator_id=?",
+                                (creator_id,)).fetchone()
+            version=int((latest or {"version":0})["version"] or 0)+1
+            record_id=uid("opinion")
+            validation=judgment.get("modelValidation") or {}
+            evidence_ids=validation.get("commonEvidenceIds") or []
+            conn.execute("insert into opinion_judgments values(?,?,?,?,?,?,?,?,?)",
+                         (record_id,creator_id,version,judgment.get("status"),judgment.get("scope"),
+                          json.dumps(judgment,ensure_ascii=False),json.dumps(validation,ensure_ascii=False),
+                          json.dumps(evidence_ids,ensure_ascii=False),now()))
+        return {**judgment,"version":version,"recordId":record_id}
+
+    def asset_detail(self, asset_id, org_id=None):
+        with self.connect() as conn:
+            if org_id is None:
+                asset=conn.execute("select * from assets where id=?",(asset_id,)).fetchone()
+            else:
+                asset=conn.execute(
+                    """select a.* from assets a join creators c on c.id=a.creator_id
+                       where a.id=? and c.org_id=?""",(asset_id,org_id)
+                ).fetchone()
+            if not asset:
+                raise KeyError("作品资产不存在")
             evidence=conn.execute("select * from evidence where asset_id=? order by start_ms",(asset_id,)).fetchall()
         return {"asset":self._row(asset),"evidence":[self._row(x) for x in evidence]}
+
+    def asset_processing_context(self, asset_id, org_id="local"):
+        """Return the minimum scoped context needed to refresh one asset's media evidence."""
+        with self.connect() as conn:
+            row=conn.execute(
+                """select a.*,c.display_name as creator_display_name,
+                          t.creator_url,t.sample_count,t.id as distillation_task_id
+                   from assets a
+                   join creators c on c.id=a.creator_id
+                   left join distillation_tasks t on t.id=a.task_id
+                   where a.id=? and c.org_id=?""",(asset_id,org_id)
+            ).fetchone()
+        if not row:
+            raise KeyError("作品资产不存在")
+        return self._row(row)
+
+    def save_asset_media_result(self, asset_id, org_id, evidence, capabilities, status, message="", media=None):
+        """Atomically replace derived media evidence after a successful per-asset analysis."""
+        timestamp=now()
+        media_types=("transcript","ocr","shot","visual_summary","visual_structure")
+        with self.connect() as conn:
+            row=conn.execute(
+                """select a.analysis_json,a.capabilities_json,a.creator_id
+                   from assets a join creators c on c.id=a.creator_id
+                   where a.id=? and c.org_id=?""",(asset_id,org_id)
+            ).fetchone()
+            if not row:
+                raise KeyError("作品资产不存在")
+            try: analysis=json.loads(row["analysis_json"] or "{}")
+            except json.JSONDecodeError: analysis={}
+            try: current_capabilities=json.loads(row["capabilities_json"] or "{}")
+            except json.JSONDecodeError: current_capabilities={}
+            analysis["mediaProcessing"]={"status":status,"message":str(message or "")[:500],
+                                         "evidenceCount":len(evidence or []),"updatedAt":timestamp}
+            if media:
+                analysis["media"]=media
+            if evidence:
+                placeholders=",".join("?" for _ in media_types)
+                conn.execute(f"delete from evidence where asset_id=? and evidence_type in ({placeholders})",
+                             (asset_id,*media_types))
+                profile=conn.execute(
+                    "select id from creator_profiles where creator_id=? order by version desc limit 1",
+                    (row["creator_id"],)
+                ).fetchone()
+                for item in evidence:
+                    provenance={**(item.get("provenance") or {}),"metadata":item.get("metadata") or {}}
+                    conn.execute(
+                        "insert into evidence values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (uid("evidence"),asset_id,profile["id"] if profile else None,
+                         item.get("evidence_type") or "visual_summary",item.get("start_ms"),item.get("end_ms"),
+                         item.get("quote_text"),item.get("frame_url"),item.get("comment_id") or uid("media"),
+                         item.get("confidence"),json.dumps(provenance,ensure_ascii=False),timestamp),
+                    )
+                current_capabilities.update(capabilities or {})
+            conn.execute(
+                "update assets set analysis_json=?,capabilities_json=?,updated_at=? where id=?",
+                (json.dumps(analysis,ensure_ascii=False),json.dumps(current_capabilities,ensure_ascii=False),
+                 timestamp,asset_id),
+            )
+        return self.asset_detail(asset_id,org_id)
+
+    def refresh_creator_content_profile(self, creator_id):
+        """Refresh the deterministic content-evidence index after one asset is reprocessed."""
+        timestamp=now()
+        with self.connect() as conn:
+            creator=conn.execute("select profile_json from creators where id=?",(creator_id,)).fetchone()
+            profile=conn.execute(
+                "select id,dna_json from creator_profiles where creator_id=? order by version desc limit 1",
+                (creator_id,),
+            ).fetchone()
+            if not creator or not profile:
+                return None
+            asset_count=conn.execute("select count(*) as total from assets where creator_id=?",(creator_id,)).fetchone()["total"]
+            evidence=conn.execute(
+                """select e.evidence_type,e.quote_text,a.source_id
+                   from evidence e join assets a on a.id=e.asset_id
+                   where a.creator_id=? and e.evidence_type!='comment'
+                   order by e.created_at,e.id""",(creator_id,)
+            ).fetchall()
+            try: dna=json.loads(profile["dna_json"] or "{}")
+            except json.JSONDecodeError: dna={}
+            try: platform_profile=json.loads(creator["profile_json"] or "{}")
+            except json.JSONDecodeError: platform_profile={}
+            summary=f"已沉淀 {asset_count} 条作品和 {len(evidence)} 条内容证据，等待提炼赛道、选题、叙事结构与表达方法。"
+            dna["summary"]=summary
+            dna["mediaEvidence"]=[{"sourceId":row["source_id"],"type":row["evidence_type"],
+                                   "quote":row["quote_text"]} for row in evidence[:30]]
+            platform_profile["summary"]=summary
+            platform_profile["draft"]=dna
+            conn.execute("update creator_profiles set dna_json=? where id=?",
+                         (json.dumps(dna,ensure_ascii=False),profile["id"]))
+            conn.execute("update creators set profile_json=?,updated_at=? where id=?",
+                         (json.dumps(platform_profile,ensure_ascii=False),timestamp,creator_id))
+        return summary
 
     def methodologies(self):
         with self.connect() as conn: rows=conn.execute("select * from methodology_assets order by updated_at desc").fetchall()
@@ -106,5 +263,143 @@ class CreatorRepository:
 
     def archive_raw_response(self, task_id, platform, endpoint, endpoint_version, status_code, response):
         with self.connect() as conn:
+            raw_id = uid("raw")
             conn.execute("insert into raw_api_responses values(?,?,?,?,?,?,?,?)",
-                         (uid("raw"),task_id,platform,endpoint,endpoint_version,status_code,json.dumps(response,ensure_ascii=False),now()))
+                         (raw_id,task_id,platform,endpoint,endpoint_version,status_code,json.dumps(response,ensure_ascii=False),now()))
+        return raw_id
+
+    def save_collection(self, task, creator, assets, evidence=None):
+        """Persist a normalized collection without duplicating creators or platform assets."""
+        timestamp = now()
+        platform = str(creator["platform"])
+        platform_creator_id = str(creator["platform_creator_id"])
+        profile = creator.get("profile") or {}
+        with self.connect() as conn:
+            existing = conn.execute(
+                "select id from creators where org_id=? and platform=? and platform_creator_id=?",
+                (task["org_id"], platform, platform_creator_id),
+            ).fetchone()
+            creator_id = existing["id"] if existing else uid("creator")
+            profile_json = json.dumps(profile, ensure_ascii=False)
+            if existing:
+                conn.execute(
+                    "update creators set display_name=?,profile_json=?,updated_at=? where id=?",
+                    (creator["display_name"], profile_json, timestamp, creator_id),
+                )
+            else:
+                conn.execute(
+                    "insert into creators values(?,?,?,?,?,?,?,?)",
+                    (creator_id, task["org_id"], platform, platform_creator_id, creator["display_name"],
+                     profile_json, timestamp, timestamp),
+                )
+
+            evidence_json = json.dumps({"identity": profile.get("identity"), "provenance": profile.get("provenance")},
+                                       ensure_ascii=False)
+            latest = conn.execute(
+                "select version,evidence_json from creator_profiles where creator_id=? order by version desc limit 1",
+                (creator_id,),
+            ).fetchone()
+            if not latest or latest["evidence_json"] != evidence_json:
+                version = int(latest["version"] if latest else 0) + 1
+                conn.execute(
+                    "insert into creator_profiles values(?,?,?,?,?,?,?,?,?)",
+                    (uid("profile"), creator_id, version, "needs_review",
+                     json.dumps({"summary": None, "status": "awaiting_distillation"}, ensure_ascii=False),
+                     evidence_json, "", "", timestamp),
+                )
+
+            profile_row = conn.execute(
+                "select id from creator_profiles where creator_id=? order by version desc limit 1", (creator_id,)
+            ).fetchone()
+            creator_profile_id = profile_row["id"] if profile_row else None
+            inserted = updated = 0
+            asset_ids = []
+            asset_by_source = {}
+            for item in assets:
+                existing_asset = conn.execute(
+                    "select id from assets where platform=? and source_id=?", (platform, item["source_id"])
+                ).fetchone()
+                asset_id = existing_asset["id"] if existing_asset else uid("asset")
+                asset_ids.append(asset_id)
+                asset_by_source[str(item["source_id"])] = asset_id
+                metrics = {name: item.get(name) for name in ("views", "likes", "comments", "collects", "shares")}
+                analysis = {name: item.get(name) for name in
+                            ("primary_tag", "tags", "interference_tags", "relative_percentile", "selection_reasons",
+                             "scoring_mode", "media")}
+                missing = (item.get("provenance") or {}).get("missingMetrics") or []
+                degraded_reason = "缺少指标: " + "、".join(missing) if missing else ""
+                values = (creator_id, task["id"], platform, item.get("asset_type") or "video", item["source_id"],
+                          item.get("source_url"), item.get("title"), item.get("published_at"),
+                          json.dumps(metrics, ensure_ascii=False), json.dumps(item.get("provenance") or {}, ensure_ascii=False),
+                          json.dumps(analysis, ensure_ascii=False), item.get("performance_score"), item.get("sample_role"),
+                          json.dumps(item.get("capabilities") or
+                                     {"metadata": True, "comments": False, "transcript": False,
+                                      "ocr": False, "visual": False}, ensure_ascii=False),
+                          degraded_reason, timestamp, timestamp)
+                if existing_asset:
+                    conn.execute(
+                        """update assets set creator_id=?,task_id=?,platform=?,asset_type=?,source_id=?,source_url=?,title=?,
+                           published_at=?,metrics_json=?,provenance_json=?,analysis_json=?,performance_score=?,sample_role=?,
+                           capabilities_json=?,degraded_reason=?,updated_at=? where id=?""",
+                        (*values[:-2], values[-1], asset_id),
+                    )
+                    updated += 1
+                else:
+                    conn.execute("insert into assets values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (asset_id, *values))
+                    inserted += 1
+            evidence_inserted = evidence_updated = 0
+            for item in evidence or []:
+                asset_id = asset_by_source.get(str(item.get("source_id") or ""))
+                evidence_key = str(item.get("comment_id") or "")
+                if not asset_id or not evidence_key:
+                    continue
+                existing_evidence = conn.execute(
+                    "select id from evidence where asset_id=? and comment_id=?", (asset_id, evidence_key)
+                ).fetchone()
+                provenance = {**(item.get("provenance") or {}), "metadata": item.get("metadata") or {}}
+                if existing_evidence:
+                    conn.execute(
+                        """update evidence set evidence_type=?,start_ms=?,end_ms=?,quote_text=?,frame_url=?,
+                           confidence=?,provenance_json=? where id=?""",
+                        (item.get("evidence_type") or "comment", item.get("start_ms"), item.get("end_ms"),
+                         item.get("quote_text"), item.get("frame_url"), item.get("confidence"),
+                         json.dumps(provenance, ensure_ascii=False), existing_evidence["id"]),
+                    )
+                    evidence_updated += 1
+                else:
+                    conn.execute(
+                        "insert into evidence values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (uid("evidence"), asset_id, creator_profile_id, item.get("evidence_type") or "comment",
+                         item.get("start_ms"), item.get("end_ms"), item.get("quote_text"), item.get("frame_url"),
+                         evidence_key, item.get("confidence"),
+                         json.dumps(provenance, ensure_ascii=False), timestamp),
+                    )
+                    evidence_inserted += 1
+            self.event(conn, task["id"], "review", "completed", 100,
+                       f"已入库 {len(asset_ids)} 条作品、{evidence_inserted + evidence_updated} 条结构化证据，等待人工审核", False)
+        return {"creatorId": creator_id, "assetIds": asset_ids, "inserted": inserted, "updated": updated,
+                "evidenceInserted": evidence_inserted, "evidenceUpdated": evidence_updated}
+
+    def save_profile_draft(self, creator_id, draft):
+        """Save an evidence-indexed draft while keeping the profile in human review."""
+        timestamp = now()
+        with self.connect() as conn:
+            latest = conn.execute(
+                "select id from creator_profiles where creator_id=? order by version desc limit 1", (creator_id,)
+            ).fetchone()
+            if not latest:
+                raise KeyError("达人档案不存在")
+            conn.execute(
+                "update creator_profiles set status='needs_review',dna_json=? where id=?",
+                (json.dumps(draft, ensure_ascii=False), latest["id"]),
+            )
+            creator = conn.execute("select profile_json from creators where id=?", (creator_id,)).fetchone()
+            try:
+                platform_profile = json.loads(creator["profile_json"] or "{}") if creator else {}
+            except json.JSONDecodeError:
+                platform_profile = {}
+            platform_profile["summary"] = draft.get("summary")
+            platform_profile["draft"] = draft
+            conn.execute("update creators set profile_json=?,updated_at=? where id=?",
+                         (json.dumps(platform_profile, ensure_ascii=False), timestamp, creator_id))
+        return self.creator_detail(creator_id)["profile"]

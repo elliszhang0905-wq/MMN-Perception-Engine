@@ -105,14 +105,25 @@ from policy_intelligence import (
     seed_policy_sources,
 )
 try:
-    from creator_distillation.tasks import celery_app as creator_celery_app, enqueue_distillation as _enqueue_distillation
-    enqueue_distillation = _enqueue_distillation if creator_celery_app else None
+    from creator_distillation.tasks import (
+        celery_app as creator_celery_app,
+        enqueue_distillation as _enqueue_distillation,
+        enqueue_local_distillation as _enqueue_local_distillation,
+    )
+    _creator_worker_mode = os.getenv(
+        "MMN_CREATOR_WORKER_MODE", "celery" if os.getenv("REDIS_URL") else "local"
+    ).strip().lower()
+    enqueue_distillation = (
+        _enqueue_local_distillation
+        if _creator_worker_mode == "local"
+        else (_enqueue_distillation if creator_celery_app else None)
+    )
 except Exception:
     enqueue_distillation = None
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260718-overnight-iteration-1"
+APP_VERSION_CODE = "beta-1.02-20260718-ui-health-1"
 APP_RELEASE_DATE = "2026-07-18"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -562,6 +573,10 @@ def init_db():
             agent_few_shot_json text not null default '[]',
             script_template text,
             report_template text,
+            validation_status text not null default 'legacy',
+            model_trace_json text not null default '{}',
+            source_sample_count integer not null default 0,
+            validation_updated_at text,
             updated_at text not null,
             unique(edition, blogger_name, vertical_domain)
         );
@@ -740,6 +755,10 @@ def init_db():
         ensure_column(conn, "learning_cases", "edition", "text not null default 'china'")
         ensure_column(conn, "project_snapshots", "edition", "text not null default 'china'")
         ensure_column(conn, "content_capability_chunks", "content_breakdown_json", "text not null default '{}'")
+        ensure_column(conn, "blogger_skill_profiles", "validation_status", "text not null default 'legacy'")
+        ensure_column(conn, "blogger_skill_profiles", "model_trace_json", "text not null default '{}'")
+        ensure_column(conn, "blogger_skill_profiles", "source_sample_count", "integer not null default 0")
+        ensure_column(conn, "blogger_skill_profiles", "validation_updated_at", "text")
         ensure_column(conn, "model_judgment_assets", "highlights_json", "text not null default '[]'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
         conn.execute("""
@@ -1043,34 +1062,88 @@ def stable_id(*parts):
 
 def validate_social_trends_with_models(result):
     """Reuse MMN's Qwen + DeepSeek evidence review without exposing provider branding."""
-    sample = [{"id": x.get("id"), "platform": x.get("platformLabel"), "text": x.get("text", "")[:260],
-               "sentiment": x.get("sentiment"), "heat": x.get("heat"), "url": x.get("sourceUrl")}
-              for x in result.get("items", [])[:30]]
-    if not sample:
-        result["qa"]["dualModel"] = {"required": True, "status": "insufficient_evidence", "verifiedEvidenceIds": []}
+    source_items = result.get("comparisonItems") or result.get("items") or []
+    evidence = [{
+        "id": x.get("id"),
+        "platform": x.get("platformLabel") or x.get("platform"),
+        "text": x.get("text", "")[:320],
+        "expectedBrand": str(x.get("brandName") or x.get("normalizedModel") or x.get("keyword") or result.get("keyword") or "").strip(),
+        "sentiment": x.get("sentiment"),
+        "heat": x.get("heat"),
+        "url": x.get("sourceUrl"),
+    } for x in source_items if x.get("id")]
+    result["verifiedComparisonItems"] = []
+    qa = result.setdefault("qa", {})
+    if not evidence:
+        qa["dualModel"] = {"required": True, "status": "insufficient_evidence", "verifiedEvidenceIds": []}
         return result
     if not (qwen_config()["configured"] and deepseek_config()["configured"]):
-        result["qa"]["dualModel"] = {"required": True, "status": "pending_configuration", "verifiedEvidenceIds": []}
+        qa["dualModel"] = {"required": True, "status": "pending_configuration", "verifiedEvidenceIds": []}
         return result
-    messages = [{"role": "system", "content": (
-        "你是MMN Evidence QA。仅依据输入证据，复核每条内容的正向/负向/中性、车型相关性和矩阵内容判断。"
-        "不得补充外部事实。只返回JSON：{items:[{id,sentiment,relevant,matrixContent,reason}],strategyConclusion,risks}。"
-    )}, {"role": "user", "content": json.dumps({"keyword": result.get("keyword"), "evidence": sample}, ensure_ascii=False)}]
-    outputs, errors = {}, {}
-    for provider, caller in (("qwen", call_qwen), ("deepseek", call_deepseek)):
-        try:
-            outputs[provider] = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
-        except Exception as exc:
-            errors[provider] = str(exc)
-    qitems = {str(x.get("id")): x for x in outputs.get("qwen", {}).get("items", [])}
-    ditems = {str(x.get("id")): x for x in outputs.get("deepseek", {}).get("items", [])}
-    verified = [key for key in qitems.keys() & ditems.keys()
-                if qitems[key].get("relevant") is True and ditems[key].get("relevant") is True
-                and qitems[key].get("sentiment") == ditems[key].get("sentiment")]
-    result["qa"]["dualModel"] = {"required": True, "status": "aligned" if len(outputs) == 2 else "manual_required",
-                                      "verifiedEvidenceIds": verified, "errors": errors}
-    conclusions = [str(outputs.get(p, {}).get("strategyConclusion") or "").strip() for p in ("qwen", "deepseek")]
-    result["qa"]["strategyOutput"] = "\n".join(x for x in conclusions if x) or "证据不足，暂不输出策略结论"
+    project_brands = sorted({x["expectedBrand"] for x in evidence if x["expectedBrand"]})
+    reviewed = {"qwen": {}, "deepseek": {}}
+    conclusions = {"qwen": [], "deepseek": []}
+    error_lists = {"qwen": [], "deepseek": []}
+    batch_size = 24
+    for offset in range(0, len(evidence), batch_size):
+        batch = evidence[offset:offset + batch_size]
+        messages = [{"role": "system", "content": (
+            "你是MMN汽车品牌与车型Evidence QA。逐条复核全部输入，不得遗漏id，不得补充外部事实。"
+            "expectedBrand只是采集桶标签，不是已确认事实；必须根据正文重新判断primary brand。"
+            "如果正文同时罗列多个独立品牌且没有单一主角，令relevant=false、brandName=多品牌。"
+            "brandName只能取projectBrands中的一个值、多品牌或未知。车型与品牌冲突时令relevant=false。"
+            "只返回JSON：{items:[{id,sentiment,relevant,brandName,modelName,matrixContent,reason}],strategyConclusion,risks}。"
+        )}, {"role": "user", "content": json.dumps({
+            "keyword": result.get("keyword"), "projectBrands": project_brands, "evidence": batch,
+        }, ensure_ascii=False)}]
+        expected_ids = {str(x["id"]) for x in batch}
+        for provider, caller in (("qwen", call_qwen), ("deepseek", call_deepseek)):
+            try:
+                output = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
+                rows = {str(x.get("id")): x for x in output.get("items", []) if isinstance(x, dict) and x.get("id") is not None}
+                missing = sorted(expected_ids - rows.keys())
+                if missing:
+                    raise ValueError(f"返回不完整，缺少 {len(missing)} 个证据ID")
+                reviewed[provider].update({key: rows[key] for key in expected_ids})
+                conclusion = str(output.get("strategyConclusion") or "").strip()
+                if conclusion:
+                    conclusions[provider].append(conclusion)
+            except Exception as exc:
+                error_lists[provider].append(f"批次{offset // batch_size + 1}: {exc}")
+    expected_by_id = {str(x["id"]): x for x in evidence}
+    verified = []
+    verified_items = []
+    for key, expected in expected_by_id.items():
+        qitem, ditem = reviewed["qwen"].get(key), reviewed["deepseek"].get(key)
+        if not qitem or not ditem:
+            continue
+        qbrand = str(qitem.get("brandName") or "").strip()
+        dbrand = str(ditem.get("brandName") or "").strip()
+        if not (qitem.get("relevant") is True and ditem.get("relevant") is True
+                and qitem.get("sentiment") == ditem.get("sentiment")
+                and qbrand and qbrand == dbrand == expected["expectedBrand"]):
+            continue
+        verified.append(key)
+        original = next((x for x in source_items if str(x.get("id")) == key), None)
+        if original:
+            item = dict(original)
+            item["brandName"] = qbrand
+            qmodel = str(qitem.get("modelName") or "").strip()
+            dmodel = str(ditem.get("modelName") or "").strip()
+            item["validatedModelName"] = qmodel if qmodel and qmodel == dmodel else ""
+            item["validationStatus"] = "dual_model_verified"
+            verified_items.append(item)
+    errors = {provider: "；".join(rows) for provider, rows in error_lists.items() if rows}
+    complete = not errors and all(len(reviewed[provider]) == len(expected_by_id) for provider in ("qwen", "deepseek"))
+    qa["dualModel"] = {
+        "required": True,
+        "status": "aligned" if complete else "manual_required",
+        "reviewedEvidenceCount": len(expected_by_id),
+        "verifiedEvidenceIds": verified,
+        "errors": errors,
+    }
+    result["verifiedComparisonItems"] = verified_items if complete else []
+    qa["strategyOutput"] = "\n".join(conclusions[provider][-1] for provider in ("qwen", "deepseek") if conclusions[provider]) or "证据不足，暂不输出策略结论"
     return result
 
 
@@ -3729,10 +3802,19 @@ def call_qwen(messages, temperature=.35, profile="fast", timeout=None, max_token
             data = json.loads(resp.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
+        try:
+            provider_error = (json.loads(detail).get("error") or {})
+        except Exception:
+            provider_error = {}
+        provider_code = str(provider_error.get("code") or provider_error.get("type") or "").strip()
+        provider_message = str(provider_error.get("message") or "").strip()
         if exc.code == 401:
             raise ValueError("千问请求未授权：DASHSCOPE_API_KEY 无效、过期或不属于当前 DashScope 服务。")
         if exc.code == 403:
-            raise ValueError("千问请求被拒绝：请检查模型权限或阿里云百炼服务开通状态。")
+            if provider_code == "AllocationQuota.FreeTierOnly":
+                raise ValueError("千问额度被拒绝（AllocationQuota.FreeTierOnly）：该模型免费额度已耗尽且开启了免费额度用完即停；请充值并关闭该模型的开关，或切换到已开通的付费模型。")
+            reason = f"{provider_code} {provider_message}".strip()
+            raise ValueError(f"千问请求被拒绝：{reason or '请检查模型权限、工作空间与阿里云百炼服务状态。'}")
         raise ValueError(f"千问请求失败：HTTP {exc.code} {detail[:300]}")
     except (TimeoutError, URLError) as exc:
         raise ValueError(f"千问请求超时或网络不可用：{exc}")
@@ -8556,7 +8638,8 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
     result = apply_social_trend_history(result, previous)
     report("validation", 88, "正在执行MMN实体与双模型交叉校验")
     result = validate_social_trends_with_models(result)
-    report("storage", 96, "校验通过，正在写入真实数据库快照")
+    dual_status = (result.get("qa", {}).get("dualModel") or {}).get("status")
+    report("storage", 96, "双模型校验通过，正在写入正式快照" if dual_status == "aligned" else "双模型未完整通过，仅保存待复核快照")
     with db() as conn:
         snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
             "platforms": platforms, "timeRange": time_range, "startDate": start_date, "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
@@ -9306,6 +9389,7 @@ def parse_json_object(text):
 
 def blogger_skill_model_distill(profile, samples):
     sample_pack = [{
+        "evidence_id": s.get("source_id") or s.get("id"),
         "title": s.get("original_topic"),
         "model": s.get("model"),
         "dimensions": s.get("professional_dimensions"),
@@ -9313,8 +9397,7 @@ def blogger_skill_model_distill(profile, samples):
         "reasoning": s.get("engineering_reasoning"),
         "judgment": s.get("subjective_judgment")
     } for s in samples[:12]]
-    errors = {}
-    qwen_result = {}
+    errors, qwen_result, deepseek_result = {}, {}, {}
     try:
         qwen_result = parse_json_object(call_qwen([
             {"role": "system", "content": (
@@ -9341,13 +9424,88 @@ def blogger_skill_model_distill(profile, samples):
         for key in ["comparison_logic", "evidence_preference", "reusable_agent_instruction", "script_template", "report_template"]:
             if qwen_result.get(key):
                 profile[key] = str(qwen_result[key])
-    profile["professional_background"] = (
-        f"{profile.get('professional_background','')} MMN模型链路：快速模型完成达人能力蒸馏"
-        f"{'，已补充结构化能力字段' if qwen_result else '，本次使用本地规则结构化'}；深度质检在策略生成阶段按需后台触发。"
-    ).strip()
+    if qwen_result:
+        try:
+            deepseek_result = parse_json_object(call_deepseek([
+                {"role": "system", "content": (
+                    "你是MMN博主能力蒸馏的独立质检模型。只返回JSON，不要Markdown。"
+                    "必须基于给定的同一批公开样本审查千问候选画像，不能补造样本外事实。"
+                    "返回字段：verdict（approved或revision_required）、common_evidence_ids（至少3个给定evidence_id）、"
+                    "issues（数组）、summary。仅当画像结构完整、判断有样本支撑、迁移边界清楚时 approved。"
+                )},
+                {"role": "user", "content": json.dumps({
+                    "candidate_profile": qwen_result,
+                    "samples": sample_pack,
+                }, ensure_ascii=False)}
+            ], temperature=.1, profile="fast", timeout=75, max_tokens=2200, response_format={"type": "json_object"}))
+        except Exception as exc:
+            errors["deepseek"] = str(exc)
+    valid_ids = {str(x.get("evidence_id") or "") for x in sample_pack if x.get("evidence_id")}
+    common_ids = [str(x) for x in (deepseek_result.get("common_evidence_ids") or []) if str(x) in valid_ids]
+    approved = bool(qwen_result and deepseek_result.get("verdict") == "approved" and len(set(common_ids)) >= 3)
+    validation_status = "dual_model_approved" if approved else "manual_required"
+    if len(sample_pack) < 5:
+        validation_status = "insufficient_evidence"
+    chain_copy = {
+        "dual_model_approved": "MMN模型链路：千问主控蒸馏已完成，DeepSeek独立质检已通过，共同证据已核验。",
+        "manual_required": "MMN模型链路：双模型质检未达到发布门槛，当前画像仅供人工复核，不作为已验证结论。",
+        "insufficient_evidence": "MMN模型链路：公开样本不足5条，暂不启动正式双模型发布。",
+    }[validation_status]
+    profile["professional_background"] = f"{profile.get('professional_background','')} {chain_copy}".strip()
     profile["updated_at"] = now()
-    profile["model_trace"] = {"fast_model": bool(qwen_result), "critic": "deferred", "errors": errors}
+    profile["validation_updated_at"] = now()
+    profile["validation_status"] = validation_status
+    profile["source_sample_count"] = len(samples)
+    profile["model_trace"] = {
+        "primary": "qwen",
+        "primary_completed": bool(qwen_result),
+        "critic": "deepseek",
+        "critic_completed": bool(deepseek_result),
+        "critic_verdict": deepseek_result.get("verdict") or "not_completed",
+        "common_evidence_ids": list(dict.fromkeys(common_ids)),
+        "issues": deepseek_result.get("issues") or [],
+        "errors": errors,
+    }
     return attach_blogger_assets(profile, samples)
+
+
+def upsert_blogger_skill_profile(conn, profile, edition="china"):
+    conn.execute("""
+        insert into blogger_skill_profiles
+        (id, edition, blogger_name, platform, vertical_domain, professional_background, content_topics_json,
+         evaluation_framework_json, terminology_system_json, judgment_rules_json, comparison_logic, evidence_preference,
+         positive_judgment_patterns_json, negative_judgment_patterns_json, content_structure_patterns_json,
+         marketing_translation_patterns_json, risk_expression_patterns_json, reusable_agent_instruction,
+         agent_few_shot_json, script_template, report_template, validation_status, model_trace_json,
+         source_sample_count, validation_updated_at, updated_at)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        on conflict(edition, blogger_name, vertical_domain) do update set
+          platform=excluded.platform, professional_background=excluded.professional_background,
+          content_topics_json=excluded.content_topics_json, evaluation_framework_json=excluded.evaluation_framework_json,
+          terminology_system_json=excluded.terminology_system_json, judgment_rules_json=excluded.judgment_rules_json,
+          comparison_logic=excluded.comparison_logic, evidence_preference=excluded.evidence_preference,
+          positive_judgment_patterns_json=excluded.positive_judgment_patterns_json,
+          negative_judgment_patterns_json=excluded.negative_judgment_patterns_json,
+          content_structure_patterns_json=excluded.content_structure_patterns_json,
+          marketing_translation_patterns_json=excluded.marketing_translation_patterns_json,
+          risk_expression_patterns_json=excluded.risk_expression_patterns_json,
+          reusable_agent_instruction=excluded.reusable_agent_instruction, agent_few_shot_json=excluded.agent_few_shot_json,
+          script_template=excluded.script_template, report_template=excluded.report_template,
+          validation_status=excluded.validation_status, model_trace_json=excluded.model_trace_json,
+          source_sample_count=excluded.source_sample_count, validation_updated_at=excluded.validation_updated_at,
+          updated_at=excluded.updated_at
+    """, (
+        profile["id"], edition, profile["blogger_name"], profile["platform"], profile["vertical_domain"],
+        profile["professional_background"], json.dumps(profile["content_topics"], ensure_ascii=False),
+        json.dumps(profile["evaluation_framework"], ensure_ascii=False), json.dumps(profile["terminology_system"], ensure_ascii=False),
+        json.dumps(profile["judgment_rules"], ensure_ascii=False), profile["comparison_logic"], profile["evidence_preference"],
+        json.dumps(profile["positive_judgment_patterns"], ensure_ascii=False), json.dumps(profile["negative_judgment_patterns"], ensure_ascii=False),
+        json.dumps(profile["content_structure_patterns"], ensure_ascii=False), json.dumps(profile["marketing_translation_patterns"], ensure_ascii=False),
+        json.dumps(profile["risk_expression_patterns"], ensure_ascii=False), profile["reusable_agent_instruction"],
+        json.dumps(profile.get("agent_few_shot") or [], ensure_ascii=False), profile["script_template"], profile["report_template"],
+        profile.get("validation_status") or "legacy", json.dumps(profile.get("model_trace") or {}, ensure_ascii=False),
+        int(profile.get("source_sample_count") or 0), profile.get("validation_updated_at"), profile["updated_at"]
+    ))
 
 def save_blogger_skill_items(sources, edition="china"):
     samples = [distill_blogger_sample(x) for x in sources]
@@ -9396,36 +9554,7 @@ def save_blogger_skill_items(sources, edition="china"):
             ))
             saved_sources.append(source)
             saved_samples.append(sample)
-        conn.execute("""
-            insert into blogger_skill_profiles
-            (id, edition, blogger_name, platform, vertical_domain, professional_background, content_topics_json,
-             evaluation_framework_json, terminology_system_json, judgment_rules_json, comparison_logic, evidence_preference,
-             positive_judgment_patterns_json, negative_judgment_patterns_json, content_structure_patterns_json,
-             marketing_translation_patterns_json, risk_expression_patterns_json, reusable_agent_instruction,
-             agent_few_shot_json, script_template, report_template, updated_at)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            on conflict(edition, blogger_name, vertical_domain) do update set
-              platform=excluded.platform, professional_background=excluded.professional_background,
-              content_topics_json=excluded.content_topics_json, evaluation_framework_json=excluded.evaluation_framework_json,
-              terminology_system_json=excluded.terminology_system_json, judgment_rules_json=excluded.judgment_rules_json,
-              comparison_logic=excluded.comparison_logic, evidence_preference=excluded.evidence_preference,
-              positive_judgment_patterns_json=excluded.positive_judgment_patterns_json,
-              negative_judgment_patterns_json=excluded.negative_judgment_patterns_json,
-              content_structure_patterns_json=excluded.content_structure_patterns_json,
-              marketing_translation_patterns_json=excluded.marketing_translation_patterns_json,
-              risk_expression_patterns_json=excluded.risk_expression_patterns_json,
-              reusable_agent_instruction=excluded.reusable_agent_instruction, agent_few_shot_json=excluded.agent_few_shot_json,
-              script_template=excluded.script_template, report_template=excluded.report_template, updated_at=excluded.updated_at
-        """, (
-            profile["id"], edition, profile["blogger_name"], profile["platform"], profile["vertical_domain"],
-            profile["professional_background"], json.dumps(profile["content_topics"], ensure_ascii=False),
-            json.dumps(profile["evaluation_framework"], ensure_ascii=False), json.dumps(profile["terminology_system"], ensure_ascii=False),
-            json.dumps(profile["judgment_rules"], ensure_ascii=False), profile["comparison_logic"], profile["evidence_preference"],
-            json.dumps(profile["positive_judgment_patterns"], ensure_ascii=False), json.dumps(profile["negative_judgment_patterns"], ensure_ascii=False),
-            json.dumps(profile["content_structure_patterns"], ensure_ascii=False), json.dumps(profile["marketing_translation_patterns"], ensure_ascii=False),
-            json.dumps(profile["risk_expression_patterns"], ensure_ascii=False), profile["reusable_agent_instruction"],
-            json.dumps(profile["agent_few_shot"], ensure_ascii=False), profile["script_template"], profile["report_template"], profile["updated_at"]
-        ))
+        upsert_blogger_skill_profile(conn, profile, edition=edition)
     return {"sources": saved_sources, "samples": saved_samples, "profile": profile}
 
 def import_blogger_skill_file(data, filename, edition="china", limit=30):
@@ -9518,7 +9647,83 @@ def distilled_creator_libraries(profiles, samples):
         libraries.setdefault(platform, []).append(item)
     return libraries
 
-def blogger_skill_payload(edition="china", imported=0, result=None):
+def normalized_creator_name(value):
+    return re.sub(r"[\s·・_\-]+", "", str(value or "").strip()).casefold()
+
+
+def creator_incubation_workbenches(profiles, samples, org_id="local", repository=None):
+    """Join platform creator records to legacy blogger skills without migrating either store."""
+    try:
+        repo = repository or creator_distillation_service().repository
+        creators = repo.list_creators(org_id)
+        tasks = repo.list_tasks(org_id)
+    except Exception:
+        return []
+    profile_by_name = {normalized_creator_name(item.get("blogger_name")): item for item in profiles}
+    samples_by_name = {}
+    for item in samples:
+        samples_by_name.setdefault(normalized_creator_name(item.get("blogger_name")), []).append(item)
+    workbenches = []
+    for creator in creators:
+        detail = repo.creator_detail(creator.get("id")) or {}
+        public_profile = creator.get("profile") or {}
+        identity = public_profile.get("identity") or {}
+        dna_row = detail.get("profile") or {}
+        dna = dna_row.get("dna") or public_profile.get("draft") or {}
+        name = creator.get("display_name") or public_profile.get("nickname") or "待确认达人"
+        name_key = normalized_creator_name(name)
+        blogger_profile = profile_by_name.get(name_key) or {}
+        blogger_samples = samples_by_name.get(name_key) or []
+        source_urls = {str(identity.get(key) or "") for key in ("sourceUrl", "resolvedUrl")}
+        related_tasks = [task for task in tasks if str(task.get("creator_url") or "") in source_urls]
+        latest_task_row = related_tasks[0] if related_tasks else None
+        latest_task = ({key: latest_task_row.get(key) for key in (
+            "id", "status", "stage", "progress", "degraded_reason", "error_message", "updated_at"
+        )} if latest_task_row else None)
+        themes = [item.get("name") for item in (dna.get("contentThemes") or []) if item.get("name") and item.get("name") != "未分类"]
+        framework = blogger_profile.get("evaluation_framework") or []
+        pillars = (framework[:4] or themes[:4] or [blogger_profile.get("vertical_domain") or "内容定位待人工确认"])
+        representative = dna.get("representativeContent") or []
+        strategy_assets = blogger_profile.get("strategy_assets") or []
+        script_assets = blogger_profile.get("script_assets") or []
+        profile_status = dna_row.get("status") or dna.get("status") or identity.get("status") or "needs_review"
+        evidence_ready = bool(blogger_profile and blogger_samples and detail.get("assets"))
+        lifecycle = "incubation_ready" if profile_status == "approved" and evidence_ready else ("evidence_ready" if evidence_ready else "collecting")
+        dna_summary = {key: dna.get(key) for key in (
+            "summary", "status", "generationMode", "validationMode", "contentValidation",
+            "validatedClaims", "contentThemes", "representativeContent", "limitations"
+        ) if dna.get(key) is not None}
+        workbenches.append({
+            "creatorId": creator.get("id"),
+            "displayName": name,
+            "platform": creator.get("platform"),
+            "platformProfile": public_profile,
+            "identityStatus": identity.get("status") or "needs_review",
+            "profileStatus": profile_status,
+            "lifecycleStatus": lifecycle,
+            "assetCount": len(detail.get("assets") or []),
+            "sampleCount": len(blogger_samples),
+            "latestTask": latest_task,
+            "dna": dna_summary,
+            "incubation": {
+                "positioning": blogger_profile.get("professional_background") or dna.get("summary") or "等待补充样本后形成独立账号定位。",
+                "contentPillars": pillars,
+                "benchmarkTopics": [item.get("title") for item in representative[:5] if item.get("title")],
+                "strategyAssets": [item.get("name") for item in strategy_assets[:4] if item.get("name")],
+                "scriptAssets": [item.get("name") for item in script_assets[:4] if item.get("name")],
+                "phases": [
+                    "第1周：验证账号定位与三类固定栏目",
+                    "第2周：用代表作结构测试选题与开场",
+                    "第3周：按证据槽生产并进行内容质检",
+                    "第4周：回收互动与转化信号，修正内容 DNA",
+                ],
+                "boundary": "只迁移选题逻辑、判断框架和脚本结构；不复制原文、不冒充原账号、不搬运素材。",
+            },
+        })
+    return workbenches
+
+
+def blogger_skill_payload(edition="china", imported=0, result=None, org_id="local"):
     with db() as conn:
         source_count = conn.execute("select count(*) from blogger_skill_sources where edition=?", (edition,)).fetchone()[0]
         sample_count = conn.execute("select count(*) from blogger_skill_samples where edition=?", (edition,)).fetchone()[0]
@@ -9545,6 +9750,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
     for row in profile_rows:
         for field in json_fields:
             row[field.replace("_json", "")] = json.loads(row.pop(field) or "[]")
+        row["model_trace"] = json.loads(row.pop("model_trace_json", "{}") or "{}")
         person_samples = [s for s in samples if s.get("blogger_name") == row.get("blogger_name")]
         profiles.append(attach_blogger_assets(row, person_samples))
     knowledge = [{
@@ -9585,6 +9791,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
                 "metadata": {"author": profile.get("blogger_name"), "domain": profile.get("vertical_domain"), "asset_type": "script"}
             })
     knowledge.extend(asset_knowledge)
+    creator_workbenches = creator_incubation_workbenches(profiles, samples, org_id=org_id)
     return {
         "ok": True,
         "imported": imported,
@@ -9594,6 +9801,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None):
         "profiles": profiles,
         "knowledgeItems": knowledge,
         "creatorLibraries": distilled_creator_libraries(profiles, samples),
+        "creatorWorkbenches": creator_workbenches,
         "result": result or {}
     }
 
@@ -9932,7 +10140,10 @@ def save_content_capability_items(sources, edition="china"):
                 json.dumps(chunk["tags"], ensure_ascii=False), json.dumps(chunk["flat_tags"], ensure_ascii=False),
                 json.dumps(chunk["embedding"], ensure_ascii=False), chunk["source_url"], chunk["created_at"]
             ))
-    return {"sources": len(sources), "chunks": len(chunks)}
+    profile_results = []
+    for account_name in sorted({str(x.get("account_name") or "").strip() for x in sources if x.get("account_name")}):
+        profile_results.append(sync_content_capability_profile(account_name, edition=edition))
+    return {"sources": len(sources), "chunks": len(chunks), "profiles": profile_results}
 
 def import_content_capability_file(data, filename, edition="china", limit=120):
     digest = file_hash(data)
@@ -10241,10 +10452,16 @@ def distill_content_capability_account(account, platform="all", edition="china")
         return payload
     result = save_content_capability_items(sources, edition=edition)
     payload = content_capability_payload(edition=edition, q=account, imported=len(sources), result=result)
+    profile_status = next((x.get("status") for x in result.get("profiles", []) if x.get("account") == account), "manual_required")
+    profile_ready = profile_status == "dual_model_approved"
     payload.update({
         "account": account,
-        "distillStatus": "done",
-        "message": f"已完成“{account}”账号能力蒸馏，沉淀 {result.get('chunks', 0)} 条可调用能力片段。",
+        "distillStatus": "done" if profile_ready else "profile_review_required",
+        "message": (
+            f"已完成“{account}”账号能力蒸馏，沉淀 {result.get('chunks', 0)} 条可调用能力片段，能力画像已通过双模型质检。"
+            if profile_ready else
+            f"已完成“{account}”内容能力蒸馏，沉淀 {result.get('chunks', 0)} 条能力片段；能力画像已生成，但双模型质检未达发布门槛，需人工复核。"
+        ),
         "evidence": evidence
     })
     return payload
@@ -10355,6 +10572,109 @@ def content_capability_creator_assets(chunks):
             "tags": top_values(all_tags, 18)
         })
     return sorted(assets, key=lambda x: (-x["sample_count"], x["account_name"]))[:40]
+
+
+def content_capability_profile_from_chunks(account_name, chunks, edition="china"):
+    asset = next((x for x in content_capability_creator_assets(chunks) if x.get("account_name") == account_name), {})
+    topics = asset.get("content_motifs") or ["汽车垂直内容"]
+    terminology = list(dict.fromkeys([
+        *(asset.get("tech_tags") or []),
+        *(asset.get("tags") or []),
+    ]))[:24]
+    domain = topics[0] if topics else "汽车垂直内容"
+    platform = asset.get("platform") or next((x.get("platform") for x in chunks if x.get("platform")), "公开平台")
+    samples = []
+    for item in chunks:
+        breakdown = item.get("content_breakdown") or {}
+        samples.append({
+            "id": item.get("id"),
+            "source_id": item.get("source_id") or item.get("id"),
+            "blogger_name": account_name,
+            "platform": item.get("platform"),
+            "vertical_domain": domain,
+            "original_topic": item.get("title"),
+            "model": next(iter((item.get("tags") or {}).get("车型标签") or []), ""),
+            "professional_dimensions": item.get("professional_knowledge") or item.get("flat_tags") or [],
+            "phenomenon_description": breakdown.get("main_viewpoint") or item.get("chunk_text"),
+            "engineering_reasoning": breakdown.get("argument_structure") or item.get("knowledge_structure"),
+            "subjective_judgment": breakdown.get("main_viewpoint") or "",
+            "objective_evidence": " / ".join(asset.get("trust_sources") or []),
+            "user_translation": breakdown.get("transferable_method") or asset.get("topic_formula"),
+            "marketing_expression": asset.get("topic_formula") or "",
+            "risk_expression": breakdown.get("noncopy_risk") or asset.get("transfer_boundary"),
+            "reusable_judgment_rule": "先明确用户场景，再拆解产品事实、体验证据、适用边界与行动建议。",
+        })
+    profile = {
+        "id": stable_id("blogger-profile", edition, account_name, domain),
+        "edition": edition,
+        "blogger_name": account_name,
+        "platform": platform,
+        "vertical_domain": domain,
+        "professional_background": (
+            f"{asset.get('account_positioning') or account_name + '公开内容能力样本'}；"
+            "MMN仅蒸馏选题逻辑、判断框架、脚本结构与表达方法，不复刻个人口吻。"
+        ),
+        "content_topics": topics,
+        "evaluation_framework": ["用户场景问题", "产品/技术维度拆解", "体验或事实证据", "用户可理解判断", "适用边界", "行动建议"],
+        "terminology_system": terminology or ["场景痛点", "产品事实", "体验证据", "用户判断", "适用边界"],
+        "judgment_rules": asset.get("language_rules") or ["结论必须保留适用范围，并绑定可复验场景或公开证据。"],
+        "comparison_logic": "竞品对比先统一车型、版本、价格与使用场景，再比较产品事实、用户体感和可验证证据。",
+        "evidence_preference": "优先使用可追溯公开样本、明确的产品事实、真实场景体验和可复验条件；缺失证据时标注待核验。",
+        "positive_judgment_patterns": ["场景明确", "证据充分", "判断克制", "用户听得懂", "建议可执行"],
+        "negative_judgment_patterns": ["只堆参数", "空泛形容", "省略边界", "把观点当事实", "绝对化攻击竞品"],
+        "content_structure_patterns": ["场景问题开场", "观点拆解", "事实或体验证据", "适合/不适合谁", "验证或行动建议"],
+        "marketing_translation_patterns": ["专业参数转用户利益", "产品差异转真实场景", "技术判断转试驾检查点", "风险点转购买决策边界"],
+        "risk_expression_patterns": [asset.get("transfer_boundary") or "不复制原文、不冒充原账号、不搬运素材。", "外部观点不得包装为MMN原创事实。"],
+        "reusable_agent_instruction": (
+            f"你是MMN的{domain}内容能力蒸馏Skill。基于{account_name}可追溯公开样本归纳，"
+            "只迁移选题逻辑、判断框架和脚本结构；输出须标明证据、适用范围与风险边界。"
+        ),
+        "agent_few_shot": [],
+        "script_template": "短视频脚本：0–3秒场景痛点 → 4–15秒观点与产品事实 → 16–35秒证据/体验拆解 → 36–50秒适用人群与对比 → 51–60秒验证建议和风险提示。",
+        "report_template": "客户报告：账号能力定位 / 内容母题 / 判断框架 / 证据偏好 / 适配任务 / 脚本结构 / 不可迁移边界 / 双模型质检记录。",
+        "updated_at": now(),
+    }
+    return profile, samples
+
+
+def content_capability_chunks_for_account(account_name, edition="china"):
+    with db() as conn:
+        rows = [rowdict(r) for r in conn.execute(
+            "select * from content_capability_chunks where edition=? and account_name=? order by created_at desc limit 240",
+            (edition, account_name)
+        ).fetchall()]
+    for row in rows:
+        row["script_style"] = json.loads(row.pop("script_style_json") or "{}")
+        row["professional_knowledge"] = json.loads(row.pop("professional_knowledge_json") or "[]")
+        row["content_breakdown"] = json.loads(row.pop("content_breakdown_json") or "{}")
+        row["methodology"] = json.loads(row.pop("methodology_json") or "[]")
+        row["transferable_capabilities"] = json.loads(row.pop("transferable_capabilities_json") or "[]")
+        row["tags"] = json.loads(row.pop("tags_json") or "{}")
+        row["flat_tags"] = json.loads(row.pop("flat_tags_json") or "[]")
+        row["embedding"] = json.loads(row.pop("embedding_json") or "[]")
+    return rows
+
+
+def sync_content_capability_profile(account_name, edition="china", force=False):
+    chunks = content_capability_chunks_for_account(account_name, edition=edition)
+    if not chunks:
+        return {"account": account_name, "status": "needs_source", "samples": 0}
+    fingerprint = hashlib.sha256("|".join(sorted(str(x.get("source_id") or x.get("id")) for x in chunks)).encode("utf-8")).hexdigest()
+    with db() as conn:
+        existing = conn.execute(
+            "select validation_status, model_trace_json from blogger_skill_profiles where edition=? and blogger_name=? order by updated_at desc limit 1",
+            (edition, account_name)
+        ).fetchone()
+    if existing and not force:
+        trace = json.loads(existing["model_trace_json"] or "{}")
+        if trace.get("evidence_fingerprint") == fingerprint and existing["validation_status"] == "dual_model_approved":
+            return {"account": account_name, "status": "dual_model_approved", "samples": len(chunks), "skipped": True}
+    profile, samples = content_capability_profile_from_chunks(account_name, chunks, edition=edition)
+    profile = blogger_skill_model_distill(profile, samples)
+    profile["model_trace"]["evidence_fingerprint"] = fingerprint
+    with db() as conn:
+        upsert_blogger_skill_profile(conn, profile, edition=edition)
+    return {"account": account_name, "status": profile["validation_status"], "samples": len(chunks)}
 
 def content_capability_payload(edition="china", q="", tags=None, imported=0, result=None):
     tags = [t for t in (tags or []) if t]
@@ -10933,13 +11253,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
+            with SOCIAL_TREND_JOB_LOCK:
+                active_social_trend_jobs = sum(
+                    job.get("status") in {"queued", "running"} for job in SOCIAL_TREND_JOB_TASKS.values()
+                )
             self.send_json({
                 "ok": True,
                 "mode": "commercial-demo",
                 "version": APP_VERSION,
                 "versionCode": APP_VERSION_CODE,
                 "releaseDate": APP_RELEASE_DATE,
-                "db": str(DB_PATH)
+                "db": str(DB_PATH),
+                "activeSocialTrendJobs": active_social_trend_jobs,
             })
             return
         if parsed.path == "/api/product-whitepaper/latest":
@@ -11068,7 +11393,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if keyword == "上汽奥迪品牌传播穿透":
                     result = brand_penetration_snapshot(conn, auth.get("org_id", "local"), edition)
                 else:
-                    result = latest_social_trend_snapshot(conn, keyword, auth.get("org_id", "local"), edition)
+                    competitors = [value.strip() for value in query.get("competitor", []) if value.strip()]
+                    time_range = query.get("timeRange", [""])[0]
+                    result = latest_social_trend_snapshot(
+                        conn,
+                        keyword,
+                        auth.get("org_id", "local"),
+                        edition,
+                        {"competitors": competitors, "timeRange": time_range} if competitors or time_range else None,
+                    )
             self.send_json({"ok": True, "result": result})
             return
         social_trend_job_match = re.fullmatch(r"/api/social-trends/jobs/([^/]+)", parsed.path)
@@ -11401,7 +11734,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/blogger-skill":
             q = parse_qs(parsed.query)
             edition = edition_from(q.get("edition", ["china"])[0])
-            self.send_json(blogger_skill_payload(edition=edition))
+            auth = self.current_auth() or {}
+            self.send_json(blogger_skill_payload(edition=edition, org_id=auth.get("org_id", "local")))
             return
         if parsed.path == "/api/content-capability-kb":
             q = parse_qs(parsed.query)

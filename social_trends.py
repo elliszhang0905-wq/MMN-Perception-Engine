@@ -689,8 +689,21 @@ def save_snapshot(conn, result, org_id="local", edition="china", filters=None):
     return {"id": snapshot_id, "createdAt": stamp}
 
 
-def latest_snapshot(conn, keyword, org_id="local", edition="china"):
-    row = conn.execute("select * from social_trend_snapshots where org_id=? and edition=? and keyword=? order by created_at desc limit 1", (org_id, edition, keyword)).fetchone()
-    if not row: return None
-    result = json.loads(row["result_json"]); result["snapshot"] = {"id": row["id"], "createdAt": row["created_at"]}
-    return result
+def latest_snapshot(conn, keyword, org_id="local", edition="china", project_filters=None):
+    rows = conn.execute(
+        "select * from social_trend_snapshots where org_id=? and edition=? and keyword=? order by created_at desc",
+        (org_id, edition, keyword),
+    ).fetchall()
+    expected = project_filters or {}
+    expected_competitors = [str(value or "").strip() for value in expected.get("competitors", []) if str(value or "").strip()]
+    expected_time_range = str(expected.get("timeRange") or "").strip()
+    for row in rows:
+        filters = json.loads(row["filters_json"] or "{}")
+        if expected_competitors and filters.get("competitors", []) != expected_competitors:
+            continue
+        if expected_time_range and str(filters.get("timeRange") or "") != expected_time_range:
+            continue
+        result = json.loads(row["result_json"])
+        result["snapshot"] = {"id": row["id"], "createdAt": row["created_at"], "filters": filters}
+        return result
+    return None

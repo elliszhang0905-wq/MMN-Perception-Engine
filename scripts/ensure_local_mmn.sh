@@ -17,6 +17,13 @@ is_healthy() {
   curl -fsS -m 3 "${LOCAL_URL}/api/health" >/dev/null 2>&1
 }
 
+has_active_social_trend_jobs() {
+  local health
+  health=$(curl -fsS -m 3 "${LOCAL_URL}/api/health" 2>/dev/null || true)
+  [[ -n "${health}" ]] || return 1
+  HEALTH_PAYLOAD="${health}" python3 -c 'import json, os, sys; sys.exit(0 if int(json.loads(os.environ["HEALTH_PAYLOAD"]).get("activeSocialTrendJobs") or 0) > 0 else 1)'
+}
+
 server_pid() {
   lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
 }
@@ -35,13 +42,17 @@ backend_code_is_newer() {
   pid=$(server_pid)
   [[ -n "${pid}" && -f "${PID_FILE}" ]] || return 1
   [[ "$(cat "${PID_FILE}" 2>/dev/null || true)" == "${pid}" ]] || return 0
-  find server.py group_dashboard.py bf_factory -type f -name '*.py' -newer "${PID_FILE}" -print -quit 2>/dev/null | grep -q .
+  find server.py group_dashboard.py bf_factory creator_distillation -type f -name '*.py' -newer "${PID_FILE}" -print -quit 2>/dev/null | grep -q .
 }
 
 stop_stale_server() {
   local pid
   pid=$(server_pid)
   if [[ -n "${pid}" ]] && backend_code_is_newer; then
+    if has_active_social_trend_jobs; then
+      echo "检测到社媒采集任务正在运行，延后重启 MMN 本地服务。"
+      return
+    fi
     echo "检测到后端代码已更新，正在重启 MMN 本地服务..."
     kill "${pid}" 2>/dev/null || true
     for _ in {1..20}; do
