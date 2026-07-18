@@ -58,6 +58,7 @@ python3 -m unittest \
   tests.test_douyin_hot_entities \
   tests.test_social_trend_jobs \
   tests.test_social_trends \
+  tests.test_http_disconnects \
   tests.test_all_surfaces_release_gate -v
 
 echo "MMN release gate:研发档案检查"

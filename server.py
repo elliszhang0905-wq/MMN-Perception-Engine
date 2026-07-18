@@ -123,7 +123,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260719-global-readiness-1"
+APP_VERSION_CODE = "beta-1.02-20260719-global-readiness-2"
 APP_RELEASE_DATE = "2026-07-19"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -11234,11 +11234,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def send_json(self, payload, status=200):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return True
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+            return False
 
     def read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
