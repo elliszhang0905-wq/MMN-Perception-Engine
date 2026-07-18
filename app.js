@@ -821,6 +821,7 @@ async function initCloudLoginGate(){
     saveSession(data.session);
     screen.hidden=true;
     startAppDataLoads();
+    signalAppAuthReady();
     toast(`${data.session.name} 已进入云端演示环境`);
    }catch(err){
     msg.textContent=err.message||"登录失败，请检查账号密码。";
@@ -4662,5 +4663,13 @@ function startAppDataLoads(){
 	 loadSocialPluginStatus();
  if(session){loadServerLearnings();loadWorkspace()}else renderWorkspace();
 }
-render();
-initCloudLoginGate().then(ok=>{if(ok)startAppDataLoads()});
+function signalAppAuthReady(){
+ window.mmnAuthReady=true;
+ window.dispatchEvent(new CustomEvent("mmn:auth-ready"));
+}
+initCloudLoginGate().then(ok=>{
+ if(!ok)return;
+ render();
+ startAppDataLoads();
+ signalAppAuthReady();
+});

@@ -250,7 +250,11 @@
   bind();
  }
 
- render();
- loadRange(state.range);
- loadCollectorStatus();
+ function start(){
+  render();
+  loadRange(state.range);
+  loadCollectorStatus();
+ }
+ if(window.mmnAuthReady)start();
+ else window.addEventListener("mmn:auth-ready",start,{once:true});
 })();
