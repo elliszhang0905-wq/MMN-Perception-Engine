@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "enabled": true,
+      "source": {
+        "id": "mofcom-2026-trade-in",
+        "name": "商务部等8部门",
+        "level": 1,
+        "url": "https://www.mofcom.gov.cn/zfxxgk/fdzdgknr/ztfl/gnmygl/art/2025/art_1a6dd3bbec924caba382de84e0afad30.html",
+        "allowedDomains": ["mofcom.gov.cn"]
+      },
+      "metadata": {"policyName": "2026年汽车以旧换新补贴实施细则", "region": "全国", "regionLevel": "国家"}
+    },
+    {
+      "enabled": true,
+      "source": {
+        "id": "sta-nev-purchase-tax-2026",
+        "name": "财政部 税务总局 工业和信息化部",
+        "level": 1,
+        "url": "https://fgk.chinatax.gov.cn/zcfgk/c102416/c5207352/content.html",
+        "allowedDomains": ["chinatax.gov.cn"]
+      },
+      "metadata": {"policyName": "2026—2027新能源汽车车辆购置税减免", "region": "全国", "regionLevel": "国家"}
+    },
+    {
+      "enabled": true,
+      "source": {
+        "id": "beijing-2026-trade-in",
+        "name": "北京市商务局",
+        "level": 2,
+        "url": "https://www.beijing.gov.cn/zhengce/zhengcefagui/202602/t20260206_4495482.html",
+        "allowedDomains": ["beijing.gov.cn"]
+      },
+      "metadata": {"policyName": "北京市2026年汽车以旧换新补贴实施细则", "region": "北京", "regionLevel": "市"}
+    }
+  ]
+}

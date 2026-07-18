@@ -24,9 +24,10 @@
       "size_class": "中大型SUV",
       "energy_type": "纯电动",
       "sales_volume": 4017,
-      "price": "29.80—31.60万元",
+      "price": "26.98—35.98万元",
+      "price_source": "dongchedi_dealer_price",
       "segment_rank": 9,
-      "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "mid_large_suv"}
+      "evidence": {"type": "dongchedi_public_rank_api", "period": "2026-06", "rank_type": "mid_large_suv", "field": "dealer_price", "has_dealer_price": true, "captured_at": "2026-07-17T02:01:15+08:00"}
     },
     {
       "series_id": 25877,

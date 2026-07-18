@@ -135,6 +135,8 @@ def cross_validate_model_analyses(analyses, evidence_ids):
             reasons.append("方向冲突")
         if qwen and deepseek and abs(_finite(qwen.get("factStrength")) - _finite(deepseek.get("factStrength"))) > 0.2:
             reasons.append("事实强度差异超过0.2")
+        if qwen and deepseek and not (set(qwen.get("evidenceIds") or []) & set(deepseek.get("evidenceIds") or [])):
+            reasons.append("双模型缺少共同证据")
         for item in (qwen, deepseek):
             if item and not item.get("evidenceIds"):
                 reasons.append("模型未引用可核验证据")

@@ -53,11 +53,22 @@ fi
 if [[ -f data/sales_warning_demo_2026-06.json ]]; then
   docker compose --env-file .env cp data/sales_warning_demo_2026-06.json mmn-app:/app/data/sales_warning_demo_2026-06.json
 fi
-if [[ -f data/dongchedi_sales/sales_warning_observed_2026-06.json ]]; then
-  docker compose --env-file .env cp data/dongchedi_sales/sales_warning_observed_2026-06.json mmn-app:/app/data/dongchedi_sales/sales_warning_observed_2026-06.json
+if [[ -f data/sales_warning_cycles.json ]]; then
+  if docker compose --env-file .env exec -T mmn-app test -f /app/data/sales_warning_cycles.json; then
+    echo "保留服务器已有车型上市日期，不用版本文件覆盖。"
+  else
+    docker compose --env-file .env cp data/sales_warning_cycles.json mmn-app:/app/data/sales_warning_cycles.json
+  fi
 fi
+for observed_file in data/dongchedi_sales/sales_warning_observed_????-??.json; do
+  [[ -f "$observed_file" ]] || continue
+  docker compose --env-file .env cp "$observed_file" "mmn-app:/app/$observed_file"
+done
 if [[ -f data/dongchedi_sales/sales_warning_latest.json ]]; then
   docker compose --env-file .env cp data/dongchedi_sales/sales_warning_latest.json mmn-app:/app/data/dongchedi_sales/sales_warning_latest.json
+fi
+if [[ -f data/dongchedi_sales/sales_warning_history.json ]]; then
+  docker compose --env-file .env cp data/dongchedi_sales/sales_warning_history.json mmn-app:/app/data/dongchedi_sales/sales_warning_history.json
 fi
 if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
   docker compose --env-file .env cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json

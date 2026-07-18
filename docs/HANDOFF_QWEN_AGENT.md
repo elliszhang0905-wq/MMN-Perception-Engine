@@ -610,3 +610,39 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 服务器使用提交归档发布到 `/opt/mmn-perception-engine`；发布前代码备份 `backups/code_before_b30f0ae_20260717_040913.tar.gz`，运行数据备份 `backups/mmn_backup_20260717_040947.tar.gz`。
 - 公网 IP 健康接口、首页资源版本与核心文件哈希均已核对；`server.py`、`group_dashboard.py`、管理层 JS/CSS 和 `index.html` 与本地一致。
 - 本次全局检查修复了 1 个产品口径 BUG，并清理 1 个既往浏览器验收遗留的本地重复 8765 进程；本地已恢复 watchdog 单实例。
+
+## 27. 2026-07-17 MMN Eval v0.1 本地评测基础
+
+- 新增独立 `mmn_eval/` 包和 `scripts/run_mmn_eval.py`，支持严格 JSONL 合同、硬门禁、五维质量评分、人工复核队列和 baseline/candidate 回归比较。
+- Rubric 版本为 `mmn-eval-v0.1`；当前阈值 80 分通过、65–79.99 分人工复核、低于 65 分失败，任一硬门禁直接失败。阈值在 MMN 负责人完成首批真实案例裁决前均属内部校准值。
+- 硬门禁覆盖编造事实、未知证据、缺失写零、多模型未完成、车型配置三模型共同证据不完整、平台指标越界、来源独立性不足，以及未区分事实/推断/假设/未知。
+- 合成种子文件为 `data/eval/mmn_eval_seed_v0.1.jsonl` 与 `data/eval/mmn_eval_seed_outputs_v0.1.jsonl`；种子集故意包含失败输出，整套运行返回退出码 1 是预期门禁行为。
+- 操作和人工标注说明见 `docs/mmn-eval.md`；研发记录见 `docs/研发档案/2026-07-17_beta-1.02_MMN-Eval-v0.1.md`。
+- 本地专项 27/27、完整 Python 269/269、发布门禁专项 127/127、浏览器 `failed: []` / `runtimeErrors: []`、语法和 `git diff --check` 通过。本次未改 UI、路由、API、数据库和模型调用，也未同步 GitHub 或 ECS。
+- 下一步是脱敏抽取 20–50 条真实案例、由 MMN 负责人冻结阈值，再接全模型链路 Trace、Langfuse 数据集和正式发布门禁。
+
+## 28. 2026-07-17 MMN Eval 可视化页面
+
+- 在保留现有信息架构的前提下，将 `Eval评测` 加入「系统设置」，页面展示发布判断、五维质量表现、案例筛选、真实基线空状态和人工复核进度。
+- 新增 `mmn_eval/dashboard.py` 作为独立数据服务；`server.py` 只增加 `GET /api/eval/report`、`POST /api/eval/run`、`POST /api/eval/human-review` 三个经过现有认证层的薄路由。
+- 人工判断按 `orgId` 隔离写入 `data/eval/mmn_eval_human_reviews.json`。只有 verdict 为 `human_review` 的案例可处理，驳回必须填写理由，硬门禁不能被人工结论绕过。
+- 页面只展示真实报告字段；没有 baseline 时明确显示“尚无可对比基线”。种子集持续标记为机制验证数据，不代表 MMN 真实业务能力成绩。
+- 浏览器已验证页面加载、运行 Eval、待复核筛选、人工判断保存和测试数据清理；接口均返回 200，控制台和页面运行时错误为 0。截图见 `output/playwright/mmn-eval-dashboard.png` 与 `output/playwright/mmn-eval-human-review.png`。
+- 本次仍是本地实现，没有同步 GitHub 或 ECS。真实 Gold Set 扩充和阈值冻结仍需 MMN 负责人介入。
+# 2026-07-17｜Policy Intelligence 模块交接
+
+- 新增市场环境变量领域模块 `policy_intelligence.py`，包含来源门禁、原文留存、结构化规则、人工审核、车型影响、五维Eval及知识门禁。
+- 新增只读看板API与管理员采集/导入/解析/审核/分析/Eval API；未审核政策不进入车型计算，Eval低于80不进入机会地图。
+- 决策驾驶舱新增“政策环境分析”，管理层版新增“政策环境”视图；现有模块与计算不改写。
+- 采集脚本：`python3 scripts/refresh_policy_intelligence.py`。robots不允许或无法确认时必须失败并走人工官方原文导入，不得绕过。
+- 完整研发记录见 `docs/研发档案/2026-07-17_beta-1.02_Policy-Intelligence-MVP.md`。
+
+## 29. 2026-07-18 昨夜迭代统一发布基线
+
+- 发布标识统一为 `beta-1.02-20260718-overnight-iteration-1`，覆盖 MMN Eval v0.1 与可视化、Policy Intelligence、咨询输出框架、销售预警近六个月历史和车型上市周期持久化，以及相关管理层/驾驶舱 UI 与 API 更新。
+- MMN Eval 仍以机制验证为边界：合成种子不代表真实业务质量，正式 Gold Set 与阈值冻结继续由 MMN 负责人裁决；硬门禁不可被人工复核绕过。
+- Policy Intelligence 只允许官方来源、人工审核和 Eval 达标内容进入车型影响与机会地图；条件未确认时只展示条件权益上限，不伪装为已获得补贴。
+- 销售预警历史只读展示最近六个自然月，缺失月份明确标记且不补零；8 台车型上市日期已从浏览器存储迁移到 `data/sales_warning_cycles.json`。部署脚本仅在服务器文件不存在时初始化，服务器已有记录永不被版本文件覆盖。
+- 咨询输出统一执行金字塔结构、MECE 检查、事实/推断/假设分层与证据引用；不满足框架检查的结果不作为正式 MMN 模型输出策略。
+- 本地发布证据：完整 `unittest` 324/324 通过，`scripts/release_gate.sh` 通过 131 项业务专项与浏览器检查，`failed: []`、`runtimeErrors: []`；JS/Python 语法、`git diff --check` 和敏感信息扫描通过。
+- 生成截图、Playwright 会话文件和 `output/mmn-eval-seed-report.*` 属验收产物，不进入发布提交；种子数据合同、研发档案、脚本和测试进入 GitHub。

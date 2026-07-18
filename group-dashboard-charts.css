@@ -24,14 +24,14 @@
 .group-star-point.down .dot{fill:#c2575d}.group-star-point.flat .dot{fill:#829198}.group-star-point:focus .halo{stroke:#263941;stroke-width:2}
 .group-star-point.missing .halo{fill:transparent;stroke:#d5a84d;stroke-dasharray:3 3}.group-star-point.missing .dot{fill:#fffaf0;stroke:#d5a84d;stroke-width:2;stroke-dasharray:3 3;filter:none}
 .group-star-point.missing .delta{fill:#a77818}.group-star-point.missing .sales,.group-star-point.missing .saic{fill:#a18b5f}
-.group-star-point .focus-ring{fill:none;stroke:#1e7aa8;stroke-width:5;stroke-dasharray:7.5 7.5}.group-star-point .focus-tag{fill:#1e7aa8;font-size:25px;font-weight:900}
+.group-star-point .focus-ring{fill:none;stroke:#1e7aa8;stroke-width:3;stroke-dasharray:6 6}.group-star-point .focus-tag{fill:#1e7aa8;font-size:14px;font-weight:900}
 .group-star-point text,.group-voice-dot text,.group-voc-plot text{font-family:inherit}
-.group-star-point .delta{fill:#46575f;font-size:25px;font-weight:900}.group-star-point .segment{fill:#263840;font-size:32.5px;font-weight:900}
-.group-star-point .sales{fill:#5f7078;font-size:27.5px;font-weight:850}.group-star-point .saic-heading{fill:#607179;font-size:25px;font-weight:900}.group-star-point .saic{fill:#53656d;font-size:27.5px;font-weight:850}
+.group-star-point .delta{fill:#46575f;font-size:16px;font-weight:900}.group-star-point .segment{fill:#263840;font-size:19px;font-weight:900}
+.group-star-point .sales{fill:#5f7078;font-size:17px;font-weight:850}.group-star-point .saic-heading{fill:#607179;font-size:13px;font-weight:900}.group-star-point .saic{fill:#53656d;font-size:13px;font-weight:850}
 .group-view-panel .group-segment-frame{min-height:auto;flex:0 0 auto;padding:12px 18px 20px;overflow:visible}
 .group-view-panel .group-segment-frame .group-market-panel{position:relative;width:100%;min-height:auto;box-sizing:border-box;flex:0 0 auto;padding-left:145px}
 .group-view-panel .group-segment-frame .group-segment-plot{height:auto;min-height:0;flex:0 0 auto}
-.group-segment-frame .group-chart-axis{top:118px;bottom:188px;left:18px;width:110px;font-size:17.5px;line-height:1.3}
+.group-segment-frame .group-chart-axis{top:118px;bottom:188px;left:18px;width:110px;font-size:13px;line-height:1.3}
 .group-view-panel .group-segment-frame .group-chart-legend-explicit{gap:16px 30px;padding:15px;font-size:21.25px;line-height:1.4}
 .group-segment-frame .group-chart-legend span{gap:12.5px}.group-segment-frame .group-chart-legend i{width:20px;height:20px}
 .group-segment-frame .group-chart-legend i.size{width:30px;height:30px;border-width:5px}.group-segment-frame .group-chart-legend i.missing,.group-segment-frame .group-chart-legend i.focus{border-width:5px}

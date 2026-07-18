@@ -16,6 +16,7 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
                 "factsFingerprint": packet["fingerprint"],
                 "evidenceIds": ["retail", "wholesale", "nev_retail", "nev_penetration"],
                 "inferenceIds": ["retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"],
+                "brandImplicationIds": [item["id"] for item in packet["brandImplications"]],
                 "actionIds": ["p1", "p2", "p3"],
                 "vehicleActionIds": [item["id"] for item in packet["vehicleActions"]],
                 "issues": [],
@@ -34,6 +35,15 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(len(packet["inferences"]), 4)
         self.assertEqual([item["id"] for item in packet["actions"]], ["p1", "p2", "p3"])
         self.assertEqual(len(packet["vehicleActions"]), 9)
+        self.assertEqual(len(packet["brandImplications"]), 9)
+        consulting = packet["brandImplications"][0]["consultingOutput"]
+        self.assertEqual(
+            consulting["quality"]["sections"],
+            ["Executive Conclusion", "Key Findings", "Evidence", "Strategic Implication", "Action Recommendation"],
+        )
+        self.assertTrue(consulting["quality"]["passed"])
+        self.assertTrue(consulting["quality"]["mecePassed"])
+        self.assertEqual([item["id"] for item in consulting["evidence"]], ["E1", "E2", "E3"])
         self.assertEqual(next(item for item in packet["vehicleActions"] if item.get("selected"))["model"], "奥迪E7X")
         self.assertEqual(len(packet["fingerprint"]), 64)
 
@@ -46,6 +56,7 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
             {"factsFingerprint": "wrong"},
             {"evidenceIds": ["retail"]},
             {"inferenceIds": ["retail_pressure"]},
+            {"brandImplicationIds": ["im"]},
             {"actionIds": ["p1"]},
             {"vehicleActionIds": ["audi-e7x"]},
             {"issues": ["措辞越界"]},
@@ -65,6 +76,7 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(state["summary"], packet["candidate"])
         self.assertEqual(len(state["actions"]), 3)
         self.assertEqual(len(state["vehicleActions"]), 9)
+        self.assertEqual(len(state["brandImplications"]), 9)
         self.assertEqual(state["providerChecks"], {"qwen": "verified", "deepseek": "verified"})
 
     def test_model_failure_keeps_summary_private(self):
@@ -79,6 +91,7 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(state["summary"], "")
         self.assertEqual(state["actions"], [])
         self.assertEqual(state["vehicleActions"], [])
+        self.assertEqual(state["brandImplications"], [])
         self.assertNotIn("secret provider detail", json.dumps(state, ensure_ascii=False))
 
 

@@ -1,6 +1,12 @@
 {
   "schema_version": "1.0",
   "source": "dongchedi_authenticated_browser",
+  "price_contract": {
+    "provider": "懂车帝",
+    "field": "dealer_price",
+    "required_flag": "has_dealer_price=true",
+    "fallback": "none"
+  },
   "period": "2026-06",
   "captured_at": "2026-07-16T14:00:00+00:00",
   "complete": true,

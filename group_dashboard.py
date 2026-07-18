@@ -57,7 +57,7 @@ E7X_EVALUATION_PATH = Path(__file__).with_name("data") / "e7x_product_evaluation
 SALES_WARNING_DEMO_PATH = Path(__file__).with_name("data") / "sales_warning_demo_2026-06.json"
 SALES_WARNING_LATEST_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_latest.json"
 SALES_WARNING_OBSERVED_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_observed_2026-06.json"
-SALES_WARNING_MONITOR_SOURCE = "八车周对比次数正反向排名"
+SALES_WARNING_MONITOR_SOURCE = "周对比次数正反向排名"
 
 
 def _safe_json(value, fallback):
@@ -201,6 +201,14 @@ def build_sales_warning_full(payload):
         "dongchedi_public_rank_api",
     }:
         raise ValueError("全量细分市场数据来源不受支持")
+    price_contract = payload.get("price_contract") or {}
+    if not (
+        price_contract.get("provider") == "懂车帝"
+        and price_contract.get("field") == "dealer_price"
+        and price_contract.get("required_flag") == "has_dealer_price=true"
+        and price_contract.get("fallback") == "none"
+    ):
+        raise ValueError("车型起售价未锁定为懂车帝经销商报价")
     period = str(payload.get("period") or "").strip()
     thresholds = payload.get("thresholds") or {}
     red_ratio = float(thresholds.get("red_ratio") or 0)
@@ -230,6 +238,40 @@ def build_sales_warning_full(payload):
         body_type = str(item.get("body_type") or "待复核")
         size_class = str(item.get("size_class") or "待复核")
         energy_type = str(item.get("energy_type") or "待复核")
+        vehicle_start_price = item.get("vehicle_start_price_wan")
+        vehicle_start_price_source = str(item.get("vehicle_start_price_source") or "")
+        if vehicle_start_price is not None and vehicle_start_price_source != "dongchedi_dealer_price":
+            raise ValueError(f"车型起售价来源无效：{item.get('series_name')}")
+        competitor_pool = list(item.get("competitor_pool") or [])
+        benchmark_pool = list(item.get("benchmark_pool") or competitor_pool[:3])[:3]
+        benchmark_ids = {int(peer.get("series_id") or 0) for peer in benchmark_pool}
+        market_median = int(item.get("segment_median_sales") or 0)
+        median_pool = sorted(
+            (peer for peer in competitor_pool if int(peer.get("series_id") or 0) not in benchmark_ids),
+            key=lambda peer: (
+                abs(int(peer.get("sales_volume") or 0) - market_median),
+                -int(peer.get("sales_volume") or 0),
+                str(peer.get("series_name") or ""),
+            ),
+        )[:3]
+
+        def comparison_peer(peer, role):
+            price_display = str(peer.get("price") or "价格待复核")
+            price_match = re.search(r"(\d+(?:\.\d+)?)", price_display.replace(",", ""))
+            return {
+                "seriesId": int(peer.get("series_id") or 0),
+                "model": str(peer.get("series_name") or "待复核车型"),
+                "manufacturer": str(peer.get("manufacturer") or "待复核厂商"),
+                "sales": int(peer.get("sales_volume") or 0),
+                "priceDisplay": price_display,
+                "startPriceWan": float(price_match.group(1)) if price_match else None,
+                "priceSource": str(peer.get("price_source") or ""),
+                "role": role,
+                "roleLabel": "细分市场销量前三" if role == "top3" else "接近细分市场中位数",
+            }
+
+        top_peers = [comparison_peer(peer, "top3") for peer in benchmark_pool]
+        median_peers = [comparison_peer(peer, "median") for peer in median_pool]
         saic_models.append({
             "seriesId": int(item.get("series_id") or 0),
             "model": str(item.get("series_name") or "待复核车型"),
@@ -245,19 +287,15 @@ def build_sales_warning_full(payload):
             "marketSales": market_sales,
             "marketShare": round(sales / market_sales, 4) if market_sales else None,
             "marketModelCount": int(item.get("segment_model_count") or 0),
+            "salesMedian": market_median,
             "benchmark": benchmark,
             "peerBasis": str(item.get("competitor_pool_rule") or "排除本品后，取同细分市场销量前3名竞品的销量中位数；不足3款不计算"),
             "peerCount": int(item.get("benchmark_pool_count") or item.get("competitor_pool_count") or 0),
             "marketPeerCount": int(item.get("competitor_pool_count") or 0),
             "benchmarkMethod": str(item.get("benchmark_method") or "top_competitor_median"),
-            "benchmarkPeers": [
-                {
-                    "model": str(peer.get("series_name") or "待复核车型"),
-                    "sales": int(peer.get("sales_volume") or 0),
-                    "priceDisplay": str(peer.get("price") or "价格待复核"),
-                }
-                for peer in (item.get("benchmark_pool") or item.get("competitor_pool") or [])
-            ],
+            "benchmarkPeers": top_peers,
+            "medianPeers": median_peers,
+            "comparisonPeers": top_peers + median_peers,
             "benchmarkAuditPeers": [
                 {
                     "model": str(peer.get("series_name") or "待复核车型"),
@@ -266,7 +304,8 @@ def build_sales_warning_full(payload):
                 }
                 for peer in (item.get("competitor_pool") or [])
             ],
-            "vehicleStartPriceWan": item.get("vehicle_start_price_wan"),
+            "vehicleStartPriceWan": vehicle_start_price,
+            "vehicleStartPriceSource": vehicle_start_price_source,
             "benchmarkAverageStartPriceWan": item.get("benchmark_average_start_price_wan"),
             "benchmarkMinimumStartPriceWan": item.get("benchmark_minimum_start_price_wan"),
             "benchmarkMaximumStartPriceWan": item.get("benchmark_maximum_start_price_wan"),
@@ -496,14 +535,21 @@ def build_sales_warning_observed(path=SALES_WARNING_OBSERVED_PATH, market_path=S
     }
 
 
-def load_sales_warning(path=None, demo_path=SALES_WARNING_DEMO_PATH, observed_path=SALES_WARNING_OBSERVED_PATH):
+def _latest_sales_warning_observed_path(directory=None):
+    """Resolve the newest period-specific monitored-model table without a code change."""
+    directory = Path(directory or SALES_WARNING_OBSERVED_PATH.parent)
+    candidates = sorted(directory.glob("sales_warning_observed_????-??.json"))
+    return candidates[-1] if candidates else SALES_WARNING_OBSERVED_PATH
+
+
+def load_sales_warning(path=None, demo_path=SALES_WARNING_DEMO_PATH, observed_path=None):
     """Prefer the verified full segment file, then focal observations; never present demo data as formal."""
     path = Path(path or os.getenv("MMN_SALES_WARNING_PATH") or SALES_WARNING_LATEST_PATH)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return build_sales_warning_full(payload)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return build_sales_warning_observed(observed_path)
+        return build_sales_warning_observed(observed_path or _latest_sales_warning_observed_path())
 
 
 def sales_warning_methodology(warning):

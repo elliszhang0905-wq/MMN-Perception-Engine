@@ -97,6 +97,19 @@ class OpportunityPipelineTest(unittest.TestCase):
         self.assertEqual(checked["status"], "aligned")
         self.assertEqual(checked["items"][0]["commonEvidenceIds"], ["fact-2"])
 
+    def test_cross_validation_rejects_disjoint_model_evidence(self):
+        qwen = {"label": "舒适性", "factStrength": 0.8, "direction": "seize", "evidenceIds": ["fact-1"], "confidence": 0.9}
+        deepseek = {"label": "舒适性", "factStrength": 0.75, "direction": "seize", "evidenceIds": ["fact-2"], "confidence": 0.85}
+
+        checked = cross_validate_model_analyses(
+            {"qwen": [qwen], "deepseek": [deepseek]},
+            {"fact-1", "fact-2"},
+        )
+
+        self.assertEqual(checked["status"], "manual_required")
+        self.assertEqual(checked["items"], [])
+        self.assertIn("双模型缺少共同证据", checked["manualItems"][0]["reasons"])
+
     def test_cross_validation_requires_each_model_to_cite_evidence(self):
         no_evidence = {
             "label": "舒适性", "factStrength": 0.8, "direction": "seize",

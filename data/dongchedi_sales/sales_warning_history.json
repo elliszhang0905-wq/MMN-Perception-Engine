@@ -1,0 +1,757 @@
+{
+  "schemaVersion": "1.1",
+  "source": "dongchedi_public_rank_api",
+  "sourceLabel": "懂车帝月销量榜",
+  "sourceUrl": "https://www.dongchedi.com/sales",
+  "updatedAt": "2026-07-17T07:54:39+00:00",
+  "latestPeriod": "2026-06",
+  "windowPeriods": [
+    "2026-01",
+    "2026-02",
+    "2026-03",
+    "2026-04",
+    "2026-05",
+    "2026-06"
+  ],
+  "vehicles": {
+    "25058": {
+      "seriesId": "25058",
+      "model": "奥迪E5 Sportback",
+      "launchDate": "2025-09-16",
+      "rankType": "mid_car",
+      "months": [
+        {
+          "period": "2026-01",
+          "sales": 420,
+          "rank": 49,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 19177,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "398",
+              "model": "帕萨特",
+              "sales": 20799,
+              "rank": 1
+            },
+            {
+              "seriesId": "415",
+              "model": "迈腾",
+              "sales": 19306,
+              "rank": 2
+            },
+            {
+              "seriesId": "535",
+              "model": "凯美瑞",
+              "sales": 17426,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-02",
+          "sales": 303,
+          "rank": 49,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 12713,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "398",
+              "model": "帕萨特",
+              "sales": 13988,
+              "rank": 1
+            },
+            {
+              "seriesId": "3762",
+              "model": "Model 3",
+              "sales": 12920,
+              "rank": 2
+            },
+            {
+              "seriesId": "415",
+              "model": "迈腾",
+              "sales": 11232,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-03",
+          "sales": 2630,
+          "rank": 26,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 16472,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "535",
+              "model": "凯美瑞",
+              "sales": 17069,
+              "rank": 1
+            },
+            {
+              "seriesId": "3762",
+              "model": "Model 3",
+              "sales": 16280,
+              "rank": 2
+            },
+            {
+              "seriesId": "398",
+              "model": "帕萨特",
+              "sales": 16067,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-04",
+          "sales": 800,
+          "rank": 43,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 10007,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "535",
+              "model": "凯美瑞",
+              "sales": 10963,
+              "rank": 1
+            },
+            {
+              "seriesId": "212",
+              "model": "奔驰C级",
+              "sales": 9950,
+              "rank": 2
+            },
+            {
+              "seriesId": "145",
+              "model": "宝马3系",
+              "sales": 9107,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 500,
+          "rank": 54,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 14259,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "3762",
+              "model": "Model 3",
+              "sales": 18370,
+              "rank": 1
+            },
+            {
+              "seriesId": "535",
+              "model": "凯美瑞",
+              "sales": 12237,
+              "rank": 2
+            },
+            {
+              "seriesId": "415",
+              "model": "迈腾",
+              "sales": 12170,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 270,
+          "rank": 57,
+          "rankType": "mid_car",
+          "segmentTop3AverageSales": 14759,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "535",
+              "model": "凯美瑞",
+              "sales": 17114,
+              "rank": 1
+            },
+            {
+              "seriesId": "3762",
+              "model": "Model 3",
+              "sales": 14266,
+              "rank": 2
+            },
+            {
+              "seriesId": "415",
+              "model": "迈腾",
+              "sales": 12896,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25877": {
+      "seriesId": "25877",
+      "model": "智己LS8",
+      "launchDate": "2026-04-16",
+      "rankType": "mid_large_suv",
+      "months": [
+        {
+          "period": "2026-04",
+          "sales": 1938,
+          "rank": 20,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 15034,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 21024,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 14201,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 9876,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 3090,
+          "rank": 14,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 18424,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 20878,
+              "rank": 1
+            },
+            {
+              "seriesId": "25953",
+              "model": "问界M6",
+              "sales": 18148,
+              "rank": 2
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 16247,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 1350,
+          "rank": 23,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 16981,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 21453,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 15165,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 14324,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25925": {
+      "seriesId": "25925",
+      "model": "荣威i6",
+      "launchDate": "2026-04-28",
+      "rankType": "compact_car",
+      "months": [
+        {
+          "period": "2026-05",
+          "sales": 2001,
+          "rank": 25,
+          "rankType": "compact_car",
+          "segmentTop3AverageSales": 14087,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "5828",
+              "model": "MG4",
+              "sales": 15067,
+              "rank": 1
+            },
+            {
+              "seriesId": "10170",
+              "model": "小鹏MONA M03",
+              "sales": 14160,
+              "rank": 2
+            },
+            {
+              "seriesId": "393",
+              "model": "朗逸",
+              "sales": 13033,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 1408,
+          "rank": 26,
+          "rankType": "compact_car",
+          "segmentTop3AverageSales": 14667,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "393",
+              "model": "朗逸",
+              "sales": 15444,
+              "rank": 1
+            },
+            {
+              "seriesId": "5828",
+              "model": "MG4",
+              "sales": 14397,
+              "rank": 2
+            },
+            {
+              "seriesId": "10170",
+              "model": "小鹏MONA M03",
+              "sales": 14160,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25395": {
+      "seriesId": "25395",
+      "model": "ID.ERA 9X",
+      "launchDate": "2026-04-25",
+      "rankType": "large_suv",
+      "months": [
+        {
+          "period": "2026-04",
+          "sales": 2326,
+          "rank": 6,
+          "rankType": "large_suv",
+          "segmentTop3AverageSales": 9741,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "1616",
+              "model": "蔚来ES8",
+              "sales": 13020,
+              "rank": 1
+            },
+            {
+              "seriesId": "24670",
+              "model": "ZEEKR 9X",
+              "sales": 9315,
+              "rank": 2
+            },
+            {
+              "seriesId": "24850",
+              "model": "问界M8",
+              "sales": 6889,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 5004,
+          "rank": 6,
+          "rankType": "large_suv",
+          "segmentTop3AverageSales": 9184,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "1616",
+              "model": "蔚来ES8",
+              "sales": 11472,
+              "rank": 1
+            },
+            {
+              "seriesId": "24670",
+              "model": "ZEEKR 9X",
+              "sales": 9058,
+              "rank": 2
+            },
+            {
+              "seriesId": "25718",
+              "model": "零跑D19",
+              "sales": 7021,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 3017,
+          "rank": 13,
+          "rankType": "large_suv",
+          "segmentTop3AverageSales": 9210,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "6325",
+              "model": "问界M9",
+              "sales": 10070,
+              "rank": 1
+            },
+            {
+              "seriesId": "1616",
+              "model": "蔚来ES8",
+              "sales": 8966,
+              "rank": 2
+            },
+            {
+              "seriesId": "25904",
+              "model": "蔚来ES9",
+              "sales": 8595,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25846": {
+      "seriesId": "25846",
+      "model": "奥迪E7X",
+      "launchDate": "2026-05-29",
+      "rankType": "mid_large_suv",
+      "months": [
+        {
+          "period": "2026-05",
+          "sales": 400,
+          "rank": 41,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 18424,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 20878,
+              "rank": 1
+            },
+            {
+              "seriesId": "25953",
+              "model": "问界M6",
+              "sales": 18148,
+              "rank": 2
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 16247,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 4017,
+          "rank": 9,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 16981,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 21453,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 15165,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 14324,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25910": {
+      "seriesId": "25910",
+      "model": "别克至境E7",
+      "launchDate": "2026-04-22",
+      "rankType": "mid_suv",
+      "months": [
+        {
+          "period": "2026-04",
+          "sales": 2562,
+          "rank": 28,
+          "rankType": "mid_suv",
+          "segmentTop3AverageSales": 16459,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "4363",
+              "model": "Model Y",
+              "sales": 22990,
+              "rank": 1
+            },
+            {
+              "seriesId": "25400",
+              "model": "海狮06EV",
+              "sales": 15659,
+              "rank": 2
+            },
+            {
+              "seriesId": "9307",
+              "model": "零跑C10",
+              "sales": 10728,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 7668,
+          "rank": 7,
+          "rankType": "mid_suv",
+          "segmentTop3AverageSales": 18761,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "4363",
+              "model": "Model Y",
+              "sales": 28911,
+              "rank": 1
+            },
+            {
+              "seriesId": "25400",
+              "model": "海狮06EV",
+              "sales": 14868,
+              "rank": 2
+            },
+            {
+              "seriesId": "404",
+              "model": "途观L",
+              "sales": 12503,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 5555,
+          "rank": 13,
+          "rankType": "mid_suv",
+          "segmentTop3AverageSales": 22186,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "4363",
+              "model": "Model Y",
+              "sales": 38654,
+              "rank": 1
+            },
+            {
+              "seriesId": "9307",
+              "model": "零跑C10",
+              "sales": 15097,
+              "rank": 2
+            },
+            {
+              "seriesId": "404",
+              "model": "途观L",
+              "sales": 12806,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "25920": {
+      "seriesId": "25920",
+      "model": "尚界Z7",
+      "launchDate": "2026-04-22",
+      "rankType": "mid_large_car",
+      "months": [
+        {
+          "period": "2026-04",
+          "sales": 152,
+          "rank": 37,
+          "rankType": "mid_large_car",
+          "segmentTop3AverageSales": 14575,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "6187",
+              "model": "小米SU7",
+              "sales": 26826,
+              "rank": 1
+            },
+            {
+              "seriesId": "99",
+              "model": "奥迪A6L",
+              "sales": 9449,
+              "rank": 2
+            },
+            {
+              "seriesId": "214",
+              "model": "奔驰E级",
+              "sales": 7450,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 1176,
+          "rank": 23,
+          "rankType": "mid_large_car",
+          "segmentTop3AverageSales": 13887,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "6187",
+              "model": "小米SU7",
+              "sales": 24023,
+              "rank": 1
+            },
+            {
+              "seriesId": "214",
+              "model": "奔驰E级",
+              "sales": 8928,
+              "rank": 2
+            },
+            {
+              "seriesId": "99",
+              "model": "奥迪A6L",
+              "sales": 8709,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 6296,
+          "rank": 6,
+          "rankType": "mid_large_car",
+          "segmentTop3AverageSales": 12370,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "6187",
+              "model": "小米SU7",
+              "sales": 20414,
+              "rank": 1
+            },
+            {
+              "seriesId": "214",
+              "model": "奔驰E级",
+              "sales": 9600,
+              "rank": 2
+            },
+            {
+              "seriesId": "99",
+              "model": "奥迪A6L",
+              "sales": 7095,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "5828": {
+      "seriesId": "5828",
+      "model": "MG4",
+      "launchDate": "2026-04-24",
+      "rankType": "compact_car",
+      "months": [
+        {
+          "period": "2026-04",
+          "sales": 13189,
+          "rank": 2,
+          "rankType": "compact_car",
+          "segmentTop3AverageSales": 13080,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "10170",
+              "model": "小鹏MONA M03",
+              "sales": 13595,
+              "rank": 1
+            },
+            {
+              "seriesId": "5828",
+              "model": "MG4",
+              "sales": 13189,
+              "rank": 2
+            },
+            {
+              "seriesId": "393",
+              "model": "朗逸",
+              "sales": 12457,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 15067,
+          "rank": 1,
+          "rankType": "compact_car",
+          "segmentTop3AverageSales": 14087,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "5828",
+              "model": "MG4",
+              "sales": 15067,
+              "rank": 1
+            },
+            {
+              "seriesId": "10170",
+              "model": "小鹏MONA M03",
+              "sales": 14160,
+              "rank": 2
+            },
+            {
+              "seriesId": "393",
+              "model": "朗逸",
+              "sales": 13033,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 14397,
+          "rank": 2,
+          "rankType": "compact_car",
+          "segmentTop3AverageSales": 14667,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "393",
+              "model": "朗逸",
+              "sales": 15444,
+              "rank": 1
+            },
+            {
+              "seriesId": "5828",
+              "model": "MG4",
+              "sales": 14397,
+              "rank": 2
+            },
+            {
+              "seriesId": "10170",
+              "model": "小鹏MONA M03",
+              "sales": 14160,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

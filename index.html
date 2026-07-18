@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.02-20260717-sales-warning-global-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.02-20260718-overnight-iteration-1">
   <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
   <link rel="stylesheet" href="douyin-hot-demo.css?v=collector-8">
-  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-20260717-sales-warning-global-1">
-  <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-20260717-sales-warning-global-1">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.02-20260718-overnight-iteration-1">
+  <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-20260718-overnight-iteration-1">
+  <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.02-20260718-overnight-iteration-1">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -51,6 +52,7 @@
           <summary><button class="active nav-parent-link" data-page="dashboard">决策驾驶舱</button></summary>
           <button data-page="brandpenetration">品牌传播穿透</button>
           <button data-page="socialtrends">社媒趋势中心</button>
+          <button data-page="policyintelligence">政策环境分析</button>
         </details>
         <details class="nav-subsection" open>
           <summary>MMN策略输出</summary>
@@ -82,6 +84,7 @@
         <summary>系统设置</summary>
         <button data-page="workspace">空间权限</button>
         <button data-page="config">项目权重</button>
+        <button data-page="eval">Eval评测</button>
         <button data-page="architecture">版本架构</button>
       </details>
     </nav>
@@ -147,16 +150,16 @@
           <button class="ghost" data-page-jump="data">查看数据表</button>
         </div>
       </div>
-      <article id="dashboard-selling-point-input" class="panel selling-point-input-panel" aria-labelledby="selling-point-input-title">
+      <article id="dashboard-selling-point-input" class="panel selling-point-input-panel collapsed" aria-labelledby="selling-point-input-title">
         <div class="panel-title">
           <div><span>企业战略卖点输入</span><h2 id="selling-point-input-title">把品牌语言转换为可监测的用户语言与NSR标签</h2></div>
           <div class="selling-point-panel-actions">
             <label>上市核心车型<select id="selling-point-model-select" aria-label="选择卖点所属的上市核心车型"></select></label>
             <em id="selling-point-input-status">等待集团卖点</em>
-            <button type="button" class="ghost" id="selling-point-panel-toggle" aria-expanded="true" aria-controls="selling-point-input-body">关闭</button>
+            <button type="button" class="ghost" id="selling-point-panel-toggle" aria-expanded="false" aria-controls="selling-point-input-body">展开</button>
           </div>
         </div>
-        <div id="selling-point-input-body">
+        <div id="selling-point-input-body" hidden>
           <form id="selling-point-form" class="selling-point-form">
             <label>企业战略卖点<input name="claim" required placeholder="例如：集团确认的核心产品价值"></label>
             <label>标准标签<input name="tag" list="selling-point-tag-options" placeholder="例如：动力与操控"></label>
@@ -280,6 +283,18 @@
         </form>
         <div id="model-judgment-result" class="model-judgment-result"></div>
       </article>
+    </section>
+
+    <section class="page" id="policyintelligence">
+      <div class="policy-page-shell">
+        <div class="policy-page-intro">
+          <div><span>POLICY INTELLIGENCE · MARKET ENVIRONMENT</span><h2>把政策变化转成车型竞争力与营销机会</h2></div>
+          <p>只使用保留原文、通过人工审核的官方政策规则。行业来源仅辅助验证，不直接形成政策结论。</p>
+        </div>
+        <div id="policy-intelligence-root" aria-live="polite">
+          <div class="policy-loading"><b>正在计算政策环境变量</b><span></span><span></span><span></span></div>
+        </div>
+      </div>
     </section>
 
     <section class="page" id="socialtrends">
@@ -1053,6 +1068,16 @@
       </div>
     </section>
 
+    <section class="page" id="eval">
+      <div class="mmn-eval-page">
+        <div class="section-intro mmn-eval-intro">
+          <div><p class="eyebrow">MMN MODEL QUALITY</p><h2>Eval评测中心</h2><p>用统一证据标准检验MMN策略输出，识别版本回归，并把人工判断沉淀为可复用标签。</p></div>
+          <div class="mmn-eval-page-actions"><button type="button" class="ghost" id="mmn-eval-export">导出报告</button><button type="button" class="primary" id="mmn-eval-run">运行 Eval</button></div>
+        </div>
+        <div id="mmn-eval-root" aria-live="polite"></div>
+      </div>
+    </section>
+
     <section class="page" id="architecture">
       <div class="section-intro">
         <div><p class="eyebrow" id="architecture-eyebrow">DOMESTIC FOUNDATION</p><h2 id="architecture-title">国内版数据源与策略智能架构</h2></div>
@@ -1115,6 +1140,15 @@
       <div class="dialog-head"><h2>新增声量数据</h2><button value="cancel">×</button></div>
       <div id="row-fields" class="form-grid"></div>
       <div class="dialog-actions"><button value="cancel" class="ghost">取消</button><button value="default" class="primary" id="save-row">保存并计算</button></div>
+    </form>
+  </dialog>
+  <dialog id="mmn-eval-review-dialog" class="mmn-eval-review-dialog">
+    <form method="dialog" id="mmn-eval-review-form">
+      <div class="dialog-head"><div><span>CASE DETAIL · HUMAN REVIEW</span><h2 id="mmn-eval-review-title">人工复核</h2></div><button value="cancel" aria-label="关闭人工复核">×</button></div>
+      <div id="mmn-eval-review-body"></div>
+      <label class="mmn-eval-review-note"><span>你的判断理由</span><textarea id="mmn-eval-review-note" placeholder="填写判断理由；驳回时必填。该记录将作为后续 Gold Set 候选标签。"></textarea></label>
+      <div id="mmn-eval-review-message" aria-live="polite"></div>
+      <div class="dialog-actions"><button type="button" class="mmn-eval-reject" id="mmn-eval-review-reject">驳回并标记</button><button type="button" class="primary" id="mmn-eval-review-approve">通过并记录</button></div>
     </form>
   </dialog>
   <dialog id="login-dialog">
@@ -1197,8 +1231,9 @@
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
   <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
-  <script src="app.js?v=beta-1.02-20260716-whitepaper-evidence-1"></script>
-  <script src="group-dashboard.js?v=beta-1.02-20260717-sales-warning-global-1"></script>
+  <script src="app.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
+  <script src="group-dashboard.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
+  <script src="policy-intelligence.js?v=beta-1.02-20260718-overnight-iteration-1"></script>
   <script src="douyin-hot-demo.js?v=collector-8"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>

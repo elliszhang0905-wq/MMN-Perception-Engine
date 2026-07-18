@@ -17,6 +17,7 @@ import time
 import base64
 import hmac
 import html as html_lib
+import math
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -28,6 +29,12 @@ import urllib.robotparser as robotparser
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
+
+from consulting_output import (
+    CONSULTING_OUTPUT_INSTRUCTION,
+    inspect_consulting_output,
+    render_consulting_output,
+)
 
 from bf_factory.exporters import export_brief_docx
 from bf_factory.generation import compose_section_plan, generate_internal_strategy, render_adaptive_brief
@@ -73,6 +80,30 @@ from douyin_hot_entities import (
     save_rank_snapshot as save_douyin_hot_rank_snapshot,
 )
 from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, save_snapshot as save_social_trend_snapshot
+from mmn_eval.dashboard import (
+    load_dashboard_payload as load_mmn_eval_dashboard,
+    run_seed_dashboard as run_mmn_eval_dashboard,
+    save_human_review as save_mmn_eval_human_review,
+)
+from policy_intelligence import (
+    SUPPORTED_POLICY_REGIONS,
+    build_policy_dashboard_payload,
+    build_sales_warning_policy_profiles,
+    cross_validate_policy_strategies,
+    evaluate_policy_analysis,
+    fetch_policy_source,
+    init_policy_schema,
+    list_policy_knowledge_signals,
+    list_policy_records,
+    parse_policy_with_gateway,
+    review_policy,
+    save_policy_analysis_result,
+    save_policy_document,
+    save_policy_fetch_run,
+    save_policy_record,
+    seed_policy_mvp,
+    seed_policy_sources,
+)
 try:
     from creator_distillation.tasks import celery_app as creator_celery_app, enqueue_distillation as _enqueue_distillation
     enqueue_distillation = _enqueue_distillation if creator_celery_app else None
@@ -81,8 +112,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260717-sales-warning-global-1"
-APP_RELEASE_DATE = "2026-07-17"
+APP_VERSION_CODE = "beta-1.02-20260718-overnight-iteration-1"
+APP_RELEASE_DATE = "2026-07-18"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -97,8 +128,8 @@ QWEN_DEFAULT_MODEL = "qwen-plus"
 QWEN_DEFAULT_FAST_MODEL = "qwen-plus"
 QWEN_DEFAULT_DEEP_MODEL = "qwen3.7-max"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
-DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-reasoner"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-v4-pro"
 KIMI_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 KIMI_DEFAULT_MODEL = "kimi-k2.5"
 KIMI_DEFAULT_DEEP_MODEL = "kimi-k2.5"
@@ -230,6 +261,35 @@ def bf_model_gateway(provider, step, request):
         timeout=MMN_DEEP_MODEL_TIMEOUT if step == "STRATEGY_JUDGMENT" else MMN_CRITIC_TIMEOUT,
         max_tokens=6000,
     )
+
+
+def policy_model_gateway(messages):
+    """Extract policy facts only; authority remains with the source and reviewer."""
+    guard = {
+        "role": "system",
+        "content": (
+            "这是MMN政策事实抽取任务。只能返回合法JSON对象，不得补写、推测或创造政策内容；"
+            "所有金额、日期、条件和逐字引句必须来自输入原文。"
+        ),
+    }
+    return call_qwen([guard] + list(messages or []), temperature=.05, profile="fast", timeout=MMN_FAST_MODEL_TIMEOUT)
+
+
+def validate_policy_vehicle_inputs(price_raw, scenario_raw, engine_displacement_raw=None):
+    """Keep GET and POST policy calculations on the same bounded input contract."""
+    price = float(price_raw)
+    if not math.isfinite(price) or price <= 0 or price > 10000000:
+        raise ValueError("车型价格超出政策分析范围。")
+    scenario = str(scenario_raw or "").strip()
+    if scenario not in {"直接购车", "置换更新", "报废更新"}:
+        raise ValueError("购车情景必须为直接购车、置换更新或报废更新。")
+    raw_engine = str(engine_displacement_raw or "").strip()
+    engine_displacement = float(raw_engine) if raw_engine else None
+    if engine_displacement is not None and (
+        not math.isfinite(engine_displacement) or engine_displacement <= 0 or engine_displacement > 20
+    ):
+        raise ValueError("发动机排量超出政策分析范围。")
+    return price, scenario, engine_displacement
 
 def bf_service():
     gateway = bf_model_gateway if BF_MODELS_ENABLED else None
@@ -671,6 +731,9 @@ def init_db():
             primary key (org_id, edition, model)
         );
         """)
+        init_policy_schema(conn)
+        seed_policy_sources(conn)
+        seed_policy_mvp(conn, org_id="local", edition="china")
         migrate_vertical_scope_schema(conn)
         conn.execute("create unique index if not exists idx_vertical_rank_assets_unique on vertical_rank_assets(org_id, edition, platform, period, own_model, competitor_model)")
         conn.execute("create unique index if not exists idx_vehicle_assets_unique on vehicle_assets(org_id, edition, platform, model_name)")
@@ -3264,6 +3327,83 @@ def call_provider(provider, messages, task_type, mode="fast", reviewer=False):
         return call_kimi(messages, temperature=temperature, profile=profile, timeout=MMN_CRITIC_TIMEOUT if reviewer else (MMN_DEEP_MODEL_TIMEOUT if profile == "deep" else MMN_FAST_MODEL_TIMEOUT), max_tokens=1200)
     raise ValueError(f"不支持的模型路由：{provider}")
 
+
+def policy_strategy_messages(dashboard_result):
+    impact = dict((dashboard_result or {}).get("vehicleImpact") or {})
+    packet = {
+        "车型": impact.get("model"),
+        "区域": impact.get("region"),
+        "购车情景": (impact.get("profile") or {}).get("purchaseScenario"),
+        "车型档案": impact.get("profile") or {},
+        "规则测算": {
+            "条件式权益上限": impact.get("maxConditionalBenefit"),
+            "资格确认后权益": impact.get("maxVerifiedBenefit"),
+            "证据状态": impact.get("evidenceStatus"),
+            "因果边界": impact.get("causalBoundary"),
+        },
+        "已审核政策证据": impact.get("policyEffects") or [],
+        "规则引擎机会草案": (dashboard_result or {}).get("opportunities") or [],
+    }
+    system = (
+        "你是MMN区域政策策略验证模型。只能依据输入中的已审核政策证据，独立判断当前车型在所选区域的营销机会；"
+        "不得补写地方政策、车型资格、销量因果或未给出的用户数据。输出单个合法JSON对象，字段必须完整："
+        "policyJudgement(opportunity|conditional|insufficient_evidence)、"
+        "strategyDirection(educate|convert|retain|monitor)、conclusion、targetAudience、action、"
+        "leadingIndicator、conversionIndicator、stopCondition、uncertainty、evidenceIds、confidence(0-1)。"
+        "evidenceIds只能填写输入中policyId；结论必须明确区域、车型、适用条件和不确定性。"
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(packet, ensure_ascii=False)},
+    ]
+
+
+def run_policy_strategy_validation(dashboard_result, provider_runner=None):
+    impact = dict((dashboard_result or {}).get("vehicleImpact") or {})
+    evidence_ids = [item.get("policyId") for item in impact.get("policyEffects") or [] if item.get("policyId")]
+    if not evidence_ids:
+        return {
+            "status": "insufficient_evidence",
+            "providers": {},
+            "providerErrors": {},
+            "reasons": ["当前车型、区域与购车情景没有匹配到已审核政策证据，未调用模型生成结论"],
+            "commonEvidenceIds": [],
+            "finalStrategy": None,
+            "modelNames": {
+                "qwen": qwen_config("deep")["model"],
+                "deepseek": deepseek_config("deep")["model"],
+                "kimi": kimi_config("deep")["model"],
+            },
+        }
+    messages = policy_strategy_messages(dashboard_result)
+
+    def run_one(provider):
+        raw = (
+            provider_runner(provider, messages)
+            if provider_runner
+            else call_provider(provider, messages, "strategy_reasoning", mode="deep")
+        )
+        parsed = parse_json_object(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("%s未返回JSON策略对象" % provider)
+        return parsed
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(run_one, provider) for provider in ("qwen", "deepseek", "kimi")}
+        for provider, future in futures.items():
+            try:
+                outputs[provider] = future.result()
+            except Exception as exc:
+                errors[provider] = str(exc)
+    validated = cross_validate_policy_strategies(outputs, evidence_ids, errors)
+    validated["modelNames"] = {
+        "qwen": qwen_config("deep")["model"],
+        "deepseek": deepseek_config("deep")["model"],
+        "kimi": kimi_config("deep")["model"],
+    }
+    return validated
+
 def normalize_vehicle_config_review(value):
     item = value if isinstance(value, dict) else parse_json_object(value)
     item = item if isinstance(item, dict) else {}
@@ -3606,8 +3746,15 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
     body = {
         "model": cfg["model"],
         "messages": messages,
-        "temperature": temperature
     }
+    is_v4 = str(cfg["model"]).startswith("deepseek-v4-")
+    thinking_enabled = is_v4 and (profile or "").lower() == "deep"
+    if is_v4:
+        body["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
+    if thinking_enabled:
+        body["reasoning_effort"] = "high"
+    else:
+        body["temperature"] = temperature
     if max_tokens:
         body["max_tokens"] = max_tokens
     if response_format:
@@ -3636,7 +3783,10 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
     choices = data.get("choices") or []
     if not choices:
         raise ValueError("DeepSeek 模型无响应。")
-    return choices[0]["message"]["content"]
+    content = str((choices[0].get("message") or {}).get("content") or "").strip()
+    if not content:
+        raise ValueError("DeepSeek 模型未返回最终正文；深度思考可能已耗尽输出 Token，请提高 max_tokens 后重试。")
+    return content
 
 def call_kimi(messages, temperature=.6, profile="fast", timeout=None, max_tokens=None):
     cfg = kimi_config(profile)
@@ -3676,6 +3826,56 @@ def call_kimi(messages, temperature=.6, profile="fast", timeout=None, max_tokens
         raise ValueError("Kimi 模型无响应。")
     return choices[0]["message"]["content"]
 
+def build_brand_consulting_output(implication, framework, facts, source):
+    fact_index = {item["id"]: item for item in facts}
+    retail = fact_index["retail"]
+    nev_retail = fact_index["nev_retail"]
+    penetration = fact_index["nev_penetration"]
+    findings = [
+        "- 集团品牌需要在乘用车总盘承压时优先证明新能源结构价值。[Evidence: E1]",
+        f"- 当前关键矛盾是：{framework['conflict']} [Evidence: E1] [Evidence: E3]",
+        f"- 战略取舍应锁定为：{framework['choice']} [Evidence: E2] [Evidence: E3]",
+    ]
+    evidence = [
+        (
+            f"- E1：乘用车零售 {retail['value']} {retail['unit']}、同比 {int(retail['yoy'] * 100)}%；"
+            f"新能源零售 {nev_retail['value']} {nev_retail['unit']}、同比 {int(nev_retail['yoy'] * 100)}%；"
+            f"新能源渗透率 {penetration['value']}{penetration['unit']}。"
+        ),
+        f"- E2：行业事实来源为{source['label']}，周期为{source['period']}。",
+        "- E3：品牌判断属于基于锁定事实包与集团经营语境形成的策略推断；当前未接入品牌财务、渠道实绩和专项转化数据。",
+    ]
+    actions = [
+        f"- P0｜最高优先级｜{framework['priority']}",
+        f"- P1｜0—30天｜{framework['phase1']}",
+        f"- P2｜31—60天｜{framework['phase2']}",
+        f"- P3｜61—90天｜{framework['phase3']}",
+        f"- 责任机制｜{framework['owner']}",
+        f"- 验证指标｜领先指标：{framework['leading']}；转化指标：{framework['conversion']}；风险阈值：{framework['threshold']}；纠偏动作：{framework['correction']}",
+    ]
+    strategic_implication = f"{framework['choice']} 这会直接影响传播预算配置、购买理由建立与线索承接效率。"
+    rendered = render_consulting_output(
+        implication["summaryDetail"], findings, evidence, strategic_implication, actions
+    )
+    return {
+        "executiveConclusion": implication["summaryDetail"],
+        "keyFindings": [
+            {"id": "F1", "text": findings[0][2:], "evidenceIds": ["E1"]},
+            {"id": "F2", "text": findings[1][2:], "evidenceIds": ["E1", "E3"]},
+            {"id": "F3", "text": findings[2][2:], "evidenceIds": ["E2", "E3"]},
+        ],
+        "evidence": [
+            {"id": "E1", "text": evidence[0][2:]},
+            {"id": "E2", "text": evidence[1][2:]},
+            {"id": "E3", "text": evidence[2][2:]},
+        ],
+        "strategicImplication": strategic_implication,
+        "actionRecommendation": actions,
+        "renderedText": rendered,
+        "quality": inspect_consulting_output(rendered),
+    }
+
+
 def executive_brief_evidence_packet():
     facts = [
         {"id": "retail", "label": "乘用车零售", "value": 44.3, "unit": "万辆", "yoy": -0.15, "priorValue": 52.1},
@@ -3694,6 +3894,31 @@ def executive_brief_evidence_packet():
         {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
         {"id": "penetration_buffer", "title": "新能源结构占比", "detail": "新能源零售渗透率为63.1%"},
     ]
+    brand_implications = [
+        {"id": "im", "brand": "智己", "summaryDetail": "双旗舰模型一致认为，智己本阶段应把高端新能源心智拆成可感知的驾控、智能、补能与豪华体验，判断重点从参数领先转向用户是否形成明确换购理由。", "actionDetail": "内容执行按核心车型建立人群分层：高意向用户优先承接试驾与换购，观望用户用真实场景和车主证言解释技术价值，并按周淘汰无效技术表达。", "signalDetail": "复盘需同时看品牌搜索、试驾线索、换购人群占比、优势属性提及率和高意向评论；只有认知与线索同步改善，才判定传播有效。"},
+        {"id": "mg", "brand": "MG", "summaryDetail": "双旗舰模型一致认为，MG必须把国内年轻化经营与海外交付经营拆开判断，避免用全球销量或单一运动标签替代区域需求、终端价格和库存质量。", "actionDetail": "国内内容围绕通勤、旅行和个性表达组织；海外按重点区域逐一匹配车型、现车、渠道承接和上市节奏，传播排期必须服从真实交付能力。", "signalDetail": "国内按周追踪年轻人群搜索与互动，海外同步监测区域订单、库存周转、交付周期、运价和终端价格，出现库存与传播错配时及时降档。"},
+        {"id": "roewe", "brand": "荣威", "summaryDetail": "双旗舰模型一致认为，荣威需要重建主流家庭用户的购买确定性，把空间、舒适、可靠、能耗与长期成本组织成可比较的价值体系，而不是继续依赖优惠形成短期刺激。", "actionDetail": "围绕家庭通勤、亲子和跨城三个高频场景形成同价位证据包，明确每个场景的产品证明、车主证言与到店承接，并将优惠降为成交辅助信息。", "signalDetail": "复盘同时观察家庭人群内容渗透、核心产品点NSR、试驾和换购线索、价格敏感评论及成交转化，防止声量提升但价值认知没有建立。"},
+        {"id": "vw", "brand": "大众", "summaryDetail": "双旗舰模型一致认为，上汽大众要以两套经营逻辑分别管理燃油基本盘和新能源认知转换：前者稳信任与保有体验，后者补智能与本土场景适配。", "actionDetail": "燃油产品集中表达品质、保值、服务网络和换购权益；新能源产品用真实对比解释座舱、辅助驾驶、补能与空间，不混用一套内容和转化指标。", "signalDetail": "每周并行追踪燃油换购留存、新能源搜索占比、智能化属性NSR和试驾线索，并观察两类用户迁移方向，识别基本盘流失或新能源承接不足。"},
+        {"id": "audi", "brand": "AUDI", "summaryDetail": "双旗舰模型一致认为，上汽奥迪必须把传统豪华信任转译为新能源购买理由；E7X应以设计、驾控、智能、舒适和场景体验的相对优势建立新认知。", "actionDetail": "执行上按总体声量、平台NSR、属性VOC和竞品差距形成闭环：先补传播规模，再放大已验证优势，并为弱势平台单独匹配内容语言、达人和试驾证据。", "signalDetail": "复盘同时看E7X总体声量、全网及分平台NSR、核心属性提及、竞品共同比较、试驾预约和豪华新能源人群渗透，避免只用单一声量判断。"},
+        {"id": "buick", "brand": "别克", "summaryDetail": "双旗舰模型一致认为，别克要重新连接家庭出行优势与新能源转型，降低价格信息对品牌价值的遮蔽，并明确燃油、插混和纯电各自适用的人群与场景。", "actionDetail": "三种能源形式分别建立家庭场景证据、使用成本解释和车主口碑，增加长期用车与服务保障内容；泛化优惠只承担临门转化，不再占据主叙事。", "signalDetail": "按能源形式拆分家庭人群好感、价格负面评论、核心属性NSR、到店试驾和置换成交，判断价值认知是否真正改善而非被促销短暂拉动。"},
+        {"id": "cadillac", "brand": "凯迪拉克", "summaryDetail": "双旗舰模型一致认为，凯迪拉克当前首要任务是阻止价格叙事继续侵蚀豪华价值、保值预期与老用户信心，新能源转型不能再以折扣代替体验解释。", "actionDetail": "控制优惠内容占比，集中放大设计、驾控、舒适、静谧与服务体验；新能源产品必须增加真实场景试驾和可核验技术证据，建立同级差异。", "signalDetail": "周度复盘价格相关声量占比、豪华属性NSR、保值焦虑、老用户情绪、试驾线索和新能源迁移率；若价格声量上升而豪华认知下降，应立即收缩促销叙事。"},
+        {"id": "maxus", "brand": "大通", "summaryDetail": "双旗舰模型一致认为，上汽大通要把商用、皮卡与海外增长拆成区域和车型机会，出口规模不能替代订单质量、库存、运力、渠道能力与利润稳定性的经营判断。", "actionDetail": "按重点国家和区域建立车型机会清单，让内容场景、行业用途、经销商承接和交付节奏一致；高库存或运力受限区域不得继续无差别放大传播。", "signalDetail": "周度追踪区域订单、车型结构、库存周转、交付周期、运价、终端价格和内容反馈，用订单与交付的同步性决定区域传播资源增减。"},
+        {"id": "wuling", "brand": "五菱", "summaryDetail": "双旗舰模型一致认为，五菱下一阶段要从规模与亲民价格升级到长期可信赖的产品价值，重点补强品质、安全、空间、能耗和家庭场景认知。", "actionDetail": "围绕代步、接送、家庭短途和县域出行沉淀真实用户内容，把低成本优势与品质安全证据绑定；主力车型分工必须清楚，避免新品互相稀释认知。", "signalDetail": "按周观察新能源规模、品质与安全NSR、真实车主口碑、县域覆盖、复购换购和主力车型认知集中度，确认规模优势是否转化为品牌资产。"},
+    ]
+    brand_frameworks = {
+        "智己": {"conflict": "技术配置具备传播素材，但参数声量尚未稳定转化为豪华新能源换购理由。", "choice": "资源从泛参数教育转向高意向家庭的驾控、智能、补能与豪华体验证明。", "priority": "先建立一套可复制的核心车型换购证据包，再扩大媒介覆盖。", "phase1": "锁定高意向与观望两类人群，完成核心场景、竞品异议和证明素材清单。", "phase2": "集中投放试驾、车主证言与场景对比，按平台淘汰低转化表达。", "phase3": "把有效内容固化为经销商承接话术，并按区域复制。", "owner": "品牌、产品、媒介与销售共同维护同一张证据—线索看板。", "leading": "品牌搜索、优势属性提及率、高意向评论占比。", "conversion": "试驾预约、换购线索、有效线索到店率。", "threshold": "连续两周声量增长但试驾或换购线索不增长，即判定表达失效。", "correction": "暂停低效参数内容，把预算转向已验证场景与高转化平台。"},
+        "MG": {"conflict": "国内年轻化心智和海外交付质量属于两套问题，现有总量叙事容易掩盖区域差异。", "choice": "国内经营品牌偏好，海外经营区域订单、库存和交付，不再共用一个成功指标。", "priority": "建立国内内容增长与海外区域交付两张独立经营表。", "phase1": "国内明确年轻用户三类场景；海外按国家核对车型、库存、现车和渠道能力。", "phase2": "国内放大高互动场景；海外只在订单、库存和交付承接匹配的区域投放。", "phase3": "沉淀区域打法并形成传播排期与供应交付的联动机制。", "owner": "国内品牌团队与海外区域负责人分别担责，集团层统一看资源回报。", "leading": "国内年轻人群搜索互动；海外区域询盘、经销商反馈和库存变化。", "conversion": "国内试驾与线索；海外订单、交付周期与库存周转。", "threshold": "海外库存上升或交付周期恶化时仍扩大传播，即触发红色预警。", "correction": "暂停区域增量投放，先修正现车、价格和经销商承接。"},
+        "荣威": {"conflict": "优惠可以制造短期成交，但持续放大会削弱家庭用户对产品价值和长期成本的判断。", "choice": "从价格驱动转向空间、舒适、可靠、能耗和服务保障的家庭价值证明。", "priority": "用三类家庭场景重建同价位可比较的购买确定性。", "phase1": "完成通勤、亲子、跨城三套证据包及同价位竞品对比。", "phase2": "联动车主内容、试驾路线和门店话术验证各证据的转化效率。", "phase3": "把高转化证据固化为主传播资产，优惠降为临门成交工具。", "owner": "产品营销提供证据，内容团队完成转译，销售端回传异议与成交原因。", "leading": "家庭人群内容渗透、核心产品点NSR、价值词提及率。", "conversion": "到店试驾、换购线索、成交转化与优惠依赖度。", "threshold": "价格声量上升且产品价值NSR连续两周下降时触发预警。", "correction": "降低促销曝光，补充品质、成本和售后服务的可验证内容。"},
+        "大众": {"conflict": "燃油基本盘与新能源认知转换处于不同阶段，混用内容和指标会同时削弱两边效率。", "choice": "燃油守信任、保值和服务网络；新能源补智能化和本土使用场景。", "priority": "建立双业务线、双内容体系、双转化指标，集团层只合并资源回报。", "phase1": "拆分燃油与新能源目标人群、核心异议、证据资产和渠道任务。", "phase2": "燃油强化换购承接；新能源集中验证座舱、智驾、补能与空间内容。", "phase3": "根据用户迁移方向调整车型组合与媒介预算。", "owner": "两条产品线分别负责结果，品牌中台负责口径一致与资源冲突管理。", "leading": "燃油信任与保值词、新能源搜索占比、智能属性NSR。", "conversion": "燃油换购留存、新能源试驾线索及跨能源迁移率。", "threshold": "新能源声量增长但智能属性NSR或试驾线索连续两周不升时触发预警。", "correction": "停止泛品牌曝光，回到具体智能场景、真实对比和门店体验。"},
+        "AUDI": {"conflict": "传统豪华信任可以降低认知门槛，但不会自动形成新能源购买偏好。", "choice": "以E7X的设计、驾控、智能、舒适和场景体验重建豪华新能源差异。", "priority": "先补总体声量规模，再按平台NSR和属性VOC放大已验证优势。", "phase1": "确认各平台声量、NSR、优势属性与竞品差距，形成差异化任务表。", "phase2": "为弱势平台配置专属内容语言、达人类型和试驾证据。", "phase3": "把有效优势资产同步到媒介、门店和车主运营，形成持续复利。", "owner": "品牌统筹定位，产品提供证据，媒介和销售分别负责认知与线索闭环。", "leading": "总体声量、分平台NSR、核心属性提及和竞品共同比较率。", "conversion": "试驾预约、豪华新能源人群渗透和有效线索率。", "threshold": "声量进入前三但全网NSR或试驾转化未改善时触发预警。", "correction": "削减泛曝光，将预算转向优势属性内容和高意向试驾承接。"},
+        "别克": {"conflict": "长期促销强化价格记忆，家庭出行优势和新能源价值没有形成稳定连接。", "choice": "按燃油、插混、纯电分别解释适用人群、使用场景和长期成本。", "priority": "重建家庭购买理由，价格只承担最后一公里转化。", "phase1": "拆分三种能源形式的目标家庭、核心异议与成本证据。", "phase2": "增加车主口碑、长期用车和服务保障内容，并联动门店试驾。", "phase3": "根据能源形式的线索质量与成交表现重新配置预算。", "owner": "产品线负责证据，品牌负责家庭价值框架，销售负责能源选择与成交反馈。", "leading": "家庭人群好感、能源认知、核心属性NSR和价格负面评论。", "conversion": "分能源试驾、到店、置换和成交率。", "threshold": "促销声量占比上升且品牌好感或核心属性NSR下降时触发预警。", "correction": "限制泛优惠传播，补充场景价值、使用成本与服务保障证据。"},
+        "凯迪拉克": {"conflict": "价格信息持续压过豪华价值，正在放大保值焦虑并影响老用户信心。", "choice": "控制折扣叙事，以设计、驾控、舒适、静谧和服务重建豪华价值。", "priority": "先止住价格对品牌资产的侵蚀，再推动新能源体验认知。", "phase1": "审计价格内容占比、保值焦虑来源和豪华属性缺口。", "phase2": "集中上线豪华体验、真实试驾和可核验技术证据。", "phase3": "联动老用户运营与新能源转化，持续修复保值与信任。", "owner": "品牌负责人管理价格叙事上限，销售和经销商同步执行统一口径。", "leading": "价格相关声量占比、豪华属性NSR、保值焦虑和老用户情绪。", "conversion": "试驾线索、新能源迁移率、高价值车型成交结构。", "threshold": "价格声量连续两周上升且豪华属性NSR下降即触发红色预警。", "correction": "立即收缩促销内容，增加豪华体验证据与老用户沟通。"},
+        "大通": {"conflict": "出口总量能够说明规模，但无法反映区域订单质量、库存、运力、渠道和利润风险。", "choice": "从总量管理转向国家—区域—车型三级机会与交付管理。", "priority": "建立区域车型机会清单，让传播资源服从真实订单和交付能力。", "phase1": "核对重点国家的车型需求、库存、运力、渠道和终端价格。", "phase2": "只在交付承接健康区域放大行业场景和车型内容。", "phase3": "按订单质量与利润贡献动态调整国家优先级。", "owner": "海外区域负责人对订单交付负责，品牌和供应链共同确认传播窗口。", "leading": "区域询盘、经销商反馈、内容响应和订单结构。", "conversion": "订单、库存周转、交付周期、运价和终端价格。", "threshold": "库存或交付周期恶化但传播仍加码时触发红色预警。", "correction": "暂停该区域增量传播，优先处理库存、运力和渠道承接。"},
+        "五菱": {"conflict": "规模与亲民价格形成广泛认知，但品质、安全和长期信赖尚未同步沉淀。", "choice": "从价格普及者升级为家庭长期可信赖的国民新能源品牌。", "priority": "把品质安全证据嵌入代步、接送、家庭短途和县域出行内容。", "phase1": "明确主力车型分工，整理品质、安全、空间与能耗证据。", "phase2": "用真实车主内容覆盖四类高频场景，减少新品间认知稀释。", "phase3": "把高口碑资产用于复购换购和县域渠道长期运营。", "owner": "品牌管理车型心智分工，产品与质量团队提供证据，渠道负责场景承接。", "leading": "品质安全NSR、车主口碑、县域人群覆盖和主力车型认知集中度。", "conversion": "复购换购、试驾线索与主力车型成交结构。", "threshold": "销量扩张但品质安全NSR或车型认知集中度连续两周下降时触发预警。", "correction": "减少价格与新品泛曝光，集中补强品质安全和主力车型分工。"},
+    }
+    for implication in brand_implications:
+        framework = brand_frameworks[implication["brand"]]
+        implication["consultingOutput"] = build_brand_consulting_output(implication, framework, facts, source)
     actions = [
         {
             "id": "p1",
@@ -3758,12 +3983,13 @@ def executive_brief_evidence_packet():
         {"id": "vehicle_data_gap", "type": "data_coverage", "detail": "除AUDI E7X外，当前名单车型尚未接入同口径声量、平台NSR与属性VOC。"},
     ]
     candidate = "乘用车零售与批发同比均下降，且批发降幅大于零售；新能源零售降幅小于乘用车总体，零售渗透率为63.1%。"
-    fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
+    fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "brandImplications": brand_implications, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
     return {
         "facts": facts,
         "source": source,
         "candidate": candidate,
         "inferences": inferences,
+        "brandImplications": brand_implications,
         "actions": actions,
         "actionEvidence": action_evidence,
         "launchVehicles": launch_vehicles,
@@ -3778,12 +4004,14 @@ def executive_brief_review_prompt(packet):
         "source": packet["source"],
         "candidateSummary": packet["candidate"],
         "mmnInferences": packet["inferences"],
+        "mmnBrandImplications": packet["brandImplications"],
         "mmnActions": packet["actions"],
         "actionEvidence": packet["actionEvidence"],
         "launchVehicles": packet["launchVehicles"],
         "vehicleActions": packet["vehicleActions"],
         "requiredEvidenceIds": ["retail", "wholesale", "nev_retail", "nev_penetration"],
         "requiredInferenceIds": ["retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"],
+        "requiredBrandImplicationIds": [item["id"] for item in packet["brandImplications"]],
         "requiredActionIds": ["p1", "p2", "p3"],
         "requiredVehicleActionIds": [item["id"] for item in packet["vehicleActions"]],
     }
@@ -3794,10 +4022,11 @@ def executive_brief_review_prompt(packet):
                 "你是MMN集团管理摘要的独立质检模型。只检查给定摘要是否被锁定事实支持，不得修改数字、出处或摘要文本。"
                 "重点检查数字一致性、推理边界、因果是否过度、管理层表述是否准确。"
                 "只输出JSON对象：approved(boolean)、summary(必须原样返回candidateSummary)、factsFingerprint、"
-                "evidenceIds(string数组)、inferenceIds(string数组)、actionIds(string数组)、vehicleActionIds(string数组)、issues(string数组)。"
-                "若approved=true，evidenceIds、inferenceIds、actionIds、vehicleActionIds必须分别原样复制用户消息中的四个required列表，禁止返回空数组；"
+                "evidenceIds(string数组)、inferenceIds(string数组)、brandImplicationIds(string数组)、actionIds(string数组)、vehicleActionIds(string数组)、issues(string数组)。"
+                "若approved=true，evidenceIds、inferenceIds、brandImplicationIds、actionIds、vehicleActionIds必须分别原样复制用户消息中的五个required列表，禁止返回空数组；"
                 "若任一required项未通过，必须approved=false并在issues说明。"
-                "summary和mmnInferences必须被lockedFacts支持；mmnActions和vehicleActions必须被lockedFacts或actionEvidence支持。"
+                "summary和mmnInferences必须被lockedFacts支持；mmnBrandImplications、mmnActions和vehicleActions必须遵守lockedFacts或actionEvidence的数据边界，不得把策略建议伪装成已发生事实。"
+                "mmnBrandImplications中的consultingOutput必须严格遵守五层金字塔、判断到Evidence编号关联与MECE不重复要求；任一quality未通过必须approved=false。"
                 "launch_roster属于集团排期配置项，只验证动作是否遵守数据边界，不验证名单的公开上市真实性。"
                 "任何证据不足或措辞越界都必须approved=false。"
             ),
@@ -3809,20 +4038,29 @@ def normalize_executive_brief_review(raw, packet):
     parsed = parse_json_object(raw)
     if not isinstance(parsed, dict):
         return False
+    framework_outputs_valid = all(
+        item.get("consultingOutput", {}).get("quality", {}).get("passed") is True
+        and item.get("consultingOutput", {}).get("quality", {}).get("mecePassed") is True
+        for item in packet["brandImplications"]
+    )
     evidence_ids = {str(item) for item in parsed.get("evidenceIds") or []}
     inference_ids = {str(item) for item in parsed.get("inferenceIds") or []}
+    brand_implication_ids = {str(item) for item in parsed.get("brandImplicationIds") or []}
     action_ids = {str(item) for item in parsed.get("actionIds") or []}
     vehicle_action_ids = {str(item) for item in parsed.get("vehicleActionIds") or []}
     required_ids = {"retail", "wholesale", "nev_retail", "nev_penetration"}
     required_inference_ids = {"retail_pressure", "wholesale_pressure", "nev_resilience", "penetration_buffer"}
+    required_brand_implication_ids = {item["id"] for item in packet["brandImplications"]}
     required_action_ids = {"p1", "p2", "p3"}
     required_vehicle_action_ids = {item["id"] for item in packet["vehicleActions"]}
     return bool(
-        parsed.get("approved") is True
+        framework_outputs_valid
+        and parsed.get("approved") is True
         and str(parsed.get("summary") or "").strip() == packet["candidate"]
         and str(parsed.get("factsFingerprint") or "") == packet["fingerprint"]
         and required_ids.issubset(evidence_ids)
         and required_inference_ids.issubset(inference_ids)
+        and required_brand_implication_ids.issubset(brand_implication_ids)
         and required_action_ids.issubset(action_ids)
         and required_vehicle_action_ids.issubset(vehicle_action_ids)
         and not (parsed.get("issues") or [])
@@ -3859,6 +4097,7 @@ def public_executive_brief_state(packet, cached=None):
         "summary": packet["candidate"] if status == "verified" else "",
         "facts": packet["facts"],
         "inferences": packet["inferences"] if status == "verified" else [],
+        "brandImplications": packet["brandImplications"] if status == "verified" else [],
         "actions": packet["actions"] if status == "verified" else [],
         "launchVehicles": packet["launchVehicles"] if status == "verified" else [],
         "vehicleActions": packet["vehicleActions"] if status == "verified" else [],
@@ -4132,6 +4371,112 @@ SALES_WARNING_T_CYCLE_PHASES = (
     {"key": "validation", "label": "销售验证期", "range": "T+91～T+120", "start": 91, "end": 120},
     {"key": "alwayson", "label": "常态经营期", "range": "T+121起", "start": 121, "end": None},
 )
+SALES_WARNING_CYCLES_LOCK = Lock()
+
+
+def sales_warning_cycles_path():
+    return DATA_DIR / "sales_warning_cycles.json"
+
+
+def load_sales_warning_cycles():
+    path = sales_warning_cycles_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def sales_warning_history_path():
+    return DATA_DIR / "dongchedi_sales" / "sales_warning_history.json"
+
+
+def load_sales_warning_history():
+    path = sales_warning_history_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def attach_sales_warning_history(warning, cycles=None, history=None):
+    """Attach read-only launch-aware monthly history to warning vehicle rows."""
+    if not isinstance(warning, dict):
+        return warning
+    cycles = cycles if isinstance(cycles, dict) else load_sales_warning_cycles()
+    history = history if isinstance(history, dict) else load_sales_warning_history()
+    vehicles = history.get("vehicles") if isinstance(history.get("vehicles"), dict) else {}
+    window_periods = [str(value) for value in (history.get("windowPeriods") or []) if re.fullmatch(r"\d{4}-\d{2}", str(value))]
+    source = {
+        "label": str(history.get("sourceLabel") or "懂车帝月销量榜"),
+        "url": str(history.get("sourceUrl") or DONGCHEDI_SALES_BASE + "/sales"),
+        "updatedAt": str(history.get("updatedAt") or ""),
+    }
+    for item in warning.get("saicModels") or []:
+        series_id = str(item.get("seriesId") or "")
+        cycle = cycles.get(series_id) if isinstance(cycles.get(series_id), dict) else {}
+        launch_date = str(cycle.get("launchDate") or "")
+        launch_period = launch_date[:7] if re.fullmatch(r"\d{4}-\d{2}-\d{2}", launch_date) else ""
+        vehicle = vehicles.get(series_id) if isinstance(vehicles.get(series_id), dict) else {}
+        raw_months = vehicle.get("months") if isinstance(vehicle.get("months"), list) else []
+        months = []
+        for month in raw_months:
+            period = str(month.get("period") or "") if isinstance(month, dict) else ""
+            if not re.fullmatch(r"\d{4}-\d{2}", period) or (launch_period and period < launch_period):
+                continue
+            top3_vehicles = []
+            for vehicle_row in (month.get("segmentTop3Vehicles") or [])[:3]:
+                if not isinstance(vehicle_row, dict):
+                    continue
+                top3_vehicles.append({
+                    "model": str(vehicle_row.get("model") or ""),
+                    "sales": max(0, dongchedi_sales_count(vehicle_row.get("sales"))),
+                    "rank": max(0, dongchedi_sales_count(vehicle_row.get("rank"))),
+                })
+            months.append({
+                "period": period,
+                "sales": max(0, dongchedi_sales_count(month.get("sales"))),
+                "rank": max(0, dongchedi_sales_count(month.get("rank"))),
+                "segmentTop3AverageSales": max(0, dongchedi_sales_count(month.get("segmentTop3AverageSales"))),
+                "segmentTop3Vehicles": top3_vehicles,
+            })
+        months = sorted(months, key=lambda value: value["period"])[-6:]
+        expected_periods = [period for period in window_periods[-6:] if not launch_period or period >= launch_period]
+        available_periods = {month["period"] for month in months}
+        missing_periods = [period for period in expected_periods if period not in available_periods]
+        status = "available" if months and not missing_periods else "partial" if months else "unavailable"
+        scope_label = f"上市后 {len(months)} 个月" if launch_period and len(expected_periods) < 6 else "近6个月"
+        item["salesHistory"] = {
+            "status": status,
+            "scopeLabel": scope_label,
+            "launchDate": launch_date,
+            "latestPeriod": str(history.get("latestPeriod") or ""),
+            "months": months,
+            "missingPeriods": missing_periods,
+            "source": source,
+        }
+    return warning
+
+
+def save_sales_warning_cycle(conclusion, reviewed_at=""):
+    series_id = str((conclusion or {}).get("seriesId") or "").strip()
+    if not series_id:
+        raise ValueError("缺少车型序列ID，不能保存上市日期。")
+    record = {**conclusion, "status": "verified", "reviewedAt": str(reviewed_at or "")}
+    with SALES_WARNING_CYCLES_LOCK:
+        payload = load_sales_warning_cycles()
+        payload[series_id] = record
+        path = sales_warning_cycles_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    return record
 
 
 def sales_warning_cycle_packet(model, launch_date, assessment_date=None, series_id=""):
@@ -4375,45 +4720,45 @@ MMN_OUTPUT_STYLE = (
     "避免空泛词：赋能、闭环、生态、抓手、矩阵、势能、心智占领，除非后面给出具体动作。"
 )
 
+MMN_STRATEGY_OUTPUT_STYLE = MMN_OUTPUT_STYLE + CONSULTING_OUTPUT_INSTRUCTION
+
 def llm_strategy_prompt(context, engine_name):
     if context.get("drillType") == "strategy_ppt_brief":
         system = (
             f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
             "这是一份内容资产中心的策略PPT方案交付。你必须综合调用输入中的决策驾驶舱、声量数据中心、垂媒竞争格局、抖音/小红书内容资产、达人蒸馏资产、人工学习和RAG知识。"
-            "输出必须严格使用10个小标题："
-            "### 1. 封面；### 2. 核心结论；### 3. 当前核心问题；### 4. 认知资产 / 负债 / 空位；### 5. 垂媒竞争格局；"
-            "### 6. 声量与用户情绪；### 7. 抖音内容打法；### 8. 小红书内容打法；### 9. 达人脚本与内容资产；### 10. 行动节奏与KPI。"
+            "在五层框架内覆盖当前核心问题、认知资产/负债/空位、垂媒竞争格局、声量与情绪、抖音/小红书打法、达人脚本、行动节奏与KPI，不得新增并列三级标题。"
             "不要输出底层模型名称，不要输出“数据缺口”“依据不足”“尚未同步”“尚未创建任务”等字样。"
             "语气要像专业汽车营销咨询方案：有判断、有依据、有动作，但必须通俗易懂。"
-            + MMN_OUTPUT_STYLE
+            + MMN_STRATEGY_OUTPUT_STYLE
         )
     elif context.get("drillType") == "content_asset_strategy":
         system = (
             f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
             "这是一份内容资产中心的外显策略交付。你必须综合调用输入中的三大上游板块：决策驾驶舱、声量数据中心、垂媒竞争格局，再结合抖音/小红书内容资产归类。"
-            "输出必须只包含：核心营销结论、三大数据依据、营销动作、KPI。"
+            "在五层框架内覆盖核心营销结论、三大数据依据、营销动作和KPI，不得新增并列三级标题。"
             "不要输出“数据缺口”“依据不足”“尚未同步”“尚未创建任务”等字样；缺失项只作为内部质量判断，不进入外显策略。"
             "底层模型名称不要作为主标题，统一以MMN模型策略口径交付。"
             "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
-            + MMN_OUTPUT_STYLE
+            + MMN_STRATEGY_OUTPUT_STYLE
         )
     elif context.get("drillType") == "cognition_strategy":
         system = (
             f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
             "这是一份认知赛道诊断页面的外显策略交付。你必须综合调用输入中的决策驾驶舱、声量数据中心、垂媒竞争格局，并围绕认知资产、认知负债、认知空位给出策略。"
-            "输出必须只包含：核心认知判断、资产负债机会、策略动作、KPI。"
+            "在五层框架内覆盖核心认知判断、资产负债机会、策略动作和KPI，不得新增并列三级标题。"
             "外显主标题和语气统一为MMN多模态策略输出；底层模型名称只能作为交叉验证过程，不要作为策略主标题。"
             "必须体现MMN主控负责主策略、MMN质检负责风险和过度承诺复核的交叉验证逻辑。"
             "不要编造不存在的具体数值，但可以基于已有上游数据做专业营销判断。"
-            + MMN_OUTPUT_STYLE
+            + MMN_STRATEGY_OUTPUT_STYLE
         )
     else:
         system = (
             f"你是MMN汽车营销引擎中的{engine_name}策略专家。"
             "请基于输入的数据拆解、词云、know-how、learning与RAG引用，生成可执行、可复盘的中文汽车营销建议。"
-            "必须包含：核心判断、关键触发点、内容策略、平台动作、证据链、KPI。"
+            "在五层框架内覆盖核心判断、关键触发点、内容策略、平台动作、证据链和KPI，不得新增并列三级标题。"
             "不要编造不存在的数据；如果依据不足，请明确说明。"
-            + MMN_OUTPUT_STYLE
+            + MMN_STRATEGY_OUTPUT_STYLE
         )
     user = "请基于以下本地声量拆解生成策略：\n" + json.dumps(context, ensure_ascii=False, indent=2)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -5114,18 +5459,30 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         creators = (knowledge.get("creatorAssets") or []) + (knowledge.get("distilledBloggerAssets") or [])
         creator_names = " / ".join([x.get("name") for x in creators if x.get("name")][:3]) or "评测型达人、生活方式达人、真实车主"
         category = summary.get("topCategory") or top_label
-        return "\n\n".join([
-            "### 1. 封面\n" + f"{model} 内容资产与营销策略方案\nMMN多模态策略输出｜面向品牌市场、市场转化与达人合作团队",
-            "### 2. 核心结论\n" + f"{model} 的内容策略不能只看发布量，而要把“{top_label}”做成用户能理解的购买理由。下一轮传播建议采用“证据先行、场景解释、竞品校准”的打法：先修复“{risk_label}”，再放大已有正向认知。",
-            "### 3. 当前核心问题\n" + f"用户已经把 {model} 放进 {competitor_text} 的比较池。真正的问题不是用户没看到车型，而是看到之后还缺少一句稳定判断：为什么在同样预算、同样使用场景下，选择 {model} 更合理。",
-            "### 4. 认知资产 / 负债 / 空位\n" + f"资产：围绕“{top_label}”继续放大，把它变成短视频标题、垂媒解释和品牌传播口径。\n负债：围绕“{risk_label}”先给证据，不急着喊卖点。\n空位：把竞品没有讲透的家庭、通勤、长途、补能、智能驾驶边界，转成用户能马上代入的选择题。",
-            "### 5. 垂媒竞争格局\n" + (f"{relation.get('platform','垂媒')} {relation.get('period','当前周期')}显示，{model}与{relation.get('competitor', competitor_text)}处在“{relation.get('status','竞争对比')}”关系。垂媒内容要少讲配置清单，多讲用户为什么会把两台车放在一起比。" if relation else f"垂媒格局用于校准比较语境：{model}不是孤立被讨论，而是在与{competitor_text}的真实选择关系中被评价。"),
-            "### 6. 声量与用户情绪\n" + f"主平台建议优先看 {top_platform}。当前内容资产主类为“{category}”；策略上要把高声量内容从“看热闹”改成“能帮用户做决定”。如果声量集中在争议点，就用第三方实测和真实车主回答；如果声量集中在卖点，就用场景化脚本提高转化效率。",
-            "### 7. 抖音内容打法\n" + f"抖音负责把疑虑拍成验证。建议三类脚本：第一类“一个疑虑一个实测”，第二类“一个竞品一个同场景对比”，第三类“一个场景一个车主回答”。标题不要写抽象卖点，直接写用户会搜的问题，例如“为什么这台车值得试驾”。",
-            "### 8. 小红书内容打法\n" + "小红书负责把决策材料沉淀下来。建议做家庭用车账本、通勤体验、长途补能、老人小孩乘坐、智能驾驶接管边界、真实花费清单。每篇笔记都要能被收藏，并且能被品牌和达人二次复用。",
-            "### 9. 达人脚本与内容资产\n" + f"达人组合建议调用：{creator_names}。评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。脚本资产统一沉淀为五段式：疑虑开场、实测证据、竞品对比、适合人群、试驾行动。当前内容资产可先围绕“{category}”做第一批脚本库。",
-            "### 10. 行动节奏与KPI\n" + "7天：完成自动抓取、分类和脚本方向筛选；14天：上线疑虑验证内容和达人同场景对比；30天：复盘内容质量与线索转化。\nKPI：核心标签正向声量提升、负向疑虑评论占比下降、竞品对比搜索提升、收藏/评论质量提升、试驾/询价线索提升。\n策略复核：方案已按可验证证据、竞品关系和内容资产复用价值完成校准。"
-        ])
+        relation_evidence = (
+            f"{relation.get('platform','垂媒')} {relation.get('period','当前周期')}显示，{model}与"
+            f"{relation.get('competitor', competitor_text)}处在“{relation.get('status','竞争对比')}”关系。"
+            if relation else f"当前垂媒资料仅能确认 {model} 处在与 {competitor_text} 的比较语境，具体排名待补。"
+        )
+        return render_consulting_output(
+            f"{model}应采用“证据先行、场景解释、竞品校准”的内容策略：先修复“{risk_label}”，再放大“{top_label}”。",
+            [
+                f"- 当前阻力不是曝光不足，而是用户缺少选择 {model} 的稳定购买理由。[Evidence: E1]",
+                f"- 认知资产应围绕“{top_label}”放大，认知负债应围绕“{risk_label}”优先修复。[Evidence: E1]",
+                f"- 内容资源应优先配置在 {top_platform}，并围绕真实竞品比较关系组织表达。[Evidence: E2] [Evidence: E3]",
+            ],
+            [
+                f"- E1：决策驾驶舱正向分 {cockpit.get('positiveScore', summary.get('positiveScore', 0))}、负向风险 {cockpit.get('negativeScore', summary.get('negativeScore', 0))}；优先标签为“{top_label}”。",
+                f"- E2：声量数据中心主平台为 {top_platform}，当前内容资产主类为“{category}”。",
+                f"- E3：{relation_evidence}",
+            ],
+            "若继续以发布量和泛曝光为中心，预算会放大尚未解决的购买疑虑；把证据资产沉淀为可复用购买理由，才能同时提升内容效率与试驾/询价承接。",
+            [
+                f"- P0｜7天｜内容团队：围绕“{risk_label}”完成疑虑实测和品牌FAQ，并以负向疑虑占比验证。",
+                f"- P1｜14天｜平台与达人团队：在 {top_platform} 上线同场景竞品对比；达人组合优先调用 {creator_names}；以收藏、有效评论和竞品对比搜索验证。",
+                f"- P2｜30天｜项目负责人：把“{category}”沉淀为五段式脚本资产；以核心标签正向声量和试驾/询价线索验证。",
+            ],
+        )
     if context.get("drillType") == "content_asset_strategy":
         project = context.get("project") or {}
         summary = context.get("summary") or {}
@@ -5143,28 +5500,26 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         rule_clean = without_gap_sections(rule_text or "")
         qwen_clean = without_gap_sections(qwen_text or "")
         deepseek_clean = without_gap_sections(deepseek_text or "")
-        return "\n".join([
-            "### 核心营销结论",
-            f"{project.get('model', context.get('drillKey', '当前车型'))} 的下一步不是继续堆内容数量，而是把决策驾驶舱识别出的“{top_label}”优先级、声量数据中心里的“{top_platform}”主阵地，以及垂媒里与 {competitor} 的竞争关系合并成一个清晰购买理由。",
-            "",
-            "### 三大数据依据",
-            f"1. 决策驾驶舱：NSR {cockpit.get('nsr', 0)}，正向分 {cockpit.get('positiveScore', summary.get('positiveScore', 0))}，负向风险 {cockpit.get('negativeScore', summary.get('negativeScore', 0))}，优先判断落在“{top_label}”。",
-            f"2. 声量数据中心：主平台为“{top_platform}”，内容表达要围绕高声量平台重写，不做平均投放。",
-            f"3. 垂媒竞争格局：{relation.get('platform','垂媒')} {relation.get('period','')} 显示与 {competitor} 的关系为“{relation.get('status','竞争对比')}”，需要把对比从参数表转为真实场景。",
-            "",
-            "### 营销动作",
-            f"1. 内容动作：围绕“{top_label}”做第三方实测、车主证词、场景短视频和品牌FAQ四类资产。",
-            f"2. 竞品动作：对 {competitor} 做同场景对比，标题直接回答用户为什么选择 {project.get('model', context.get('drillKey', '本品'))}。",
-            "3. 达人动作：评测型达人负责证据，生活方式达人负责场景，车主/KOC负责评论区信任。",
-            "",
-            "### KPI",
-            "核心标签正向声量提升、负向疑虑评论占比下降、垂媒正向排名提升、竞品对比搜索占比提升、试驾/询价线索提升。",
-            "",
-            "### MMN交叉验证结论",
-            qwen_clean.split("\n", 1)[0] if qwen_clean else "主控模型建议采用证据型内容承接。",
-            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "质检模型建议用竞品关系校准表达。",
-            rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以可验证证据作为策略底线。"
-        ])
+        model = project.get("model", context.get("drillKey", "当前车型"))
+        return render_consulting_output(
+            f"{model}下一步不应继续堆内容数量，应把“{top_label}”、{top_platform}主阵地和与 {competitor} 的竞争关系合并成一个清晰购买理由。",
+            [
+                f"- “{top_label}”是当前内容资产的优先判断，应作为第一传播任务。[Evidence: E1]",
+                f"- {top_platform}是当前主平台，资源不应平均分配。[Evidence: E2]",
+                f"- 与 {competitor} 的表达应从参数表转为真实场景比较。[Evidence: E3]",
+            ],
+            [
+                f"- E1：决策驾驶舱 NSR {cockpit.get('nsr', 0)}、正向分 {cockpit.get('positiveScore', summary.get('positiveScore', 0))}、负向风险 {cockpit.get('negativeScore', summary.get('negativeScore', 0))}。",
+                f"- E2：声量数据中心当前主平台为 {top_platform}。",
+                f"- E3：{relation.get('platform','垂媒')} {relation.get('period','当前周期')}中，与 {competitor} 的关系为“{relation.get('status','竞争对比')}”；无排名时仅作为待验证比较语境。",
+            ],
+            "把三类上游判断合并后，内容预算才能从增加发布量转向建立购买确定性，并减少无差别投放造成的资源损耗。",
+            [
+                f"- P0｜7天｜内容团队：围绕“{top_label}”建立第三方实测、车主证词、场景短视频和品牌FAQ；以证据覆盖率验证。",
+                f"- P1｜14天｜平台团队：在 {top_platform} 对 {competitor} 做同场景对比；以有效评论和竞品对比搜索验证。",
+                "- P2｜30天｜项目负责人：复盘正向声量、负向疑虑、垂媒排名和试驾/询价线索，并将有效资产写回MMN学习库。",
+            ],
+        )
     if context.get("drillType") == "cognition_strategy":
         project = context.get("project") or {}
         summary = context.get("summary") or {}
@@ -5187,40 +5542,40 @@ def fuse_strategy(context, qwen_text=None, deepseek_text=None, openai_text=None,
         rule_clean = without_gap_sections(rule_text or "")
         qwen_clean = without_gap_sections(qwen_text or "")
         deepseek_clean = without_gap_sections(deepseek_text or "")
-        return "\n".join([
-            "### 核心认知判断",
-            f"{model} 的认知策略不是看单个正负面，而是把“{asset.get('label','已有好评')}”沉淀为资产，把“{risk.get('label','购买疑虑')}”用证据修复，把“{space.get('label','可抢占空位')}”转成与 {competitor} 的可传播差异。",
-            "",
-            "### 资产负债机会",
-            f"1. 资产：{asset.get('label','核心正向标签')} 可继续放大，适合进入短视频钩子、垂媒解释和品牌传播口径。",
-            f"2. 负债：{risk.get('label','高风险疑虑')} 需要优先修复，先给证据再谈卖点。",
-            f"3. 机会：{space.get('label','认知空位')} 可作为下一轮抢位主题，和 {competitor} 做同场景对比。",
-            "",
-            "### 策略动作",
-            f"1. 平台动作：在 {top_platform} 先做“一个疑虑一个证据”的内容包，标题直接回答用户问题。",
-            f"2. 竞品动作：{relation_copy}",
-            "3. 协同动作：评测达人负责证据，车主/KOC负责真实场景，品牌端同步FAQ承接询价和试驾。",
-            "",
-            "### KPI",
-            f"核心正向标签占比提升、负向疑虑评论占比下降、认知Gap收窄、垂媒正向排名改善、试驾/询价线索提升。当前NSR {summary.get('nsr', 0)} 可作为复盘基线。",
-            "",
-            "### MMN交叉验证结论",
-            qwen_clean.split("\n", 1)[0] if qwen_clean else "MMN主控建议以认知资产和购买阻塞点组织策略。",
-            deepseek_clean.split("\n", 1)[0] if deepseek_clean else "MMN质检建议控制过度承诺，优先使用可验证证据。",
-            rule_clean.split("\n", 1)[0] if rule_clean else "本地规则建议以真实数据结构作为策略底线。"
-        ])
+        return render_consulting_output(
+            f"{model}应把“{asset.get('label','已有好评')}”沉淀为认知资产，优先用证据修复“{risk.get('label','购买疑虑')}”，再抢占“{space.get('label','认知空位')}”。",
+            [
+                f"- “{asset.get('label','核心正向标签')}”具备继续放大的条件。[Evidence: E1]",
+                f"- “{risk.get('label','高风险疑虑')}”是当前购买阻塞点，应先给证据再谈卖点。[Evidence: E1]",
+                f"- “{space.get('label','认知空位')}”可用于建立与 {competitor} 的同场景差异。[Evidence: E2]",
+            ],
+            [
+                f"- E1：当前认知标签诊断已区分资产、负债和空位；NSR {summary.get('nsr', 0)} 作为复盘基线，具体样本口径沿用当前项目数据。",
+                f"- E2：{relation_copy}",
+                f"- E3：当前优先平台为 {top_platform}；未提供平台数据时仅作为策略假设。",
+            ],
+            "先修复认知负债可降低传播对疑虑的放大效应；再放大资产和空位，才能把内容互动转成可复述的差异化购买理由。",
+            [
+                f"- P0｜7天｜内容团队：在 {top_platform} 完成“一个疑虑一个证据”内容包；以负向疑虑占比验证。",
+                f"- P1｜14天｜竞品团队：围绕 {competitor} 做同场景对比；以认知Gap和垂媒排名验证。",
+                "- P2｜30天｜品牌与达人团队：评测达人负责证据、车主/KOC负责真实场景、品牌FAQ承接询价和试驾；以正向标签占比和线索变化验证。",
+            ],
+        )
     common = "\n".join([f"- {name}：{text[:500]}" for name, text in available])
-    return "\n".join([
-        "核心判断：综合多模型与规则引擎结果，优先采用可被当前数据和RAG依据支持的策略，不采纳无证据扩展。",
-        "共同建议：围绕高声量标签建立“数据拆解 → 证据链 → 平台内容 → KPI复盘”的闭环。",
-        "分歧处理：若模型表述不一致，以本地规则引擎的样本量、情绪风险和平台分布为底线，以RAG引用作为策略依据。",
-        "平台打法：优先选择当前拆解中的高声量平台，输出短视频/种草/垂媒解释/品牌传播口径四类资产。",
-        "内容资产需求：补齐原始评论、标题、字幕、话题、作者类型、互动量和商业化/自然声量标记。",
-        "下一步行动：把融合策略保存为Learning，并在下一轮导入后比较情绪占比、标签声量和转化指标变化。",
-        "",
-        "多模型依据摘要：",
-        common
-    ])
+    return render_consulting_output(
+        "优先采用当前数据和RAG依据共同支持的策略，不采纳无证据扩展。",
+        [
+            "- 策略主线应遵循“数据拆解 → 证据链 → 平台内容 → KPI复盘”。[Evidence: E1]",
+            "- 模型意见不一致时，应以样本量、情绪风险、平台分布和RAG引用作为判断底线。[Evidence: E1]",
+        ],
+        f"- E1：当前可用分析与规则摘要如下；内容仅保留至500字：\n{common}",
+        "证据优先可以降低无依据判断对预算和品牌表达的误导风险，并让后续复盘能够定位策略变化与业务结果之间的关系。",
+        [
+            "- P0｜现在｜策略负责人：确认高声量标签及其证据来源；以引用完整率验证。",
+            "- P1｜首轮内容｜平台团队：在高声量平台输出短视频、种草、垂媒解释和品牌传播口径；以情绪占比和标签声量验证。",
+            "- P2｜下一轮导入后｜项目负责人：比较情绪、标签声量与转化指标，并把有效结论保存为Learning。",
+        ],
+    )
 
 def col_to_num(col):
     n = 0
@@ -7049,17 +7404,17 @@ def rag_strategy_prompt(question, project, references):
             "引用原因": item.get("reason", "")
         })
     return [
-        {"role": "system", "content": "你是MMN营销引擎的汽车营销智能体。你必须先利用RAG召回资料，再结合通用汽车营销策略能力输出。不要编造未给出的数据；如果依据不足，要说明依据不足并给出可执行的下一步补数建议。" + MMN_OUTPUT_STYLE},
+        {"role": "system", "content": "你是MMN营销引擎的汽车营销智能体。你必须先利用RAG召回资料，再结合通用汽车营销策略能力输出。不要编造未给出的数据；如果依据不足，要说明依据不足并给出可执行的下一步补数建议。" + MMN_STRATEGY_OUTPUT_STYLE},
         {"role": "user", "content": json.dumps({
             "用户问题": question,
             "当前项目": project or {},
             "RAG召回资料": compact_refs,
             "输出格式": [
-                "结论先说：一句话说明最该解决的问题",
-                "归因分析：用3点说明为什么会这样，每点都要联系用户心智或平台传播机制",
-                "策略结论：明确主打法，不超过3条",
-                "马上怎么做：按优先级列3-5条动作，每条写清内容形态、平台、人群、验证指标",
-                "需要补充的数据：只列真正影响判断的数据缺口"
+                "Executive Conclusion：一句话说明最该解决的问题和主取舍",
+                "Key Findings：最多3项互不重复的判断，每项引用 [Evidence: E#]",
+                "Evidence：逐项列出E#、数据或事实、来源与口径；数据缺口也在此标明",
+                "Strategic Implication：说明对预算、用户决策或市场转化的商业影响",
+                "Action Recommendation：按优先级列3-5条动作，写清责任对象、时点和验证指标"
             ]
         }, ensure_ascii=False)}
     ]
@@ -7068,13 +7423,23 @@ def local_rag_strategy_answer(question, project, references):
     refs = references or []
     titles = "、".join([x.get("title", "") for x in refs[:4] if x.get("title")]) or "当前知识库"
     model = (project or {}).get("model") or "当前车型"
-    return "\n".join([
-        f"结论先说：{model}现在不要先扩大投放，先把用户最在意的疑虑讲清楚。",
-        f"归因分析：本次本地RAG召回了 {len(refs)} 条依据，主要来自：{titles}。说明当前问题不是没有话题，而是缺少能让用户相信的解释材料。",
-        "策略结论：先做证据型内容，再做平台扩散，最后承接试驾或咨询。不要把预算直接砸到泛流量上。",
-        "马上怎么做：1. 把最高风险认知拆成三条可验证证据；2. 用垂媒或真实车主补第三方视角；3. 在小红书/抖音用真实场景解释价格、空间、智驾或安全疑虑；4. 把有效说法写回项目学习库。",
-        "还缺什么数据：正式给客户前，需要补平台声量、达人质量、竞品正反向变化和转化线索。"
-    ])
+    return render_consulting_output(
+        f"{model}当前不应先扩大投放，应先把用户最在意的购买疑虑转成可验证证据。",
+        [
+            f"- 当前问题不是缺少话题，而是缺少能支持用户决策的解释材料。[Evidence: E1]",
+            "- 内容扩散应排在证据建设之后，避免预算放大未解决的疑虑。[Evidence: E2]",
+        ],
+        [
+            f"- E1：本次本地RAG召回 {len(refs)} 条依据，主要来自：{titles}。",
+            "- E2：当前仍需补充平台声量、达人质量、竞品正反向变化和转化线索；在补齐前仅作为低置信策略判断。",
+        ],
+        "若直接扩大泛流量，新增曝光可能放大购买疑虑，降低内容预算对试驾和咨询的转化效率。",
+        [
+            "- P0｜本周｜品牌市场：把最高风险认知拆成三条可验证证据；以证据覆盖率验证。",
+            "- P1｜两周内｜内容团队：用垂媒或真实车主补第三方视角；以收藏、有效评论和疑虑占比验证。",
+            "- P2｜首轮复盘后｜项目负责人：将有效说法写回MMN学习库；以试驾或咨询线索变化验证。",
+        ],
+    )
 
 def agent_source_ref(item):
     metadata = item.get("metadata") or {}
@@ -7123,6 +7488,14 @@ def build_signal_summary(signal):
 
 def review_agent_strategy(text, evidence, signal_summary, question):
     findings = []
+    framework_review = inspect_consulting_output(text)
+    if not framework_review["passed"]:
+        findings.append({
+            "severity": "medium",
+            "category": "consulting_output",
+            "message": "Consulting Output Framework 未通过：" + "；".join(framework_review["issues"][:3]),
+            "fix": "按五层金字塔重排输出，并补齐判断到证据编号的关联后再交付。"
+        })
     if not evidence:
         findings.append({
             "severity": "high",
@@ -7172,7 +7545,8 @@ def review_agent_strategy(text, evidence, signal_summary, question):
             "fix": ""
         }],
         "evidence_count": len(evidence),
-        "diagnostic_count": signal_summary.get("diagnostic_count", 0)
+        "diagnostic_count": signal_summary.get("diagnostic_count", 0),
+        "consultingFramework": framework_review,
     }
 
 def save_agent_run_record(run, steps, reviews, evidence):
@@ -7851,6 +8225,7 @@ def _opportunity_model_analysis(provider, evidence_packet, facts):
         "待复核人工修正": {"facts": pending_facts, "reviews": pending_reviews},
         "市场信号": evidence_packet.get("marketSignals") or [],
         "垂媒正反向交叉验证": evidence_packet.get("verticalEvidence") or [],
+        "已通过人工Eval的政策环境变量": evidence_packet.get("policyEnvironment") or [],
         "竞品官网来源": evidence_packet.get("competitorSources") or [],
         "竞品官网事实": evidence_packet.get("competitorFacts") or [],
         "本品资料": {key: own_document.get(key) for key in ("documentId", "filename", "brand", "model", "version")},
@@ -7938,10 +8313,29 @@ def run_opportunity_map_pipeline(body, *, org_id="", user_id="local", run_id=Non
     competitor_models = [source.get("model", "") for source in body.get("competitorSources") or []]
     vertical_evidence = build_opportunity_vertical_evidence(document.get("model", ""), competitor_models, org_id, body.get("edition", "china"))
     evidence.extend(vertical_evidence)
+    with db() as conn:
+        policy_environment = list_policy_knowledge_signals(
+            conn,
+            org_id=org_id or "local",
+            edition=edition_from(body.get("edition", "china")),
+            model=document.get("model", ""),
+            region=str(body.get("region") or "").strip(),
+        )
+    for signal in policy_environment:
+        evidence.append({
+            "id": stable_id("opportunity-policy", signal.get("analysisId"), signal.get("label")),
+            "source_type": "policy_environment_evaluated",
+            "source_ref": signal.get("analysisId"),
+            "brand": document.get("brand", ""),
+            "model": signal.get("model", ""),
+            "claim": signal.get("inference", ""),
+            "confidence": min(1.0, max(0.0, float(signal.get("evalScore") or 0) / 100)),
+            "payload": signal,
+        })
     signals = normalize_market_signals(body.get("marketSignals") or [])
     heat = heat_scores(signals)
     evidence_ids = {item["id"] for item in evidence if item.get("id")}
-    packet = {"own": document, "competitorSources": source_results, "competitorFacts": competitor_facts, "verticalEvidence": vertical_evidence, "marketSignals": signals}
+    packet = {"own": document, "competitorSources": source_results, "competitorFacts": competitor_facts, "verticalEvidence": vertical_evidence, "marketSignals": signals, "policyEnvironment": policy_environment}
     report("alignment", 40, "官网事实、垂媒正反向关系、属性NSR与传播热度已按统一标签对齐")
     report("primary_model", 45, "MMN旗舰模型 A 正在独立分析")
     qwen_items, qwen_mode, qwen_error = _opportunity_model_analysis("qwen", packet, own_facts)
@@ -8002,6 +8396,21 @@ def run_opportunity_map_pipeline(body, *, org_id="", user_id="local", run_id=Non
         if item.get("evidenceStatus") == "aligned" and item.get("category") != "manual_required"
     ]
     execution_recommendations = derive_execution_recommendations(verified_opportunities, signals)
+    execution_recommendations.extend(
+        {
+            "type": "policy_environment",
+            "label": item.get("label"),
+            "action": item.get("action"),
+            "reason": item.get("inference"),
+            "leadingIndicator": item.get("leadingIndicator"),
+            "conversionIndicator": item.get("conversionIndicator"),
+            "stopCondition": item.get("stopCondition"),
+            "evidenceIds": item.get("factIds") or [],
+            "evalScore": item.get("evalScore"),
+            "evidenceBoundary": item.get("evidenceBoundary"),
+        }
+        for item in policy_environment
+    )
     has_remaining_review = bool(validation.get("manualItems") or document.get("manualReviewItems"))
     if models_verified and validation.get("status") == "aligned" and not document.get("manualReviewItems"):
         status = "completed"
@@ -8009,7 +8418,7 @@ def run_opportunity_map_pipeline(body, *, org_id="", user_id="local", run_id=Non
         status = "partial_completed"
     else:
         status = "manual_required"
-    run = {"id": run_id, "org_id": org_id, "user_id": user_id, "edition": body.get("edition", "china"), "task_type": "opportunity_map", "brand": document.get("brand", ""), "model": document.get("model", ""), "competitors": competitor_models, "platforms": sorted({row.get("platform") for row in signals if row.get("platform")}), "status": status, "final_output": {"status": status, "document": document, "competitorSources": source_results, "competitorProducts": competitor_products, "verticalEvidence": vertical_evidence, "marketSignals": signals, "opportunities": opportunities, "executionRecommendations": execution_recommendations, "validation": validation, "modelModes": {"qwen": qwen_mode, "deepseek": deepseek_mode}, "errors": {"qwen": qwen_error, "deepseek": deepseek_error}}, "qa_summary": {"manualCount": len(validation.get("manualItems", [])) + len(document.get("manualReviewItems", [])), "verifiedLabelCount": len(verified_opportunities), "evidenceCount": len(evidence)}, "created_at": now(), "updated_at": now()}
+    run = {"id": run_id, "org_id": org_id, "user_id": user_id, "edition": body.get("edition", "china"), "task_type": "opportunity_map", "brand": document.get("brand", ""), "model": document.get("model", ""), "competitors": competitor_models, "platforms": sorted({row.get("platform") for row in signals if row.get("platform")}), "status": status, "final_output": {"status": status, "document": document, "competitorSources": source_results, "competitorProducts": competitor_products, "verticalEvidence": vertical_evidence, "marketSignals": signals, "policyEnvironment": policy_environment, "opportunities": opportunities, "executionRecommendations": execution_recommendations, "validation": validation, "modelModes": {"qwen": qwen_mode, "deepseek": deepseek_mode}, "errors": {"qwen": qwen_error, "deepseek": deepseek_error}}, "qa_summary": {"manualCount": len(validation.get("manualItems", [])) + len(document.get("manualReviewItems", [])), "verifiedLabelCount": len(verified_opportunities), "evidenceCount": len(evidence)}, "created_at": now(), "updated_at": now()}
     steps = [{"id": stable_id("opportunity-step", run_id, "qwen"), "agent_name": "MMN双模型-Qwen", "step_order": 1, "status": qwen_mode, "input_summary": "冻结产品事实、官网快照和市场信号", "output": {"items": qwen_items, "error": qwen_error}, "confidence": .8 if qwen_mode == "model" else .45}, {"id": stable_id("opportunity-step", run_id, "deepseek"), "agent_name": "MMN双模型-DeepSeek", "step_order": 2, "status": deepseek_mode, "input_summary": "冻结产品事实、官网快照和市场信号", "output": {"items": deepseek_items, "error": deepseek_error}, "confidence": .8 if deepseek_mode == "model" else .45}, {"id": stable_id("opportunity-step", run_id, "cross-validation"), "agent_name": "MMN交叉验证", "step_order": 3, "status": validation.get("status"), "input_summary": "比较标签、方向、事实强度与证据引用", "output": validation, "confidence": 1.0 if validation.get("status") == "aligned" else .4}]
     reviews = [{"id": stable_id("opportunity-review", run_id, item.get("label"), json.dumps(item, ensure_ascii=False)), "reviewer_name": "MMN人工确认台", "verdict": "pending", "severity": "high", "findings": [item], "evidence": item.get("evidenceIds", []), "retry_instruction": "请确认车型版本、事实证据和统一标签后再发布"} for item in validation.get("manualItems", [])]
     for evidence_item in evidence:
@@ -10575,6 +10984,66 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parsed.path.startswith("/api/") and parsed.path not in {"/api/sales-marquee", "/api/global-sales-marquee"}:
             if not self.require_cloud_auth():
                 return
+        if parsed.path == "/api/eval/report":
+            try:
+                auth = self.current_auth() or {}
+                payload = load_mmn_eval_dashboard(org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, **payload})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 500)
+            return
+        if parsed.path == "/api/policy-intelligence/dashboard":
+            try:
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                price, scenario, engine_displacement = validate_policy_vehicle_inputs(
+                    query.get("price", ["280000"])[0],
+                    query.get("scenario", ["置换更新"])[0],
+                    query.get("engineDisplacementL", [""])[0],
+                )
+                region = str(query.get("region", ["上海"])[0] or "上海").strip()
+                if region not in SUPPORTED_POLICY_REGIONS:
+                    raise ValueError("区域必须为支持的省、自治区或直辖市。")
+                profile = {
+                    "model": str(query.get("model", ["奥迪E7X"])[0] or "奥迪E7X").strip(),
+                    "price": price,
+                    "energyType": str(query.get("energyType", ["新能源"])[0] or "新能源").strip(),
+                    "bodyType": str(query.get("bodyType", ["SUV"])[0] or "SUV").strip(),
+                    "engineDisplacementL": engine_displacement,
+                    "priceSource": str(query.get("priceSource", ["analyst_input"])[0] or "analyst_input").strip(),
+                    "priceAsOf": str(query.get("priceAsOf", [""])[0] or "").strip(),
+                    "scenario": scenario,
+                }
+                with db() as conn:
+                    payload = build_policy_dashboard_payload(
+                        conn,
+                        model=profile["model"],
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        profile=profile,
+                        region=region,
+                        as_of=str(query.get("asOf", [""])[0] or "").strip() or None,
+                    )
+                self.send_json(payload)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/policies":
+            try:
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    policies = list_policy_records(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        review_status=str(query.get("reviewStatus", [""])[0] or "").strip(),
+                        limit=query.get("limit", [100])[0],
+                    )
+                self.send_json({"ok": True, "policies": policies})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path.startswith("/api/creator-distillation/"):
             try:
                 auth = self.current_auth() or {}
@@ -10813,6 +11282,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     fuel_market["sourceFetchedAt"] = fuel_snapshot.get("fetchedAt")
                     fuel_market["sourceStale"] = fuel_snapshot.get("stale") is True
                 with db() as conn:
+                    policy_region = str(q.get("policy_region", ["上海"])[0] or "上海").strip()
+                    policy_scenario = str(q.get("policy_scenario", ["置换更新"])[0] or "置换更新").strip()
                     payload = build_group_dashboard_payload(
                         conn,
                         sales_payload,
@@ -10820,12 +11291,82 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         edition_from(q.get("edition", ["china"])[0]),
                         fuel_market=fuel_market,
                     )
+                    monitored_policy_models = {
+                        str(model).strip()
+                        for model in payload["salesWarnings"].get("monitoring", {}).get("models", [])
+                        if str(model).strip()
+                    }
+                    warning_models = [
+                        item for item in payload["salesWarnings"].get("saicModels", [])
+                        if str(item.get("model") or "").strip() in monitored_policy_models
+                        and item.get("vehicleStartPriceWan") not in (None, "")
+                    ]
+                    requested_policy_model = str(q.get("policy_model", ["奥迪E7X"])[0] or "奥迪E7X").strip()
+                    selected_warning = next(
+                        (item for item in warning_models if item.get("model") == requested_policy_model),
+                        next((item for item in warning_models if item.get("model") == "奥迪E7X"), warning_models[0] if warning_models else {}),
+                    )
+                    policy_profiles = build_sales_warning_policy_profiles(
+                        selected_warning,
+                        payload["salesWarnings"].get("source", {}).get("period") or "",
+                    )
+                    if not policy_profiles:
+                        policy_profiles = [{
+                            "model": requested_policy_model or "奥迪E7X",
+                            "role": "own",
+                            "price": 269800,
+                            "energyType": "纯电动",
+                            "bodyType": "SUV",
+                            "priceSource": "重点车型监测兜底输入",
+                            "priceAsOf": "2026-07-17",
+                            "salesReference": {"role": "own", "roleLabel": "本品", "level": "gray", "levelLabel": "灰色待复核"},
+                        }]
+                    policy_models = []
+                    for policy_profile in policy_profiles:
+                        policy_model = policy_profile["model"]
+                        policy_snapshot = build_policy_dashboard_payload(
+                            conn,
+                            model=policy_model,
+                            region=policy_region,
+                            profile={**policy_profile, "model": policy_model, "scenario": policy_scenario},
+                            org_id=auth.get("org_id", "local"),
+                            edition=edition_from(q.get("edition", ["china"])[0]),
+                        )
+                        policy_models.append({
+                            "model": policy_model,
+                            "role": policy_profile["role"],
+                            "salesReference": policy_profile["salesReference"],
+                            "vehicleImpact": policy_snapshot["vehicleImpact"],
+                            "opportunities": policy_snapshot["opportunities"],
+                        })
+                    payload["policyIntelligence"] = {
+                        "meta": policy_snapshot["meta"],
+                        "summary": policy_snapshot["summary"],
+                        "region": policy_region,
+                        "scenario": policy_scenario,
+                        "map": policy_snapshot["map"],
+                        "models": policy_models,
+                        "ownModelOptions": [
+                            {
+                                "model": item.get("model"),
+                                "level": item.get("level"),
+                                "levelLabel": item.get("levelLabel"),
+                                "segmentLabel": item.get("segmentLabel"),
+                            }
+                            for item in warning_models
+                        ],
+                        "comparisonMethod": "本品当前销量预警细分市场：销量前三 + 剔除前三后最接近市场销量中位数的三台车",
+                        "salesContext": policy_profiles[0]["salesReference"],
+                    }
                 force_review = str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
                 payload["executiveBrief"] = executive_brief_state(force=force_review)
                 payload["salesWarnings"]["dualModelReview"] = sales_warning_review_state(
                     payload["salesWarnings"],
                     force=force_review,
                 )
+                sales_warning_cycles = load_sales_warning_cycles()
+                attach_sales_warning_history(payload.get("salesWarnings"), sales_warning_cycles)
+                payload["salesWarningCycles"] = sales_warning_cycles
                 self.send_json(payload)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 500)
@@ -11125,6 +11666,213 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             roles = None if parsed.path in trial_post_allowed else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/eval/run":
+            try:
+                auth = self.current_auth() or {}
+                payload = run_mmn_eval_dashboard(org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, **payload})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/fetch":
+            body = self.read_json()
+            source = dict(body.get("source") or {})
+            auth = self.current_auth() or {}
+            started_at = now()
+            try:
+                result = fetch_policy_source(
+                    source,
+                    lambda url, max_bytes: fetch_opportunity_official_page(
+                        url,
+                        allowed_domains=source.get("allowedDomains"),
+                        max_bytes=max_bytes,
+                    ),
+                )
+                metadata = dict(body.get("metadata") or {})
+                metadata.update({"finalUrl": result["finalUrl"], "fetchedAt": result["fetchedAt"], "acquisitionMethod": "network_fetched"})
+                with db() as conn:
+                    document = save_policy_document(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(body.get("edition") or "china"),
+                        source=source,
+                        raw_text=result["rawText"],
+                        metadata=metadata,
+                    )
+                    run = save_policy_fetch_run(
+                        conn,
+                        source=source,
+                        source_url=result["sourceUrl"],
+                        status="fetched",
+                        document_id=document["id"],
+                        started_at=started_at,
+                        finished_at=now(),
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(body.get("edition") or "china"),
+                    )
+                self.send_json({"ok": True, "document": document, "fetchRun": run}, 201)
+            except Exception as exc:
+                try:
+                    with db() as conn:
+                        save_policy_fetch_run(
+                            conn,
+                            source=source,
+                            source_url=source.get("url") or source.get("baseUrl") or "",
+                            status="failed",
+                            error=str(exc),
+                            started_at=started_at,
+                            finished_at=now(),
+                            org_id=auth.get("org_id", "local"),
+                            edition=edition_from(body.get("edition") or "china"),
+                        )
+                except Exception:
+                    pass
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/import-source":
+            try:
+                body = self.read_json()
+                source = dict(body.get("source") or {})
+                raw_text = str(body.get("rawText") or "").strip()
+                if len(raw_text) < 10 or len(raw_text.encode("utf-8")) > 800000:
+                    raise ValueError("人工导入的官方政策原文长度无效。")
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    document = save_policy_document(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(body.get("edition") or "china"),
+                        source=source,
+                        raw_text=raw_text,
+                        metadata={**dict(body.get("metadata") or {}), "acquisitionMethod": "manual_imported"},
+                    )
+                self.send_json({"ok": True, "document": document, "nextStep": "parse_then_human_review"}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/parse":
+            try:
+                body = self.read_json()
+                document_id = str(body.get("documentId") or "").strip()
+                if not document_id:
+                    raise ValueError("缺少政策原始文档ID。")
+                with db() as conn:
+                    auth = self.current_auth() or {}
+                    document = conn.execute(
+                        "select * from policy_documents where id=? and org_id=? and edition=?",
+                        (document_id, auth.get("org_id", "local"), edition_from(body.get("edition") or "china")),
+                    ).fetchone()
+                    if not document:
+                        raise ValueError("政策原始文档不存在。")
+                    source = {
+                        "id": document["source_id"],
+                        "name": document["issuer"],
+                        "level": document["source_level"],
+                        "url": document["source_url"],
+                    }
+                    parsed_policy = parse_policy_with_gateway(document["raw_text"], source, policy_model_gateway)
+                    policy = save_policy_record(conn, document_id, parsed_policy)
+                self.send_json({"ok": True, "policy": policy}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    policy = review_policy(
+                        conn,
+                        body.get("policyId"),
+                        body.get("decision"),
+                        auth.get("email") or auth.get("username") or auth.get("user_id") or "local-reviewer",
+                        body.get("note") or "",
+                        org_id=auth.get("org_id", "local"),
+                    )
+                self.send_json({"ok": True, "policy": policy})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/analyze":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                model = str(body.get("model") or "奥迪E7X").strip()
+                region = str(body.get("region") or "上海").strip()
+                if region not in SUPPORTED_POLICY_REGIONS:
+                    raise ValueError("区域必须为支持的省、自治区或直辖市。")
+                price, scenario, engine_displacement = validate_policy_vehicle_inputs(
+                    body.get("price", 280000),
+                    body.get("scenario", "置换更新"),
+                    body.get("engineDisplacementL"),
+                )
+                profile = {
+                    "model": model,
+                    "price": price,
+                    "energyType": str(body.get("energyType") or "新能源").strip(),
+                    "bodyType": str(body.get("bodyType") or "SUV").strip(),
+                    "engineDisplacementL": engine_displacement,
+                    "priceSource": str(body.get("priceSource") or "analyst_input").strip(),
+                    "priceAsOf": str(body.get("priceAsOf") or "").strip(),
+                    "scenario": scenario,
+                }
+                edition = edition_from(body.get("edition") or "china")
+                with db() as conn:
+                    result = build_policy_dashboard_payload(
+                        conn,
+                        model=model,
+                        region=region,
+                        profile=profile,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                        as_of=body.get("asOf") or None,
+                    )
+                result["strategyValidation"] = run_policy_strategy_validation(result)
+                with db() as conn:
+                    analysis = save_policy_analysis_result(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                        model=model,
+                        region=region,
+                        result=result,
+                    )
+                self.send_json({"ok": True, "result": result, "analysis": analysis, "strategyValidation": result["strategyValidation"]}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/policy-intelligence/evaluate":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    evaluation = evaluate_policy_analysis(
+                        conn,
+                        body.get("analysisId"),
+                        dict(body.get("scores") or {}),
+                        auth.get("email") or auth.get("username") or auth.get("user_id") or "local-evaluator",
+                        body.get("note") or "",
+                        org_id=auth.get("org_id", "local"),
+                    )
+                self.send_json({"ok": True, "evaluation": evaluation})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/eval/human-review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                result = save_mmn_eval_human_review(
+                    body.get("caseId"),
+                    body.get("decision"),
+                    body.get("note"),
+                    org_id=auth.get("org_id", "local"),
+                    reviewer=auth.get("email") or auth.get("username") or auth.get("user_id") or "local-human",
+                )
+                self.send_json(result)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/group-dashboard/cycle-review":
             try:
                 if not (qwen_config("deep")["configured"] and deepseek_config("deep")["configured"]):
@@ -11135,6 +11883,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     body.get("launchDate"),
                     series_id=body.get("seriesId"),
                 )
+                if result.get("status") == "verified" and result.get("conclusion"):
+                    save_sales_warning_cycle(result["conclusion"], result.get("reviewedAt"))
                 self.send_json({"ok": True, "result": result})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)

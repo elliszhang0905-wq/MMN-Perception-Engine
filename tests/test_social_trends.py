@@ -282,11 +282,12 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(result["timelineUndated"]["platforms"][0]["platform"], "douyin")
 
     def test_social_assistant_import_applies_relevance_time_and_threshold_rules(self):
+        published_day = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d")
         rows = [
-            {"平台": "抖音", "作品ID": "d1", "作品标题": "奥迪E7X 深度体验", "发布时间": "2026-07-10 12:00:00", "点赞数": "9000", "评论数": "100", "作品链接": "https://www.douyin.com/video/d1"},
-            {"平台": "抖音", "作品ID": "d2", "作品标题": "奥迪E7X 到店", "发布时间": "2026-07-10 13:00:00", "点赞数": "7999"},
-            {"平台": "小红书", "作品ID": "x1", "作品标题": "奥迪E7X 试驾", "发布时间": "2026-07-10 14:00:00", "点赞数": "600", "评论数": "30"},
-            {"平台": "微博", "作品ID": "w1", "作品标题": "其他车型", "发布时间": "2026-07-10 14:00:00", "点赞数": "900"},
+            {"平台": "抖音", "作品ID": "d1", "作品标题": "奥迪E7X 深度体验", "发布时间": f"{published_day} 12:00:00", "点赞数": "9000", "评论数": "100", "作品链接": "https://www.douyin.com/video/d1"},
+            {"平台": "抖音", "作品ID": "d2", "作品标题": "奥迪E7X 到店", "发布时间": f"{published_day} 13:00:00", "点赞数": "7999"},
+            {"平台": "小红书", "作品ID": "x1", "作品标题": "奥迪E7X 试驾", "发布时间": f"{published_day} 14:00:00", "点赞数": "600", "评论数": "30"},
+            {"平台": "微博", "作品ID": "w1", "作品标题": "其他车型", "发布时间": f"{published_day} 14:00:00", "点赞数": "900"},
         ]
         result = import_records(rows, "奥迪E7X", ["douyin", "xiaohongshu", "weibo"], time_range="7d", filename="assistant.xlsx")
         self.assertEqual([x["platformItemId"] for x in result["contentRanking"]], ["d1", "x1"])

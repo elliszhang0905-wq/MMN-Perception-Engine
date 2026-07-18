@@ -13,6 +13,7 @@ from group_dashboard import (
     parse_cpca_ice_market,
     load_e7x_product_evaluation,
     load_sales_warning,
+    _latest_sales_warning_observed_path,
     merge_sales_payloads,
 )
 
@@ -20,6 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_sales_warning_automatically_selects_latest_period_monitoring_list(self):
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "sales_warning_observed_2026-06.json").write_text("{}", encoding="utf-8")
+            latest = directory / "sales_warning_observed_2026-07.json"
+            latest.write_text("{}", encoding="utf-8")
+
+            self.assertEqual(_latest_sales_warning_observed_path(directory), latest)
+
     def test_sales_warning_methodology_uses_current_full_segment_contract(self):
         warning = {
             "mode": "full_segment_market",
@@ -40,6 +50,12 @@ class GroupDashboardTest(unittest.TestCase):
         dataset = {
             "schema_version": "1.0",
             "source": "dongchedi_authenticated_browser",
+            "price_contract": {
+                "provider": "懂车帝",
+                "field": "dealer_price",
+                "required_flag": "has_dealer_price=true",
+                "fallback": "none",
+            },
             "period": "2026-06",
             "captured_at": "2026-07-16T14:00:00+00:00",
             "complete": True,
@@ -116,6 +132,31 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(suv["marketSales"], 6000)
         self.assertEqual(suv["level"], "yellow")
 
+    def test_full_segment_exposes_top3_and_three_distinct_median_near_peers_for_policy_comparison(self):
+        source_path = ROOT / "data" / "dongchedi_sales" / "sales_warning_latest.json"
+        raw = json.loads(source_path.read_text(encoding="utf-8"))
+        raw_own = next(item for item in raw["saic_vehicles"] if item["series_name"] == "智己LS8")
+        top_ids = {item["series_id"] for item in raw_own["benchmark_pool"]}
+        expected_median = sorted(
+            (item for item in raw_own["competitor_pool"] if item["series_id"] not in top_ids),
+            key=lambda item: (abs(item["sales_volume"] - raw_own["segment_median_sales"]), -item["sales_volume"], item["series_name"]),
+        )[:3]
+
+        result = load_sales_warning(path=source_path)
+        own = next(item for item in result["saicModels"] if item["model"] == "智己LS8")
+
+        self.assertEqual([item["role"] for item in own["comparisonPeers"][:3]], ["top3"] * 3)
+        self.assertEqual(
+            [item["model"] for item in own["comparisonPeers"][:3]],
+            [item["series_name"] for item in raw_own["benchmark_pool"]],
+        )
+        self.assertEqual(
+            [item["model"] for item in own["medianPeers"]],
+            [item["series_name"] for item in expected_median],
+        )
+        self.assertTrue(all(item["startPriceWan"] > 0 for item in own["comparisonPeers"]))
+        self.assertEqual(own["salesMedian"], raw_own["segment_median_sales"])
+
     def test_incomplete_full_segment_file_falls_back_to_verified_focal_observations(self):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "sales_warning_latest.json"
@@ -126,6 +167,39 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(result["mode"], "observed_focal_models")
         self.assertEqual(len(result["saicModels"]), 8)
         self.assertEqual(result["summary"]["calculableModelCount"], 2)
+
+    def test_e7x_start_price_uses_dongchedi_dealer_quote(self):
+        result = load_sales_warning()
+        e7x = next(item for item in result["saicModels"] if item["model"] == "奥迪E7X")
+
+        self.assertEqual(e7x["vehicleStartPriceWan"], 26.98)
+        self.assertEqual(e7x["vehicleStartPriceSource"], "dongchedi_dealer_price")
+        self.assertEqual(e7x["priceDisplay"], "26.98-35.98万")
+
+    def test_full_segment_rejects_non_dealer_price_contract(self):
+        dataset = {
+            "schema_version": "1.0",
+            "source": "dongchedi_public_rank_api",
+            "period": "2026-06",
+            "complete": True,
+            "thresholds": {"red_ratio": 0.25, "yellow_ratio": 0.5, "green_ratio": 0.8},
+            "price_contract": {"provider": "懂车帝", "field": "price", "fallback": "manual"},
+            "saic_vehicles": [],
+        }
+        with TemporaryDirectory() as tmp:
+            observed_path = Path(tmp) / "observed.json"
+            observed_path.write_text(json.dumps({
+                "source": "dongchedi_user_verified_observations",
+                "period": "2026-06",
+                "vehicles": [],
+            }, ensure_ascii=False), encoding="utf-8")
+            full_path = Path(tmp) / "full.json"
+            full_path.write_text(json.dumps(dataset, ensure_ascii=False), encoding="utf-8")
+
+            result = load_sales_warning(path=full_path, observed_path=observed_path)
+
+        self.assertEqual(result["mode"], "observed_focal_models")
+        self.assertEqual(result["saicModels"], [])
 
     def test_observed_warning_preserves_verified_exact_market_metrics(self):
         with TemporaryDirectory() as tmp:
@@ -150,8 +224,11 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIn("mmn-app:/app/data/e7x_product_evaluation_2026-06.json", deploy_script)
         self.assertIn("data/sales_warning_demo_2026-06.json", deploy_script)
         self.assertIn("mmn-app:/app/data/sales_warning_demo_2026-06.json", deploy_script)
-        self.assertIn("data/dongchedi_sales/sales_warning_observed_2026-06.json", deploy_script)
-        self.assertIn("mmn-app:/app/data/dongchedi_sales/sales_warning_observed_2026-06.json", deploy_script)
+        self.assertIn("sales_warning_observed_????-??.json", deploy_script)
+        self.assertIn('"mmn-app:/app/$observed_file"', deploy_script)
+        self.assertIn("data/dongchedi_sales/sales_warning_history.json", deploy_script)
+        self.assertIn("mmn-app:/app/data/dongchedi_sales/sales_warning_history.json", deploy_script)
+        self.assertIn("保留服务器已有车型上市日期，不用版本文件覆盖", deploy_script)
 
     def test_sales_warning_demo_uses_full_dongchedi_segment_without_price_filter(self):
         result = build_sales_warning_demo()
@@ -374,8 +451,8 @@ class GroupDashboardTest(unittest.TestCase):
 
     def test_sales_warning_monitors_only_latest_dongchedi_table_own_models_and_ignores_spaces(self):
         rows = [
-            ("local", "china", "懂车帝", "2026.07.09", "奥迪 E5 Sportback", "小米SU7", 1, 3, 0.16, "上汽集团八车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
-            ("local", "china", "懂车帝", "2026.07.09", "MG 4", "海豚", 2, 4, 0.11, "上汽集团八车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
+            ("local", "china", "懂车帝", "2026.07.09", "奥迪 E5 Sportback", "小米SU7", 1, 3, 0.16, "上汽集团十二车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
+            ("local", "china", "懂车帝", "2026.07.09", "MG 4", "海豚", 2, 4, 0.11, "上汽集团十二车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
             ("local", "china", "懂车帝", "2026.07.02", "飞凡F7", "小鹏P7", 1, 1, 0.10, "旧表.xlsx", "2026-07-15T08:00:00Z"),
         ]
         self.conn.executemany("insert into vertical_rank_assets values (?,?,?,?,?,?,?,?,?,?,?)", rows)
