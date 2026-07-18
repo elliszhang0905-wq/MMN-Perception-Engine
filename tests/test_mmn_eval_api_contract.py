@@ -16,6 +16,12 @@ class MmnEvalApiContractTest(unittest.TestCase):
         self.assertIn("run_seed_dashboard as run_mmn_eval_dashboard", self.server)
         self.assertIn("save_human_review as save_mmn_eval_human_review", self.server)
 
+    def test_deploy_publishes_eval_seed_fixtures_into_persistent_data_volume(self):
+        deploy_script = (ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("data/eval/mmn_eval_seed_v0.1.jsonl", deploy_script)
+        self.assertIn("data/eval/mmn_eval_seed_outputs_v0.1.jsonl", deploy_script)
+        self.assertIn('"mmn-app:/app/$eval_fixture"', deploy_script)
+
     def test_get_report_route_returns_dashboard_payload(self):
         self.assertIn('parsed.path == "/api/eval/report"', self.server)
         self.assertIn("load_mmn_eval_dashboard(org_id=auth.get(\"org_id\", \"local\"))", self.server)

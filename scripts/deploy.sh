@@ -46,7 +46,12 @@ echo "启动新版本服务。"
 docker compose --env-file .env up -d
 
 echo "同步随版本发布的销量与 RAG 数据资产到持久化卷。"
-docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales
+docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
+for eval_fixture in data/eval/mmn_eval_seed_v0.1.jsonl data/eval/mmn_eval_seed_outputs_v0.1.jsonl; do
+  if [[ -f "$eval_fixture" ]]; then
+    docker compose --env-file .env cp "$eval_fixture" "mmn-app:/app/$eval_fixture"
+  fi
+done
 if [[ -f data/e7x_product_evaluation_2026-06.json ]]; then
   docker compose --env-file .env cp data/e7x_product_evaluation_2026-06.json mmn-app:/app/data/e7x_product_evaluation_2026-06.json
 fi
