@@ -32,6 +32,7 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check bf-factory.js
 "$NODE_BIN" --check group-dashboard.js
 "$NODE_BIN" --check t-cycle.js
+"$NODE_BIN" --check scripts/release_gate_all_surfaces.js
 "$NODE_BIN" tests/test_t_cycle.js
 "$NODE_BIN" tests/test_nsr_map.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
@@ -56,7 +57,8 @@ python3 -m unittest \
   tests.test_dongchedi_sales_freshness \
   tests.test_douyin_hot_entities \
   tests.test_social_trend_jobs \
-  tests.test_social_trends -v
+  tests.test_social_trends \
+  tests.test_all_surfaces_release_gate -v
 
 echo "MMN release gate:研发档案检查"
 if rg -n "AI|ChatGPT|Codex|大模型辅助|AI生成|智能编写" "docs/研发档案"; then
@@ -93,5 +95,6 @@ trap cleanup EXIT
 
 echo "MMN release gate: browser checks"
 MMN_URL="$URL" "$NODE_BIN" scripts/release_gate_data_first.js
+MMN_URL="$URL" "$NODE_BIN" scripts/release_gate_all_surfaces.js
 
 echo "MMN release gate: passed"
