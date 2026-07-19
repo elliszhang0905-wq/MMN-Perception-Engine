@@ -176,6 +176,62 @@ async function auditViewport(browser, viewport) {
       JSON.stringify(e7xLinkage),
     );
 
+    const warningModels = await page.locator("#group-dashboard-root [data-warning-series-id]").evaluateAll(items => [...new Set(items.map(item => item.closest(".sales-warning-row")?.querySelector(".sales-warning-model b")?.textContent?.trim()).filter(Boolean))]);
+    for (const model of warningModels) {
+      await page.evaluate(target => window.MMNVehicleContext.select(target, { source: "release-gate", notify: false }), model);
+      await page.waitForFunction(target => state.config.model === target && state.productEvaluationBoundModel === target, model);
+      const binding = await page.evaluate(target => {
+        const unavailable = state.importQuality?.kind === "PRODUCT_EVALUATION_UNAVAILABLE";
+        const supported = [...new Set([...(state.models || []), ...Object.keys(state.summaryHeat || {}), ...Object.keys(state.summaryPlatformNsr || {}), ...(state.rows || []).map(row => row[0])])];
+        return {
+          target,
+          contextModel: state.config.model,
+          boundModel: state.productEvaluationBoundModel,
+          sellingPointModel: document.querySelector("#selling-point-model-select")?.value || "",
+          unavailable,
+          datasetModels: state.models || [],
+          rowCount: (state.rows || []).length,
+          summaryModelCount: Object.keys(state.summaryHeat || {}).length,
+          supported,
+          sourceNote: state.sourceNote || "",
+        };
+      }, model);
+      const unavailableIsClean = !binding.unavailable
+        || (binding.datasetModels.length === 1
+          && binding.datasetModels[0] === model
+          && binding.rowCount === 0
+          && binding.summaryModelCount === 0
+          && binding.sourceNote.includes(model)
+          && binding.sourceNote.includes("已清除上一车型数据"));
+      add(
+        `${viewport.name}: ${model} never reuses the previously selected model dataset`,
+        binding.contextModel === model
+          && binding.boundModel === model
+          && binding.sellingPointModel === model
+          && binding.supported.includes(model)
+          && unavailableIsClean,
+        JSON.stringify(binding),
+      );
+    }
+
+    await page.evaluate(() => window.MMNVehicleContext.select("奥迪E7X", { source: "release-gate-restore", notify: false }));
+    await page.waitForFunction(() => state.config.model === "奥迪E7X" && state.productEvaluationBoundModel === "奥迪E7X");
+    const restoredE7x = await page.evaluate(() => ({
+      models: state.models || [],
+      rowModels: [...new Set((state.rows || []).map(row => row[0]))],
+      attributeCount: Object.keys(state.summaryAttributeBenchmark?.["全网"] || {}).length,
+      sellingPointModel: document.querySelector("#selling-point-model-select")?.value || "",
+    }));
+    add(
+      `${viewport.name}: a registered model dataset restores after visiting models without product data`,
+      restoredE7x.models.includes("奥迪E7X")
+        && restoredE7x.rowModels.length === 1
+        && restoredE7x.rowModels[0] === "奥迪E7X"
+        && restoredE7x.attributeCount === 15
+        && restoredE7x.sellingPointModel === "奥迪E7X",
+      JSON.stringify(restoredE7x),
+    );
+
     await page.screenshot({ path: `output/playwright/all-surfaces-${viewport.width}.png`, fullPage: true });
   } finally {
     await page.close();
