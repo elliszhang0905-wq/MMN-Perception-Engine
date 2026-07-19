@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,6 +8,35 @@ import server
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def complete_delivery_payload(count=1):
+    samples = [{"id": f"sample-{index}", "blogger_name": "超哥超车", "vertical_domain": "汽车垂直内容"} for index in range(count)]
+    sources = [{"id": f"source-{index}", "author": "超哥超车"} for index in range(count)]
+    profile = {
+        "id": "profile-1", "blogger_name": "超哥超车", "vertical_domain": "汽车垂直内容",
+        "validation_status": "manual_required", "source_sample_count": count,
+        "professional_background": "汽车垂直内容判断能力",
+        "comparison_logic": "固定预算和场景后比较",
+        "evidence_preference": "公开且可复验的证据",
+        "reusable_agent_instruction": "基于公开样本生成判断",
+        "script_template": "问题到证据再到验证动作",
+        "report_template": "结论、证据、边界、动作",
+        "evaluation_framework": ["问题", "证据", "边界"],
+        "terminology_system": ["预算", "场景"],
+        "judgment_rules": ["结论必须可复验"],
+        "content_structure_patterns": ["先问题后证据"],
+        "marketing_translation_patterns": ["转成用户决策清单"],
+        "strategy_assets": [{"name": "策略1"}, {"name": "策略2"}],
+        "script_assets": [{"name": "脚本1"}, {"name": "脚本2"}],
+    }
+    return {
+        "imported": count,
+        "sourceMode": "social_assistant",
+        "sourcePriority": "primary",
+        "stats": {"samples": count},
+        "result": {"profile": profile, "samples": samples, "sources": sources},
+    }
 
 
 class FakeCreatorRepository:
@@ -42,6 +73,179 @@ class FakeCreatorRepository:
 
 
 class BloggerIncubationWorkbenchTest(unittest.TestCase):
+    def test_general_auto_samples_do_not_inherit_chassis_profile(self):
+        sources = [server.normalize_blogger_source({
+            "达人昵称": "超哥超车",
+            "视频描述": title,
+            "视频链接": f"https://www.douyin.com/video/{index}",
+        }, "【社媒助手】达人「超哥超车」的视频数据.xlsx", "digest") for index, title in enumerate([
+            "油车价格大降价，买车三买三不买",
+            "粉丝连麦：50万预算买什么车更理性",
+            "新能源汽车真的有看见的那么好吗",
+        ])]
+        samples = [server.distill_blogger_sample(source) for source in sources]
+        profile = server.blogger_skill_profile_from_samples(samples, blogger_name="超哥超车")
+
+        self.assertEqual(server.dominant_blogger_domain(samples), "汽车垂直内容")
+        self.assertEqual(profile["vertical_domain"], "汽车垂直内容")
+        self.assertNotIn("底盘工程方向", profile["professional_background"])
+        self.assertIn("预算与使用场景", profile["evaluation_framework"])
+
+    def test_filename_creator_must_match_export_rows(self):
+        rows = [{"视频描述": "购车建议", "达人昵称": "另一位达人"}]
+        with patch.object(server, "generic_rows_from_file", return_value=rows):
+            with self.assertRaisesRegex(ValueError, "身份不一致"):
+                server.import_blogger_skill_file(
+                    b"xlsx", "【社媒助手】达人「超哥超车」的视频数据.xlsx"
+                )
+
+    def test_file_without_named_creator_rejects_mixed_accounts(self):
+        rows = [
+            {"视频描述": "购车建议一", "达人昵称": "达人甲"},
+            {"视频描述": "购车建议二", "达人昵称": "达人乙"},
+        ]
+        with patch.object(server, "generic_rows_from_file", return_value=rows):
+            with self.assertRaisesRegex(ValueError, "多个达人"):
+                server.import_blogger_skill_file(b"xlsx", "达人视频数据.xlsx")
+
+    def test_async_import_job_persists_four_stage_progress_and_result(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(server, "DB_PATH", Path(temp_dir) / "jobs.db"), \
+                patch.object(server, "BLOGGER_SKILL_JOB_ROOT", Path(temp_dir) / "job-files"):
+            server.init_db()
+
+            def runner(data, filename, edition, limit, progress_callback):
+                for stage, progress in (("import", 20), ("distillation", 45), ("analysis", 80), ("delivery", 98)):
+                    progress_callback(stage, progress, f"{stage} ready")
+                return complete_delivery_payload(12)
+
+            job = server.start_blogger_skill_import_job(
+                b"workbook", "【社媒助手】达人「超哥超车」的视频数据.xlsx", runner=runner
+            )
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                job = server.get_blogger_skill_import_job(job["id"])
+                if job["status"] == "completed":
+                    break
+                time.sleep(.02)
+
+            self.assertEqual(job["status"], "completed")
+            self.assertEqual(job["progress"], 100)
+            self.assertEqual(job["importedCount"], 12)
+            self.assertEqual(job["result"]["creatorName"], "超哥超车")
+            self.assertEqual(job["result"]["verticalDomain"], "汽车垂直内容")
+            self.assertTrue({"import", "distillation", "analysis", "delivery"}.issubset(
+                {event["stage"] for event in job["stages"]}
+            ))
+
+    def test_failed_import_job_can_retry_the_same_preserved_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(server, "DB_PATH", Path(temp_dir) / "jobs.db"), \
+                patch.object(server, "BLOGGER_SKILL_JOB_ROOT", Path(temp_dir) / "job-files"):
+            server.init_db()
+
+            def failing_runner(data, filename, edition, limit, progress_callback):
+                progress_callback("analysis", 48, "analysis started")
+                raise ValueError("能力画像证据不足")
+
+            job = server.start_blogger_skill_import_job(
+                b"workbook", "【社媒助手】达人「超哥超车」的视频数据.xlsx", runner=failing_runner
+            )
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                job = server.get_blogger_skill_import_job(job["id"])
+                if job["status"] == "failed":
+                    break
+                time.sleep(.02)
+            self.assertEqual(job["status"], "failed")
+            self.assertIn("证据不足", job["error"])
+
+            def successful_runner(data, filename, edition, limit, progress_callback):
+                for stage, progress in (("import", 20), ("distillation", 45), ("analysis", 80), ("delivery", 98)):
+                    progress_callback(stage, progress, f"{stage} ready")
+                return complete_delivery_payload(1)
+
+            retried = server.retry_blogger_skill_import_job(job["id"], runner=successful_runner)
+            self.assertEqual(retried["id"], job["id"])
+            deadline = time.time() + 3
+            while time.time() < deadline:
+                retried = server.get_blogger_skill_import_job(job["id"])
+                if retried["status"] == "completed":
+                    break
+                time.sleep(.02)
+            self.assertEqual(retried["status"], "completed")
+            self.assertEqual(retried["progress"], 100)
+            self.assertEqual(retried["error"], "")
+
+    def test_delivery_gate_rejects_incomplete_or_cross_creator_cards(self):
+        payload = complete_delivery_payload(2)
+        payload["result"]["profile"]["script_assets"] = []
+        with self.assertRaisesRegex(ValueError, "资产不完整"):
+            server.validate_blogger_import_delivery(payload, expected_creator="超哥超车")
+
+        payload = complete_delivery_payload(2)
+        payload["result"]["samples"][1]["blogger_name"] = "另一位达人"
+        with self.assertRaisesRegex(ValueError, "混入其他达人"):
+            server.validate_blogger_import_delivery(payload, expected_creator="超哥超车")
+
+    def test_incomplete_card_is_rejected_before_any_database_write(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(server, "DB_PATH", Path(temp_dir) / "gate.db"):
+            server.init_db()
+            source = server.normalize_blogger_source({
+                "达人昵称": "超哥超车", "视频描述": "20万预算如何选家用车",
+                "视频链接": "https://www.douyin.com/video/1",
+            }, "【社媒助手】达人「超哥超车」的视频数据.xlsx", "digest")
+
+            def incomplete_distill(profile, samples, progress_callback=None):
+                candidate = server.attach_blogger_assets(profile, samples)
+                candidate["source_sample_count"] = len(samples)
+                candidate["script_assets"] = []
+                return candidate
+
+            with patch.object(server, "blogger_skill_model_distill", side_effect=incomplete_distill):
+                with self.assertRaisesRegex(ValueError, "资产不完整"):
+                    server.save_blogger_skill_items([source])
+
+            with server.db() as conn:
+                self.assertEqual(conn.execute("select count(*) from blogger_skill_sources").fetchone()[0], 0)
+                self.assertEqual(conn.execute("select count(*) from blogger_skill_samples").fetchone()[0], 0)
+                self.assertEqual(conn.execute("select count(*) from blogger_skill_profiles").fetchone()[0], 0)
+
+    def test_job_stage_cannot_go_backwards_or_complete_early(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(server, "DB_PATH", Path(temp_dir) / "jobs.db"), \
+                patch.object(server, "BLOGGER_SKILL_JOB_ROOT", Path(temp_dir) / "job-files"):
+            server.init_db()
+            with patch.object(server.Thread, "start", return_value=None):
+                job = server.start_blogger_skill_import_job(
+                    b"workbook", "【社媒助手】达人「超哥超车」的视频数据.xlsx"
+                )
+            server.update_blogger_skill_import_job(job["id"], status="running", stage="analysis", progress=60)
+            with self.assertRaisesRegex(ValueError, "不能回退"):
+                server.update_blogger_skill_import_job(job["id"], status="running", stage="distillation", progress=70)
+            with self.assertRaisesRegex(ValueError, "全部交付门禁"):
+                server.update_blogger_skill_import_job(job["id"], status="completed", stage="delivery", progress=90)
+            server.init_db()
+            interrupted = server.get_blogger_skill_import_job(job["id"])
+            self.assertEqual(interrupted["status"], "failed")
+            self.assertIsNotNone(interrupted["completedAt"])
+
+    def test_local_directory_scan_uses_the_same_async_job_pipeline(self):
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(server, "BLOGGER_SKILL_IMPORT_ROOT", Path(temp_dir)):
+            older = Path(temp_dir) / "【社媒助手】达人「达人甲」的视频数据.csv"
+            newer = Path(temp_dir) / "【社媒助手】达人「达人乙」的视频数据.xlsx"
+            older.write_bytes(b"old")
+            time.sleep(.01)
+            newer.write_bytes(b"new")
+            with patch.object(server, "start_blogger_skill_import_job", return_value={"id": "job-1"}) as start:
+                result = server.scan_blogger_skill_imports(org_id="org-1")
+
+            self.assertEqual(result["job"]["id"], "job-1")
+            self.assertEqual(result["queuedFiles"], 1)
+            self.assertEqual(result["remainingFiles"], 1)
+            self.assertEqual(start.call_args.args[1], newer.name)
+            self.assertEqual(start.call_args.kwargs["org_id"], "org-1")
+
     def test_social_assistant_fields_are_attributed_to_creator(self):
         row = {
             "视频ID": "7348040890440551707",
@@ -182,6 +386,11 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         self.assertIn("补充采集（可选）", html)
         self.assertIn("不覆盖主证据", html)
         self.assertIn("账号补充采集任务", app)
+        self.assertIn("公开主证据 · 能力卡生成任务", app)
+        self.assertIn("BLOGGER_IMPORT_PHASES", app)
+        self.assertIn("/api/blogger-skill/import-jobs/", app)
+        self.assertIn("data-blogger-import-retry", app)
+        self.assertIn('role="progressbar"', app)
         self.assertNotIn("社媒助手主采集", html)
         self.assertNotIn("TikHub 补充采集", html)
         self.assertNotIn("Qwen + DeepSeek 共同证据质检通过", app)

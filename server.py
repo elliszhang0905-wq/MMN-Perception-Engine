@@ -18,6 +18,7 @@ import base64
 import hmac
 import html as html_lib
 import math
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -60,6 +61,13 @@ from opportunity_pipeline import (
 )
 from cockpit_decision_loop import derive_execution_recommendations
 from group_dashboard import build_group_dashboard_payload, build_sales_warning_demo, merge_sales_payloads, parse_cpca_ice_market
+from weekly_market_refresh import load_weekly_market_snapshot, refresh_weekly_market_snapshot
+from mmn_model_governance import (
+    GOVERNANCE_VERSION,
+    TASK_ROUTER_POLICIES,
+    cockpit_governance_snapshot,
+    public_model_governance_contract,
+)
 from bf_factory.repository import (
     BFConflictError,
     BFNotFoundError,
@@ -69,6 +77,16 @@ from bf_factory.repository import (
 from bf_factory.service import BFService
 from bf_factory.schema import BF_BRIEF_JSON_SCHEMA
 from bf_factory.storage import sanitize_filename
+from creator_script_generation import (
+    PLATFORM_RULES as CREATOR_SCRIPT_PLATFORM_RULES,
+    draft_prompt as creator_script_draft_prompt,
+    export_script_docx,
+    final_prompt as creator_script_final_prompt,
+    normalize_script_result,
+    platform_rule as creator_script_platform_rule,
+    review_prompt as creator_script_review_prompt,
+    validate_human_tone,
+)
 from creator_distillation import CreatorDistillationService
 from creator_distillation.service import api_error as creator_distillation_api_error
 from douyin_hot_entities import (
@@ -123,8 +141,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260719-global-readiness-2"
-APP_RELEASE_DATE = "2026-07-19"
+APP_VERSION_CODE = "beta-1.02-20260720-cockpit-creator-1"
+APP_RELEASE_DATE = "2026-07-20"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -156,6 +174,8 @@ ROUTER_REVIEW_LOCK = Lock()
 ROUTER_REVIEW_TASKS = {}
 OPPORTUNITY_JOB_LOCK = Lock()
 OPPORTUNITY_JOB_TASKS = {}
+BLOGGER_IMPORT_JOB_LOCK = Lock()
+CREATOR_SCRIPT_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_TASKS = {}
 SOCIAL_TREND_JOB_LIMIT = 100
@@ -174,15 +194,8 @@ OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
     "modules": ["NSR", "Emotion", "Attribute", "Identity", "Positioning", "Gap", "Action", "RAG知识库", "市场周报", "竞品传播分析", "达人蒸馏", "内容Brief", "脚本生产", "品牌/高管IP蒸馏", "策略报告输出", "营销智能体矩阵预留"],
     "workflow": ["本品", "竞品", "用户情绪", "产品属性", "身份认同", "认知空位", "传播动作"],
-    "router": {
-        "strategy_reasoning": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN策略推理模型"},
-        "content_delivery": {"primary": "qwen", "reviewer": "", "label": "MMN中文交付快速模型"},
-        "fact_explanation": {"primary": "rag", "reviewer": "qwen", "label": "MMN事实解释模型"},
-        "vehicle_configuration_fact": {"primary": "rag", "reviewer": "qwen+deepseek+kimi", "label": "MMN汽车配置三模型验证"},
-        "data_summary": {"primary": "qwen", "reviewer": "", "label": "MMN标签摘要快速模型"},
-        "fast_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN快速策略"},
-        "complex_strategy": {"primary": "deepseek", "reviewer": "qwen", "label": "MMN深度策略"}
-    }
+    "governanceVersion": GOVERNANCE_VERSION,
+    "router": TASK_ROUTER_POLICIES,
 }
 DONGCHEDI_SALES_BASE = "https://www.dongchedi.com"
 SALES_CACHE = {"expires": "", "payload": None}
@@ -203,6 +216,7 @@ SOCIAL_PLUGIN_TASK_LABELS = {
     "xiaohongshu": "小红书笔记自动采集"
 }
 BLOGGER_SKILL_IMPORT_ROOT = Path(os.getenv("MMN_BLOGGER_SKILL_IMPORT_ROOT", str(ROOT / "imports" / "chassis_reviews"))).expanduser().resolve()
+BLOGGER_SKILL_JOB_ROOT = Path(os.getenv("MMN_BLOGGER_SKILL_JOB_ROOT", str(DATA_DIR / "blogger_skill_import_jobs"))).expanduser().resolve()
 BLOGGER_SKILL_TAGS = [
     "滤震", "支撑", "侧倾", "转向手感", "车身收敛", "后桥跟随", "制动姿态", "NVH", "轮胎匹配",
     "平台架构", "空气悬挂", "CDC", "后轮转向", "机械素质", "电控底盘", "高速稳定性", "低速舒适性",
@@ -580,6 +594,28 @@ def init_db():
             updated_at text not null,
             unique(edition, blogger_name, vertical_domain)
         );
+        create table if not exists blogger_skill_import_jobs (
+            id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
+            filename text not null,
+            file_path text not null,
+            file_hash text not null,
+            creator_name text,
+            status text not null default 'queued',
+            stage text not null default 'import',
+            progress integer not null default 0,
+            message text not null default '',
+            error text not null default '',
+            imported_count integer not null default 0,
+            result_json text not null default '{}',
+            stage_history_json text not null default '[]',
+            created_at text not null,
+            updated_at text not null,
+            completed_at text
+        );
+        create index if not exists idx_blogger_skill_import_jobs_scope
+        on blogger_skill_import_jobs(org_id, edition, updated_at desc);
         create table if not exists content_capability_sources (
             id text primary key,
             edition text not null default 'china',
@@ -618,6 +654,33 @@ def init_db():
             created_at text not null,
             unique(edition, source_id, id)
         );
+        create table if not exists creator_script_jobs (
+            id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
+            creator_asset_id text not null,
+            creator_name text not null,
+            platform text not null,
+            status text not null default 'queued',
+            stage text not null default 'brief',
+            progress integer not null default 0,
+            message text not null default '',
+            error text not null default '',
+            request_json text not null default '{}',
+            creator_snapshot_json text not null default '{}',
+            evidence_json text not null default '[]',
+            result_json text not null default '{}',
+            review_json text not null default '{}',
+            model_trace_json text not null default '{}',
+            stage_history_json text not null default '[]',
+            parent_job_id text,
+            revision_no integer not null default 1,
+            created_at text not null,
+            updated_at text not null,
+            completed_at text
+        );
+        create index if not exists idx_creator_script_jobs_scope
+        on creator_script_jobs(org_id, edition, creator_asset_id, updated_at desc);
         create table if not exists agent_runs (
             id text primary key,
             org_id text,
@@ -759,6 +822,13 @@ def init_db():
         ensure_column(conn, "blogger_skill_profiles", "model_trace_json", "text not null default '{}'")
         ensure_column(conn, "blogger_skill_profiles", "source_sample_count", "integer not null default 0")
         ensure_column(conn, "blogger_skill_profiles", "validation_updated_at", "text")
+        conn.execute("""
+            update blogger_skill_import_jobs
+            set status='failed', stage='delivery', progress=progress,
+                message='服务重启中断了上一次处理，可从原文件重试。',
+                error='任务在服务重启前未完成', updated_at=?, completed_at=coalesce(completed_at, ?)
+            where status in ('queued','running')
+        """, (now(), now()))
         ensure_column(conn, "model_judgment_assets", "highlights_json", "text not null default '[]'")
         conn.execute("update vertical_rank_assets set compare_share=compare_share/100 where compare_share > 1")
         conn.execute("""
@@ -3959,22 +4029,35 @@ def build_brand_consulting_output(implication, framework, facts, source):
 
 
 def executive_brief_evidence_packet():
-    facts = [
+    baseline = {"facts": [
         {"id": "retail", "label": "乘用车零售", "value": 44.3, "unit": "万辆", "yoy": -0.15, "priorValue": 52.1},
         {"id": "wholesale", "label": "乘用车厂商批发", "value": 37.9, "unit": "万辆", "yoy": -0.26, "priorValue": 51.2},
         {"id": "nev_retail", "label": "新能源零售", "value": 28.0, "unit": "万辆", "yoy": -0.08, "priorValue": 30.4},
         {"id": "nev_penetration", "label": "新能源零售渗透率", "value": 63.1, "unit": "%"},
-    ]
-    source = {
-        "label": "乘联会《周度分析｜车市扫描（20260706—0712）》",
+    ], "source": {
+        "label": "中国汽车流通协会乘用车市场信息联席分会《车市扫描（2026年7月6日—7月12日）》",
         "url": "https://www.cpcaauto.com/newslist.php?types=csjd&id=4272",
-        "period": "2026年7月1—12日",
-    }
+        "period": "截至2026年7月12日 · 7月月内累计",
+        "metricPeriod": "2026年7月1—12日",
+        "metricBasis": "month_to_date",
+        "naturalWeekPeriod": "2026年7月6—12日",
+        "naturalWeekEndDate": "2026-07-12",
+    }}
+    weekly_snapshot, weekly_refresh = load_weekly_market_snapshot(DATA_DIR, baseline)
+    facts = weekly_snapshot["facts"]
+    source = weekly_snapshot["source"]
+    fact_index = {item["id"]: item for item in facts}
+    retail, wholesale = fact_index["retail"], fact_index["wholesale"]
+    nev_retail, penetration = fact_index["nev_retail"], fact_index["nev_penetration"]
+    retail_yoy = int(round(float(retail["yoy"]) * 100))
+    wholesale_yoy = int(round(float(wholesale["yoy"]) * 100))
+    nev_yoy = int(round(float(nev_retail["yoy"]) * 100))
+    resilience_gap = int(round((float(nev_retail["yoy"]) - float(retail["yoy"])) * 100))
     inferences = [
-        {"id": "retail_pressure", "title": "终端零售承压", "detail": "乘用车零售44.3万辆，同比下降15%"},
-        {"id": "wholesale_pressure", "title": "批发端承压更明显", "detail": "厂商批发37.9万辆，同比下降26%，降幅大于零售"},
-        {"id": "nev_resilience", "title": "新能源结构韧性", "detail": "新能源零售同比下降8%，降幅较乘用车总体少7个百分点"},
-        {"id": "penetration_buffer", "title": "新能源结构占比", "detail": "新能源零售渗透率为63.1%"},
+        {"id": "retail_pressure", "title": "终端零售变化", "detail": f"乘用车零售{retail['value']}万辆，同比{retail_yoy:+d}%"},
+        {"id": "wholesale_pressure", "title": "批发端变化", "detail": f"厂商批发{wholesale['value']}万辆，同比{wholesale_yoy:+d}%"},
+        {"id": "nev_resilience", "title": "新能源结构变化", "detail": f"新能源零售同比{nev_yoy:+d}%，相对乘用车总体高{resilience_gap:+d}个百分点"},
+        {"id": "penetration_buffer", "title": "新能源结构占比", "detail": f"新能源零售渗透率为{penetration['value']}%"},
     ]
     brand_implications = [
         {"id": "im", "brand": "智己", "summaryDetail": "双旗舰模型一致认为，智己本阶段应把高端新能源心智拆成可感知的驾控、智能、补能与豪华体验，判断重点从参数领先转向用户是否形成明确换购理由。", "actionDetail": "内容执行按核心车型建立人群分层：高意向用户优先承接试驾与换购，观望用户用真实场景和车主证言解释技术价值，并按周淘汰无效技术表达。", "signalDetail": "复盘需同时看品牌搜索、试驾线索、换购人群占比、优势属性提及率和高意向评论；只有认知与线索同步改善，才判定传播有效。"},
@@ -3998,7 +4081,13 @@ def executive_brief_evidence_packet():
         "大通": {"conflict": "出口总量能够说明规模，但无法反映区域订单质量、库存、运力、渠道和利润风险。", "choice": "从总量管理转向国家—区域—车型三级机会与交付管理。", "priority": "建立区域车型机会清单，让传播资源服从真实订单和交付能力。", "phase1": "核对重点国家的车型需求、库存、运力、渠道和终端价格。", "phase2": "只在交付承接健康区域放大行业场景和车型内容。", "phase3": "按订单质量与利润贡献动态调整国家优先级。", "owner": "海外区域负责人对订单交付负责，品牌和供应链共同确认传播窗口。", "leading": "区域询盘、经销商反馈、内容响应和订单结构。", "conversion": "订单、库存周转、交付周期、运价和终端价格。", "threshold": "库存或交付周期恶化但传播仍加码时触发红色预警。", "correction": "暂停该区域增量传播，优先处理库存、运力和渠道承接。"},
         "五菱": {"conflict": "规模与亲民价格形成广泛认知，但品质、安全和长期信赖尚未同步沉淀。", "choice": "从价格普及者升级为家庭长期可信赖的国民新能源品牌。", "priority": "把品质安全证据嵌入代步、接送、家庭短途和县域出行内容。", "phase1": "明确主力车型分工，整理品质、安全、空间与能耗证据。", "phase2": "用真实车主内容覆盖四类高频场景，减少新品间认知稀释。", "phase3": "把高口碑资产用于复购换购和县域渠道长期运营。", "owner": "品牌管理车型心智分工，产品与质量团队提供证据，渠道负责场景承接。", "leading": "品质安全NSR、车主口碑、县域人群覆盖和主力车型认知集中度。", "conversion": "复购换购、试驾线索与主力车型成交结构。", "threshold": "销量扩张但品质安全NSR或车型认知集中度连续两周下降时触发预警。", "correction": "减少价格与新品泛曝光，集中补强品质安全和主力车型分工。"},
     }
+    weekly_context = (
+        f"{source['period']}，乘用车零售同比{retail_yoy:+d}%，新能源零售同比{nev_yoy:+d}%，"
+        f"新能源渗透率{penetration['value']}%。"
+    )
     for implication in brand_implications:
+        implication["weeklyContext"] = weekly_context
+        implication["summaryDetail"] = weekly_context + implication["summaryDetail"]
         framework = brand_frameworks[implication["brand"]]
         implication["consultingOutput"] = build_brand_consulting_output(implication, framework, facts, source)
     actions = [
@@ -4006,7 +4095,7 @@ def executive_brief_evidence_packet():
             "id": "p1",
             "scope": "集团品牌与媒介",
             "title": "统一“结构韧性”周度传播口径",
-            "conclusion": "总盘零售同比下降15%，但新能源零售降幅少7个百分点且渗透率达到63.1%；集团传播应把新能源韧性与乘用车总体承压分开陈述。",
+            "conclusion": f"总盘零售同比{retail_yoy:+d}%，新能源零售同比{nev_yoy:+d}%且渗透率达到{penetration['value']}%；集团传播应把新能源结构变化与乘用车总体变化分开陈述。",
             "reviewSignal": "新能源内容正向认知 / 竞品差异词",
             "evidenceIds": ["retail", "nev_retail", "nev_penetration"],
         },
@@ -4051,6 +4140,7 @@ def executive_brief_evidence_packet():
                     else f"{vehicle['model']}尚未接入同口径声量、平台NSR与属性VOC，当前不发布传播优先级；先完成数据接入与竞品口径确认。"
                 ),
                 "reviewSignal": "优势属性提及率 / 平台NSR" if connected else "数据接入率 / 竞品口径 / 有效样本量",
+                "weeklyContext": weekly_context,
                 "evidenceIds": ["e7x_voice_rank", "e7x_nsr_rank"] if connected else ["launch_roster", "vehicle_data_gap"],
             }
         )
@@ -4064,11 +4154,22 @@ def executive_brief_evidence_packet():
         {"id": "e7x_nsr_rank", "type": "imported_product_evaluation", "detail": "AUDI E7X五车同口径全网NSR排名第2。"},
         {"id": "vehicle_data_gap", "type": "data_coverage", "detail": "除AUDI E7X外，当前名单车型尚未接入同口径声量、平台NSR与属性VOC。"},
     ]
-    candidate = "乘用车零售与批发同比均下降，且批发降幅大于零售；新能源零售降幅小于乘用车总体，零售渗透率为63.1%。"
+    candidate = (
+        f"乘用车零售同比{retail_yoy:+d}%，厂商批发同比{wholesale_yoy:+d}%；"
+        f"新能源零售同比{nev_yoy:+d}%，零售渗透率为{penetration['value']}%。"
+    )
+    headline = (
+        "市场承压，但新能源仍具结构韧性"
+        if retail_yoy < 0 and resilience_gap > 0
+        else "乘用车市场与新能源结构同步变化"
+    )
     fingerprint_source = json.dumps({"facts": facts, "source": source, "candidate": candidate, "inferences": inferences, "brandImplications": brand_implications, "actions": actions, "actionEvidence": action_evidence, "launchVehicles": launch_vehicles, "vehicleActions": vehicle_actions}, ensure_ascii=False, sort_keys=True)
     return {
         "facts": facts,
         "source": source,
+        "headline": headline,
+        "weeklyRefresh": weekly_refresh,
+        "batchId": weekly_snapshot["batchId"],
         "candidate": candidate,
         "inferences": inferences,
         "brandImplications": brand_implications,
@@ -4173,9 +4274,21 @@ def save_executive_brief_cache(payload):
 def public_executive_brief_state(packet, cached=None):
     cached = cached or {}
     status = cached.get("status") if cached.get("status") in {"verified", "pending_review"} else "pending_review"
+    with EXECUTIVE_BRIEF_REVIEW_LOCK:
+        review_running = (EXECUTIVE_BRIEF_REVIEW_TASKS.get(packet["fingerprint"]) or {}).get("status") == "running"
+    review_completed = bool(cached.get("reviewedAt"))
+    status_label = (
+        "双旗舰模型交叉验证已通过"
+        if status == "verified"
+        else (
+            "双旗舰模型交叉验证中 · 暂不发布"
+            if review_running or not review_completed
+            else "双旗舰模型交叉验证未通过 · 暂不发布"
+        )
+    )
     return {
         "status": status,
-        "statusLabel": "双旗舰模型交叉验证已通过" if status == "verified" else "双旗舰模型交叉验证中 · 暂不发布",
+        "statusLabel": status_label,
         "summary": packet["candidate"] if status == "verified" else "",
         "facts": packet["facts"],
         "inferences": packet["inferences"] if status == "verified" else [],
@@ -4184,8 +4297,13 @@ def public_executive_brief_state(packet, cached=None):
         "launchVehicles": packet["launchVehicles"] if status == "verified" else [],
         "vehicleActions": packet["vehicleActions"] if status == "verified" else [],
         "source": packet["source"],
+        "headline": packet.get("headline") or "乘用车市场与新能源结构同步变化",
+        "weeklyRefresh": packet.get("weeklyRefresh") or {},
+        "batchId": packet.get("batchId") or "",
         "factsFingerprint": packet["fingerprint"],
         "providerChecks": cached.get("providerChecks") or {"qwen": "pending", "deepseek": "pending"},
+        "reviewRunning": review_running,
+        "reviewCompleted": review_completed,
         "reviewedAt": cached.get("reviewedAt") or "",
         "priorValueMethod": "按本期值 ÷（1＋同比）反算，显示至0.1万辆",
     }
@@ -4254,6 +4372,72 @@ def executive_brief_state(force=False):
         return public_executive_brief_state(packet, cached)
     enqueue_executive_brief_review(packet, force=force)
     return public_executive_brief_state(packet, cached)
+
+
+def run_weekly_group_dashboard_refresh(payload=None):
+    """Publish one atomic weekly batch, then invalidate/re-run its review."""
+    status = refresh_weekly_market_snapshot(DATA_DIR, payload=payload)
+    packet = executive_brief_evidence_packet()
+    review_started = False
+    if status.get("status") == "published":
+        review_started = enqueue_executive_brief_review(packet, force=True)
+    return {**status, "reviewStarted": review_started, "weeklyRefresh": packet.get("weeklyRefresh")}
+
+
+def monthly_sales_refresh_status():
+    path = DATA_DIR / "monthly_sales_warning_refresh_status.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        payload = {}
+    return {
+        "cadence": "monthly",
+        "schedule": "每月15日起检查新月份数据",
+        "status": payload.get("status") or "scheduled",
+        "statusLabel": payload.get("statusLabel") or "月度销量预警按已发布月份展示",
+        "lastAttemptAt": payload.get("lastAttemptAt") or "",
+        "lastSuccessAt": payload.get("lastSuccessAt") or "",
+        "sourcePeriod": payload.get("sourcePeriod") or "",
+        "error": payload.get("error") or "",
+    }
+
+
+def run_monthly_sales_warning_refresh():
+    attempted_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    crawler_root = Path(os.getenv("MMN_DCD_CRAWLER_ROOT") or (ROOT.parent / "mmn-dcd-sales-crawler"))
+    runner = crawler_root / "scripts" / "run_scheduled_update.py"
+    status = {"lastAttemptAt": attempted_at, "lastSuccessAt": "", "sourcePeriod": ""}
+    try:
+        if not runner.exists():
+            raise RuntimeError("月度销量采集运行环境未安装，沿用上期销量预警")
+        result = subprocess.run(
+            [os.getenv("PYTHON", "python3"), str(runner)], cwd=str(crawler_root),
+            capture_output=True, text=True, timeout=900, check=False,
+        )
+        if result.returncode:
+            raise RuntimeError((result.stderr or result.stdout or "月度销量更新失败").strip()[-500:])
+        latest = crawler_root / "data" / "processed" / "latest.json"
+        published = json.loads(latest.read_text(encoding="utf-8")) if latest.exists() else {}
+        item_periods = [
+            str(item.get("period_start") or item.get("month") or "")[:7]
+            for item in published.get("items") or [] if isinstance(item, dict)
+        ]
+        period = str((published.get("source") or {}).get("period") or published.get("period") or max(item_periods, default=""))
+        status.update({
+            "status": "published", "statusLabel": "月度销量预警已更新",
+            "lastSuccessAt": attempted_at, "sourcePeriod": period, "error": "",
+        })
+    except Exception as exc:
+        status.update({
+            "status": "carried_forward", "statusLabel": "月度数据待发布 · 沿用上期销量预警",
+            "error": str(exc),
+        })
+    path = DATA_DIR / "monthly_sales_warning_refresh_status.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+    return status
 
 
 def sales_warning_evidence_packet(warning=None):
@@ -9283,38 +9467,81 @@ def distill_blogger_sample(source):
         "created_at": now()
     }
 
-def blogger_skill_profile_from_samples(samples, blogger_name="冷静的饺子", edition="china", vertical_domain="底盘"):
-    relevant = [s for s in samples if (s.get("blogger_name") or blogger_name) == blogger_name or blogger_name == "冷静的饺子"]
-    tags = sorted({t for s in relevant for t in (s.get("professional_dimensions") or [])}) or BLOGGER_SKILL_TAGS
+def dominant_blogger_domain(samples, fallback="汽车垂直内容"):
+    counts = Counter(
+        str(sample.get("vertical_domain") or "").strip()
+        for sample in samples
+        if str(sample.get("vertical_domain") or "").strip()
+    )
+    return counts.most_common(1)[0][0] if counts else fallback
+
+
+def dominant_blogger_platform(samples, fallback="公开内容"):
+    counts = Counter(
+        str(sample.get("platform") or "").strip()
+        for sample in samples
+        if str(sample.get("platform") or "").strip()
+    )
+    return counts.most_common(1)[0][0] if counts else fallback
+
+
+def blogger_name_from_filename(filename):
+    name = Path(str(filename or "")).stem
+    quoted = re.search(r"达人[「『\"“]([^」』\"”]+)[」』\"”]", name)
+    separated = re.search(r"达人[-_ ]+(.+?)(?:[-_ ]*(?:视频|笔记)?数据(?:[-_ ]|$)|$)", name)
+    match = quoted or separated
+    if match:
+        candidate = re.sub(r"(?:的视频数据|的笔记数据|视频数据|笔记数据|数据)$", "", match.group(1)).strip(" -_")
+        return candidate if candidate not in {"视频", "笔记", "导出"} else ""
+    return ""
+
+
+def blogger_skill_profile_from_samples(samples, blogger_name="待确认博主", edition="china", vertical_domain=""):
+    blogger_name = str(blogger_name or "").strip() or "待确认博主"
+    relevant = [s for s in samples if str(s.get("blogger_name") or "").strip() == blogger_name]
+    if not relevant:
+        observed_names = {str(s.get("blogger_name") or "").strip() for s in samples if str(s.get("blogger_name") or "").strip()}
+        if len(observed_names) > 1:
+            raise ValueError("能力卡样本包含多个达人，禁止混合生成画像。")
+        relevant = list(samples)
+    vertical_domain = vertical_domain or dominant_blogger_domain(relevant)
+    platform = dominant_blogger_platform(relevant)
+    tags = sorted({t for s in relevant for t in (s.get("professional_dimensions") or [])}) or [vertical_domain]
     topics = [s.get("original_topic") for s in relevant if s.get("original_topic")][:18]
     rules = sorted({s.get("reusable_judgment_rule") for s in relevant if s.get("reusable_judgment_rule")})
+    is_chassis = vertical_domain == "底盘"
+    positioning = (
+        "底盘工程方向公开内容样本源；MMN仅蒸馏专业判断框架，不复刻个人口吻。"
+        if is_chassis else
+        f"{vertical_domain}方向公开内容样本源；MMN仅蒸馏选题逻辑、判断框架和内容结构，不复刻原文或个人身份。"
+    )
     return {
         "id": stable_id("blogger-profile", edition, blogger_name, vertical_domain),
         "edition": edition,
         "blogger_name": blogger_name,
-        "platform": "小红书 / 公开垂直内容",
+        "platform": platform,
         "vertical_domain": vertical_domain,
-        "professional_background": "底盘工程方向公开内容样本源；MMN仅蒸馏专业判断框架，不复刻个人口吻。",
+        "professional_background": positioning,
         "content_topics": topics,
-        "evaluation_framework": ["现象描述", "工程原因推测", "主观判断", "客观证据", "用户感知翻译", "营销可用表达", "风险表达"],
+        "evaluation_framework": (["现象描述", "工程原因推测", "主观判断", "客观证据", "用户感知翻译", "营销可用表达", "风险表达"] if is_chassis else ["用户原始问题", "预算与使用场景", "候选车型与版本", "核心判断", "证据与适用边界", "可执行验证动作"]),
         "terminology_system": tags,
-        "judgment_rules": rules[:20] or ["先描述车辆动态现象，再拆解悬架/轮胎/电控/平台原因，最后翻译为用户可感知价值。"],
-        "comparison_logic": "同级车型对比时优先比较体感差异、结构差异、调校取向和可验证路况，不只比较配置表。",
-        "evidence_preference": "偏好试驾场景、路况描述、结构参数、轮胎/悬架信息、横向对比和可复验体感证据。",
-        "positive_judgment_patterns": ["稳定、收敛、支撑足、滤震干净、转向可信、后桥跟随自然"],
-        "negative_judgment_patterns": ["余震多、支撑弱、侧倾大、转向虚、制动点头明显、NVH暴露"],
-        "content_structure_patterns": ["先抛用户可感知问题", "再讲工程结构或调校逻辑", "给车型对比", "最后给购买或传播建议"],
-        "marketing_translation_patterns": ["把专业术语变成乘坐舒适、驾驶信心、家庭安心、长途不累、试驾可验证"],
+        "judgment_rules": rules[:20] or (["先描述车辆动态现象，再拆解悬架、轮胎、电控和平台原因，最后翻译为用户可感知价值。"] if is_chassis else ["所有结论都要绑定预算、版本、使用场景、时间和适用人群，并给出可复验动作。"]),
+        "comparison_logic": ("同级车型对比时优先比较体感差异、结构差异、调校取向和可验证路况，不只比较配置表。" if is_chassis else "车型比较需固定预算、版本、使用场景与时间口径，再比较产品能力、使用成本和决策风险。"),
+        "evidence_preference": ("偏好试驾场景、路况描述、结构参数、轮胎或悬架信息、横向对比和可复验体感证据。" if is_chassis else "优先使用公开产品信息、价格与权益、真实使用场景、横向对比和可复验的购买决策证据。"),
+        "positive_judgment_patterns": (["稳定、收敛、支撑足、滤震干净、转向可信、后桥跟随自然"] if is_chassis else ["适配场景明确、证据充分、成本可控、决策边界清楚"]),
+        "negative_judgment_patterns": (["余震多、支撑弱、侧倾大、转向虚、制动点头明显、NVH暴露"] if is_chassis else ["预算错配、版本不明、证据不足、忽略使用成本、结论超出适用边界"]),
+        "content_structure_patterns": ["先抛用户真实问题", "锚定预算与使用场景", "给出候选方案和证据", "说明适用边界", "提供验证动作"],
+        "marketing_translation_patterns": (["把专业术语变成乘坐舒适、驾驶信心、家庭安心、长途不累、试驾可验证"] if is_chassis else ["把复杂车型信息转成用户能比较、能试驾、能查证的决策清单"]),
         "risk_expression_patterns": ["避免绝对化攻击竞品", "避免替外部作者下结论", "避免把主观体感包装成实验事实"],
         "reusable_agent_instruction": (
-            "你是MMN底盘工程蒸馏Skill。基于公开专业内容样本归纳，不模仿博主个人身份。"
-            "输出必须按：车型对象、底盘维度、现象、工程原因推测、用户体感翻译、营销可用表达、风险提示。"
+            f"你是MMN{vertical_domain}蒸馏Skill。基于公开专业内容样本归纳，不模仿博主个人身份。"
+            "输出必须按：用户问题、预算与场景、候选方案、证据、适用边界、验证动作和风险提示。"
         ),
         "agent_few_shot": [
-            {"input": "某车滤震被质疑", "output": "先区分低速小震动、连续起伏和大冲击，再看悬架形式、阻尼调校、轮胎匹配，最后转译成用户是否觉得颠、晃、稳。"}
+            {"input": "用户不知道两台车怎么选", "output": "先固定预算、版本和使用场景，再比较核心产品差异、长期成本与风险，最后给出试驾和查证清单。"}
         ],
-        "script_template": "短视频脚本：开头抛体感问题 → 10秒讲现象 → 20秒讲工程原因 → 15秒讲同级对比 → 结尾给试驾验证点。",
-        "report_template": "客户报告：车型结论 / 底盘维度 / 证据依据 / 用户感知 / 传播建议 / 风险边界。",
+        "script_template": "短视频脚本：开头抛用户原声问题 → 锚定预算与场景 → 给核心判断和证据 → 说明适合谁与限制条件 → 结尾给验证动作。",
+        "report_template": "客户报告：用户问题 / 预算与场景 / 候选方案 / 判断证据 / 适用边界 / 验证动作 / 传播建议。",
         "updated_at": now()
     }
 
@@ -9404,7 +9631,8 @@ def parse_json_object(text):
         raw = m.group(0)
     return json.loads(raw)
 
-def blogger_skill_model_distill(profile, samples):
+def blogger_skill_model_distill(profile, samples, progress_callback=None):
+    report = progress_callback or (lambda stage, progress, message: None)
     sample_pack = [{
         "evidence_id": s.get("source_id") or s.get("id"),
         "title": s.get("original_topic"),
@@ -9415,6 +9643,7 @@ def blogger_skill_model_distill(profile, samples):
         "judgment": s.get("subjective_judgment")
     } for s in samples[:12]]
     errors, qwen_result, deepseek_result = {}, {}, {}
+    report("analysis", 48, "正在生成能力定位、判断框架与内容结构")
     try:
         qwen_result = parse_json_object(call_qwen([
             {"role": "system", "content": (
@@ -9430,6 +9659,7 @@ def blogger_skill_model_distill(profile, samples):
         ], temperature=.2, profile="fast", timeout=75))
     except Exception as exc:
         errors["qwen"] = str(exc)
+    report("analysis", 68, "能力画像初稿已完成，正在进行独立证据质检")
     if qwen_result:
         for key in [
             "content_topics", "evaluation_framework", "terminology_system", "judgment_rules",
@@ -9457,6 +9687,7 @@ def blogger_skill_model_distill(profile, samples):
             ], temperature=.1, profile="fast", timeout=75, max_tokens=2200, response_format={"type": "json_object"}))
         except Exception as exc:
             errors["deepseek"] = str(exc)
+    report("analysis", 86, "独立质检已完成，正在核对共同证据与发布边界")
     valid_ids = {str(x.get("evidence_id") or "") for x in sample_pack if x.get("evidence_id")}
     common_ids = [str(x) for x in (deepseek_result.get("common_evidence_ids") or []) if str(x) in valid_ids]
     approved = bool(qwen_result and deepseek_result.get("verdict") == "approved" and len(set(common_ids)) >= 3)
@@ -9464,7 +9695,7 @@ def blogger_skill_model_distill(profile, samples):
     if len(sample_pack) < 5:
         validation_status = "insufficient_evidence"
     chain_copy = {
-        "dual_model_approved": "MMN模型链路：千问主控蒸馏已完成，DeepSeek独立质检已通过，共同证据已核验。",
+        "dual_model_approved": "MMN模型链路：主控蒸馏已完成，独立质检已通过，共同证据已核验。",
         "manual_required": "MMN模型链路：双模型质检未达到发布门槛，当前画像仅供人工复核，不作为已验证结论。",
         "insufficient_evidence": "MMN模型链路：公开样本不足5条，暂不启动正式双模型发布。",
     }[validation_status]
@@ -9524,11 +9755,70 @@ def upsert_blogger_skill_profile(conn, profile, edition="china"):
         int(profile.get("source_sample_count") or 0), profile.get("validation_updated_at"), profile["updated_at"]
     ))
 
-def save_blogger_skill_items(sources, edition="china"):
+
+def validate_blogger_skill_artifacts(profile, sources, samples, expected_creator="", expected_count=None):
+    creator_name = str(profile.get("blogger_name") or "").strip()
+    expected_creator = str(expected_creator or "").strip()
+    if not creator_name:
+        raise ValueError("交付门禁未通过：能力卡缺少达人身份。")
+    if expected_creator and creator_name != expected_creator:
+        raise ValueError(f"交付门禁未通过：任务达人“{expected_creator}”与能力卡达人“{creator_name}”不一致。")
+    if not samples:
+        raise ValueError("交付门禁未通过：没有可追溯的蒸馏样本。")
+    if expected_count is not None and (len(sources) != expected_count or len(samples) != expected_count):
+        raise ValueError("交付门禁未通过：导入、来源与样本数量不一致。")
+    sample_names = {str(sample.get("blogger_name") or "").strip() for sample in samples}
+    if sample_names != {creator_name}:
+        raise ValueError("交付门禁未通过：样本中混入其他达人。")
+    source_names = {str(source.get("author") or "").strip() for source in sources}
+    if source_names != {creator_name}:
+        raise ValueError("交付门禁未通过：来源中混入其他达人。")
+    sample_domain = dominant_blogger_domain(samples, fallback="")
+    profile_domain = str(profile.get("vertical_domain") or "").strip()
+    if not profile_domain or not sample_domain or profile_domain != sample_domain:
+        raise ValueError("交付门禁未通过：能力卡领域与样本证据不一致。")
+    required_text = (
+        "professional_background", "comparison_logic", "evidence_preference",
+        "reusable_agent_instruction", "script_template", "report_template",
+    )
+    required_lists = (
+        "evaluation_framework", "terminology_system", "judgment_rules",
+        "content_structure_patterns", "marketing_translation_patterns",
+    )
+    missing = [key for key in required_text if not str(profile.get(key) or "").strip()]
+    missing.extend(key for key in required_lists if not profile.get(key))
+    if missing:
+        raise ValueError(f"交付门禁未通过：能力卡字段不完整（{', '.join(missing)}）。")
+    if len(profile.get("strategy_assets") or []) < 2 or len(profile.get("script_assets") or []) < 2:
+        raise ValueError("交付门禁未通过：策略资产或脚本资产不完整。")
+    if int(profile.get("source_sample_count") or 0) != len(samples):
+        raise ValueError("交付门禁未通过：能力卡证据数量与导入结果不一致。")
+    return profile
+
+
+def save_blogger_skill_items(sources, edition="china", progress_callback=None):
+    report = progress_callback or (lambda stage, progress, message: None)
+    report("distillation", 28, "正在把公开内容拆解为主题、判断、证据与表达方法")
     samples = [distill_blogger_sample(x) for x in sources]
     saved_sources, saved_samples = [], []
-    profile = blogger_skill_profile_from_samples(samples, blogger_name=next((s.get("author") for s in sources if s.get("author")), "冷静的饺子"), edition=edition)
-    profile = blogger_skill_model_distill(profile, samples)
+    creator_name = next((s.get("author") for s in sources if s.get("author") and s.get("author") != "待确认博主"), "待确认博主")
+    vertical_domain = dominant_blogger_domain(samples)
+    profile = blogger_skill_profile_from_samples(
+        samples,
+        blogger_name=creator_name,
+        edition=edition,
+        vertical_domain=vertical_domain,
+    )
+    report("distillation", 40, f"已完成 {len(samples)} 条内容拆解，正在生成完整能力卡")
+    profile = blogger_skill_model_distill(profile, samples, progress_callback=progress_callback)
+    validate_blogger_skill_artifacts(
+        profile,
+        sources,
+        samples,
+        expected_creator=creator_name,
+        expected_count=len(sources),
+    )
+    report("delivery", 90, "正在保存能力画像、策略资产、脚本资产与知识片段")
     with db() as conn:
         for source, sample in zip(sources, samples):
             conn.execute("""
@@ -9574,7 +9864,9 @@ def save_blogger_skill_items(sources, edition="china"):
         upsert_blogger_skill_profile(conn, profile, edition=edition)
     return {"sources": saved_sources, "samples": saved_samples, "profile": profile}
 
-def import_blogger_skill_file(data, filename, edition="china", limit=30):
+def import_blogger_skill_file(data, filename, edition="china", limit=30, progress_callback=None):
+    report = progress_callback or (lambda stage, progress, message: None)
+    report("import", 8, "文件已接收，正在识别字段与达人身份")
     digest = file_hash(data)
     rows = generic_rows_from_file(data, filename)
     social_assistant = "社媒助手" in str(filename or "")
@@ -9586,32 +9878,297 @@ def import_blogger_skill_file(data, filename, edition="china", limit=30):
             sources.append(source)
     if not sources:
         raise ValueError("未识别到可蒸馏的内容样本。请确认文件包含标题、正文、作者或链接字段。")
-    result = save_blogger_skill_items(sources, edition=edition)
+    filename_creator = blogger_name_from_filename(filename)
+    observed_creators = {s.get("author") for s in sources if s.get("author") and s.get("author") != "待确认博主"}
+    if filename_creator and observed_creators and observed_creators != {filename_creator}:
+        raise ValueError(f"文件名达人“{filename_creator}”与数据中的达人身份不一致，请核对后重新导入。")
+    if not filename_creator and len(observed_creators) > 1:
+        raise ValueError("文件中包含多个达人，必须拆分为单达人文件后分别导入。")
+    creator_name = filename_creator or next(iter(observed_creators), "")
+    if not creator_name:
+        raise ValueError("未识别到达人名称。请使用包含达人昵称的导出文件，或在文件名中保留达人名称。")
+    for source in sources:
+        if not source.get("author") or source.get("author") == "待确认博主":
+            source["author"] = creator_name
+    report("import", 20, f"已识别 {creator_name}，准备处理 {len(sources)} 条公开样本")
+    result = save_blogger_skill_items(sources, edition=edition, progress_callback=progress_callback)
     payload = blogger_skill_payload(edition=edition, imported=len(sources), result=result)
     payload.update({
         "sourceMode": "social_assistant" if social_assistant else "file_import",
         "sourcePriority": "primary" if social_assistant else "supplemental",
     })
+    report("delivery", 98, f"{creator_name}完整能力卡已生成，正在完成交付校验")
     return payload
 
-def scan_blogger_skill_imports(edition="china", limit=30):
+
+BLOGGER_IMPORT_STAGES = (
+    ("import", "导入"),
+    ("distillation", "蒸馏"),
+    ("analysis", "分析"),
+    ("delivery", "交付"),
+)
+BLOGGER_IMPORT_STAGE_INDEX = {stage: index for index, (stage, _) in enumerate(BLOGGER_IMPORT_STAGES)}
+
+
+def validate_blogger_import_delivery(payload, expected_creator=""):
+    result = payload.get("result") or {}
+    profile = result.get("profile") or {}
+    sources = result.get("sources") or []
+    samples = result.get("samples") or []
+    imported = int(payload.get("imported") or 0)
+    if imported <= 0:
+        raise ValueError("交付门禁未通过：没有可追溯的蒸馏样本。")
+    return validate_blogger_skill_artifacts(
+        profile,
+        sources,
+        samples,
+        expected_creator=expected_creator,
+        expected_count=imported,
+    )
+
+
+def validate_blogger_import_stage_history(job_id, org_id="local"):
+    job = get_blogger_skill_import_job(job_id, org_id=org_id)
+    observed = [event.get("stage") for event in (job or {}).get("stages", [])]
+    missing = [stage for stage, _ in BLOGGER_IMPORT_STAGES if stage not in observed]
+    if missing:
+        raise ValueError(f"交付门禁未通过：任务缺少处理阶段（{', '.join(missing)}）。")
+
+
+def blogger_import_job_payload(row):
+    if not row:
+        return None
+    item = rowdict(row) if not isinstance(row, dict) else dict(row)
+    result = json.loads(item.get("result_json") or "{}")
+    history = json.loads(item.get("stage_history_json") or "[]")
+    return {
+        "id": item.get("id"),
+        "jobId": item.get("id"),
+        "filename": item.get("filename"),
+        "creatorName": item.get("creator_name") or "",
+        "status": item.get("status"),
+        "stage": item.get("stage"),
+        "progress": int(item.get("progress") or 0),
+        "message": item.get("message") or "",
+        "error": item.get("error") or "",
+        "importedCount": int(item.get("imported_count") or 0),
+        "result": result,
+        "stages": history,
+        "createdAt": item.get("created_at"),
+        "updatedAt": item.get("updated_at"),
+        "completedAt": item.get("completed_at"),
+    }
+
+
+def get_blogger_skill_import_job(job_id, org_id="local"):
+    with db() as conn:
+        row = conn.execute(
+            "select * from blogger_skill_import_jobs where id=? and org_id=?",
+            (str(job_id or ""), org_id or "local"),
+        ).fetchone()
+    return blogger_import_job_payload(row)
+
+
+def latest_blogger_skill_import_job(edition="china", org_id="local"):
+    with db() as conn:
+        row = conn.execute(
+            "select * from blogger_skill_import_jobs where org_id=? and edition=? order by updated_at desc limit 1",
+            (org_id or "local", edition),
+        ).fetchone()
+    return blogger_import_job_payload(row)
+
+
+def update_blogger_skill_import_job(job_id, *, status=None, stage=None, progress=None, message=None,
+                                    error=None, creator_name=None, imported_count=None, result=None,
+                                    reset_history=False):
+    with BLOGGER_IMPORT_JOB_LOCK, db() as conn:
+        row = conn.execute("select * from blogger_skill_import_jobs where id=?", (job_id,)).fetchone()
+        if not row:
+            raise KeyError("导入任务不存在")
+        item = rowdict(row)
+        next_stage = stage or item["stage"]
+        if next_stage not in BLOGGER_IMPORT_STAGE_INDEX:
+            raise ValueError("未知的达人能力卡处理阶段。")
+        if not reset_history and BLOGGER_IMPORT_STAGE_INDEX[next_stage] < BLOGGER_IMPORT_STAGE_INDEX[item["stage"]]:
+            raise ValueError("达人能力卡处理阶段不能回退。")
+        next_progress = max(int(item.get("progress") or 0), int(progress or 0)) if not reset_history else int(progress or 0)
+        history = [] if reset_history else json.loads(item.get("stage_history_json") or "[]")
+        event = {"stage": next_stage, "progress": next_progress, "message": message if message is not None else item.get("message", ""), "at": now()}
+        if not history or any(history[-1].get(key) != event.get(key) for key in ("stage", "progress", "message")):
+            history.append(event)
+        next_status = status or item["status"]
+        if next_status == "completed" and (next_stage != "delivery" or next_progress != 100):
+            raise ValueError("只有完成全部交付门禁后才能结束任务。")
+        completed_at = now() if next_status in {"completed", "failed"} else None
+        conn.execute("""
+            update blogger_skill_import_jobs
+            set status=?, stage=?, progress=?, message=?, error=?, creator_name=?, imported_count=?,
+                result_json=?, stage_history_json=?, updated_at=?, completed_at=?
+            where id=?
+        """, (
+            next_status, next_stage, next_progress,
+            message if message is not None else item.get("message", ""),
+            error if error is not None else item.get("error", ""),
+            creator_name if creator_name is not None else item.get("creator_name", ""),
+            int(imported_count if imported_count is not None else item.get("imported_count") or 0),
+            json.dumps(result if result is not None else json.loads(item.get("result_json") or "{}"), ensure_ascii=False),
+            json.dumps(history[-40:], ensure_ascii=False), now(), completed_at, job_id,
+        ))
+        updated = conn.execute("select * from blogger_skill_import_jobs where id=?", (job_id,)).fetchone()
+    return blogger_import_job_payload(updated)
+
+
+def run_blogger_skill_import_job(job_id, runner=None):
+    runner = runner or import_blogger_skill_file
+    with db() as conn:
+        row = conn.execute("select * from blogger_skill_import_jobs where id=?", (job_id,)).fetchone()
+    if not row:
+        return
+    item = rowdict(row)
+
+    def report(stage, progress, message):
+        update_blogger_skill_import_job(
+            job_id,
+            status="running",
+            stage=stage,
+            progress=progress,
+            message=message,
+        )
+
+    try:
+        report("import", 3, "正在读取公开数据文件")
+        data = Path(item["file_path"]).read_bytes()
+        payload = runner(
+            data,
+            item["filename"],
+            edition=item["edition"],
+            limit=30,
+            progress_callback=report,
+        )
+        profile = validate_blogger_import_delivery(payload, expected_creator=item.get("creator_name"))
+        validate_blogger_import_stage_history(job_id, org_id=item.get("org_id") or "local")
+        summary = {
+            "creatorName": profile.get("blogger_name") or item.get("creator_name") or "",
+            "profileId": profile.get("id") or "",
+            "validationStatus": profile.get("validation_status") or "",
+            "verticalDomain": profile.get("vertical_domain") or "",
+            "sourceMode": payload.get("sourceMode") or "",
+            "sourcePriority": payload.get("sourcePriority") or "",
+            "stats": payload.get("stats") or {},
+        }
+        update_blogger_skill_import_job(
+            job_id,
+            status="completed",
+            stage="delivery",
+            progress=100,
+            message=f"{summary['creatorName'] or '达人'}完整能力卡已生成并交付",
+            error="",
+            creator_name=summary["creatorName"],
+            imported_count=int(payload.get("imported") or 0),
+            result=summary,
+        )
+    except Exception as exc:
+        update_blogger_skill_import_job(
+            job_id,
+            status="failed",
+            message="处理未完成，请查看原因并重试。",
+            error=str(exc),
+        )
+
+
+def start_blogger_skill_import_job(data, filename, *, edition="china", org_id="local", runner=None):
+    if not data:
+        raise ValueError("导入文件为空。")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError(f"导入文件不能超过 {MAX_UPLOAD_BYTES // 1024 // 1024}MB。")
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in {".xlsx", ".csv", ".json", ".txt", ".md", ".markdown"}:
+        raise ValueError("仅支持 xlsx、csv、json、txt 或 md 格式。")
+    edition = edition_from(edition)
+    org_id = org_id or "local"
+    digest = file_hash(data)
+    with db() as conn:
+        active = conn.execute("""
+            select * from blogger_skill_import_jobs
+            where org_id=? and edition=? and file_hash=? and status in ('queued','running')
+            order by updated_at desc limit 1
+        """, (org_id, edition, digest)).fetchone()
+    if active:
+        return blogger_import_job_payload(active)
+    job_id = f"blogger_import_{uuid.uuid4().hex}"
+    BLOGGER_SKILL_JOB_ROOT.mkdir(parents=True, exist_ok=True)
+    file_path = BLOGGER_SKILL_JOB_ROOT / f"{job_id}{suffix}"
+    file_path.write_bytes(data)
+    created_at = now()
+    creator_name = blogger_name_from_filename(filename)
+    history = [{"stage": "import", "progress": 0, "message": "文件已提交，等待开始处理", "at": created_at}]
+    with db() as conn:
+        conn.execute("""
+            insert into blogger_skill_import_jobs
+            (id, org_id, edition, filename, file_path, file_hash, creator_name, status, stage, progress,
+             message, error, imported_count, result_json, stage_history_json, created_at, updated_at, completed_at)
+            values (?, ?, ?, ?, ?, ?, ?, 'queued', 'import', 0, ?, '', 0, '{}', ?, ?, ?, null)
+        """, (
+            job_id, org_id, edition, filename, str(file_path), digest, creator_name,
+            "文件已提交，等待开始处理", json.dumps(history, ensure_ascii=False), created_at, created_at,
+        ))
+    Thread(target=run_blogger_skill_import_job, args=(job_id, runner), daemon=True, name=f"mmn-blogger-import-{job_id[-8:]}").start()
+    return get_blogger_skill_import_job(job_id, org_id=org_id)
+
+
+def retry_blogger_skill_import_job(job_id, *, org_id="local", runner=None):
+    job = get_blogger_skill_import_job(job_id, org_id=org_id)
+    if not job:
+        raise KeyError("导入任务不存在")
+    if job.get("status") != "failed":
+        raise ValueError("只有失败的导入任务可以重试。")
+    with db() as conn:
+        row = conn.execute(
+            "select file_path from blogger_skill_import_jobs where id=? and org_id=?",
+            (job_id, org_id or "local"),
+        ).fetchone()
+    if not row or not Path(row["file_path"]).exists():
+        raise ValueError("原始导入文件已不可用，请重新选择文件。")
+    update_blogger_skill_import_job(
+        job_id,
+        status="queued",
+        stage="import",
+        progress=0,
+        message="任务已重新排队",
+        error="",
+        imported_count=0,
+        result={},
+        reset_history=True,
+    )
+    Thread(target=run_blogger_skill_import_job, args=(job_id, runner), daemon=True, name=f"mmn-blogger-retry-{job_id[-8:]}").start()
+    return get_blogger_skill_import_job(job_id, org_id=org_id)
+
+
+def scan_blogger_skill_imports(edition="china", limit=30, org_id="local"):
     allowed = {".xlsx", ".csv", ".json", ".txt", ".md", ".markdown"}
     files = []
     for sub in ("csv", "json", "txt", "images", ""):
         folder = BLOGGER_SKILL_IMPORT_ROOT / sub if sub else BLOGGER_SKILL_IMPORT_ROOT
         if folder.exists():
             files.extend([p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in allowed])
-    imported, errors = 0, []
-    for path in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]:
-        try:
-            payload = import_blogger_skill_file(path.read_bytes(), path.name, edition=edition, limit=30)
-            imported += payload.get("imported", 0)
-        except Exception as exc:
-            errors.append({"file": str(path), "error": str(exc)})
-            break
-    data = blogger_skill_payload(edition=edition)
-    data.update({"imported": imported, "errors": errors})
-    return data
+    candidates = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:max(1, int(limit or 30))]
+    if not candidates:
+        raise ValueError("本地导入目录中没有可处理的公开数据文件。")
+    path = candidates[0]
+    job = start_blogger_skill_import_job(
+        path.read_bytes(),
+        path.name,
+        edition=edition,
+        org_id=org_id,
+    )
+    return {
+        "ok": True,
+        "job": job,
+        "scannedFiles": len(candidates),
+        "queuedFiles": 1,
+        "remainingFiles": max(0, len(candidates) - 1),
+        "message": "已将最新文件加入能力卡生成队列。其余文件请逐个处理，以避免达人样本混合。",
+    }
 
 def distilled_creator_libraries(profiles, samples):
     grouped = {}
@@ -9792,7 +10349,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None, org_id="loca
     with db() as conn:
         source_count = conn.execute("select count(*) from blogger_skill_sources where edition=?", (edition,)).fetchone()[0]
         sample_count = conn.execute("select count(*) from blogger_skill_samples where edition=?", (edition,)).fetchone()[0]
-        profile_count = conn.execute("select count(*) from blogger_skill_profiles where edition=?", (edition,)).fetchone()[0]
+        profile_count = conn.execute("select count(distinct blogger_name) from blogger_skill_profiles where edition=?", (edition,)).fetchone()[0]
         source_rows = [rowdict(r) for r in conn.execute(
             "select * from blogger_skill_sources where edition=? order by ingest_time desc limit 80", (edition,)
         ).fetchall()]
@@ -9812,7 +10369,12 @@ def blogger_skill_payload(edition="china", imported=0, result=None, org_id="loca
         "positive_judgment_patterns_json", "negative_judgment_patterns_json", "content_structure_patterns_json",
         "marketing_translation_patterns_json", "risk_expression_patterns_json", "agent_few_shot_json"
     ]
+    seen_profile_names = set()
     for row in profile_rows:
+        profile_name = row.get("blogger_name") or ""
+        if profile_name in seen_profile_names:
+            continue
+        seen_profile_names.add(profile_name)
         for field in json_fields:
             row[field.replace("_json", "")] = json.loads(row.pop(field) or "[]")
         row["model_trace"] = json.loads(row.pop("model_trace_json", "{}") or "{}")
@@ -9821,7 +10383,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None, org_id="loca
     knowledge = [{
         "id": stable_id("blogger-rag", x["id"]),
         "type": "博主能力蒸馏Skill",
-        "title": f"{x.get('blogger_name') or '公开样本'}｜{x.get('model') or x.get('original_topic') or '底盘工程'}",
+        "title": f"{x.get('blogger_name') or '公开样本'}｜{x.get('model') or x.get('original_topic') or '垂直专业内容'}",
         "body": x.get("rag_chunk") or "",
         "keywords": [x.get("blogger_name"), x.get("brand"), x.get("model"), *(x.get("professional_dimensions") or [])],
         "tags": [x.get("vertical_domain"), *(x.get("professional_dimensions") or [])],
@@ -9867,6 +10429,7 @@ def blogger_skill_payload(edition="china", imported=0, result=None, org_id="loca
         "knowledgeItems": knowledge,
         "creatorLibraries": distilled_creator_libraries(profiles, samples),
         "creatorWorkbenches": creator_workbenches,
+        "importJob": latest_blogger_skill_import_job(edition=edition, org_id=org_id),
         "result": result or {}
     }
 
@@ -10800,6 +11363,274 @@ def content_capability_payload(edition="china", q="", tags=None, imported=0, res
         "result": result or {}
     }
 
+
+CREATOR_SCRIPT_STAGES = {
+    "brief": (5, "正在理解品牌、车型与传播任务"),
+    "draft": (35, "正在生成平台适配初稿"),
+    "review": (65, "正在交叉复核事实、表达与平台适配"),
+    "final": (88, "正在消除模板腔并完成可拍摄终稿"),
+    "delivery": (100, "脚本已完成，可复制或导出Word"),
+}
+
+
+def public_creator_script_error(exc):
+    raw = str(exc or "").strip()
+    if re.search(r"API.?Key|DASHSCOPE|DeepSeek|Kimi|Qwen|千问|密钥|401|403", raw, re.I):
+        return "文案生成能力暂不可用，请联系管理员检查生成服务配置后重试。"
+    if isinstance(exc, (TimeoutError, URLError)) or re.search(r"timeout|timed out|超时", raw, re.I):
+        return "生成服务响应超时，任务数据已保留，请稍后直接重试。"
+    return re.sub(r"Qwen|千问|DeepSeek|Kimi|deepseek|qwen", "生成服务", raw, flags=re.I) or "脚本生成未完成，请重试。"
+
+
+def creator_script_asset_context(asset_id, edition="china"):
+    payload = content_capability_payload(edition=edition)
+    asset = next((item for item in payload.get("creatorAssets") or [] if item.get("id") == asset_id), None)
+    if not asset:
+        raise KeyError("达人能力资产不存在或已更新，请重新选择达人。")
+    evidence = []
+    with db() as conn:
+        rows = [rowdict(row) for row in conn.execute(
+            """select id, source_id, title, content_breakdown_json, source_url
+               from content_capability_chunks where edition=? and account_name=?
+               order by created_at desc limit 12""",
+            (edition, asset.get("account_name") or ""),
+        ).fetchall()]
+    for item in rows:
+        breakdown = json.loads(item.get("content_breakdown_json") or "{}")
+        evidence.append({
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "coreTopic": breakdown.get("core_topic"),
+            "openingMethod": breakdown.get("opening_hook"),
+            "argumentStructure": breakdown.get("argument_structure"),
+            "transferableMethod": breakdown.get("transferable_method"),
+            "sourceUrl": item.get("source_url"),
+        })
+    if not evidence:
+        raise ValueError("该达人没有可追溯样本，不能生成可交付脚本。")
+    return asset, evidence
+
+
+def creator_script_job_payload(row):
+    if not row:
+        return None
+    item = rowdict(row) if not isinstance(row, dict) else dict(row)
+    platform = str(item.get("platform") or "")
+    rule = CREATOR_SCRIPT_PLATFORM_RULES.get(platform) or {}
+    return {
+        "id": item.get("id"),
+        "jobId": item.get("id"),
+        "creatorAssetId": item.get("creator_asset_id"),
+        "creatorName": item.get("creator_name"),
+        "platform": platform,
+        "platformLabel": rule.get("label") or platform,
+        "status": item.get("status"),
+        "stage": item.get("stage"),
+        "progress": int(item.get("progress") or 0),
+        "message": item.get("message") or "",
+        "error": item.get("error") or "",
+        "request": json.loads(item.get("request_json") or "{}"),
+        "result": json.loads(item.get("result_json") or "{}"),
+        "review": json.loads(item.get("review_json") or "{}"),
+        "stages": json.loads(item.get("stage_history_json") or "[]"),
+        "parentJobId": item.get("parent_job_id"),
+        "revisionNo": int(item.get("revision_no") or 1),
+        "createdAt": item.get("created_at"),
+        "updatedAt": item.get("updated_at"),
+        "completedAt": item.get("completed_at"),
+    }
+
+
+def get_creator_script_job(job_id, org_id="local"):
+    with db() as conn:
+        row = conn.execute(
+            "select * from creator_script_jobs where id=? and org_id=?",
+            (str(job_id or ""), org_id or "local"),
+        ).fetchone()
+    return creator_script_job_payload(row)
+
+
+def latest_creator_script_job(asset_id, edition="china", org_id="local"):
+    with db() as conn:
+        row = conn.execute(
+            """select * from creator_script_jobs
+               where creator_asset_id=? and edition=? and org_id=?
+               order by updated_at desc limit 1""",
+            (str(asset_id or ""), edition_from(edition), org_id or "local"),
+        ).fetchone()
+    return creator_script_job_payload(row)
+
+
+def update_creator_script_job(job_id, *, status=None, stage=None, progress=None, message=None,
+                              error=None, result=None, review=None, model_trace=None, reset=False):
+    with CREATOR_SCRIPT_JOB_LOCK, db() as conn:
+        row = conn.execute("select * from creator_script_jobs where id=?", (job_id,)).fetchone()
+        if not row:
+            raise KeyError("脚本任务不存在。")
+        item = rowdict(row)
+        next_stage = stage or item["stage"]
+        if next_stage not in CREATOR_SCRIPT_STAGES:
+            raise ValueError("未知脚本生成阶段。")
+        next_progress = int(progress if progress is not None else item.get("progress") or 0)
+        if not reset:
+            next_progress = max(int(item.get("progress") or 0), next_progress)
+        history = [] if reset else json.loads(item.get("stage_history_json") or "[]")
+        next_message = message if message is not None else item.get("message") or ""
+        event = {"stage": next_stage, "progress": next_progress, "message": next_message, "at": now()}
+        if not history or any(history[-1].get(key) != event.get(key) for key in ("stage", "progress", "message")):
+            history.append(event)
+        next_status = status or item["status"]
+        if next_status == "completed" and (next_stage != "delivery" or next_progress != 100):
+            raise ValueError("脚本任务尚未通过全部交付门禁。")
+        completed_at = now() if next_status in {"completed", "failed"} else None
+        conn.execute(
+            """update creator_script_jobs set status=?, stage=?, progress=?, message=?, error=?,
+               result_json=?, review_json=?, model_trace_json=?, stage_history_json=?, updated_at=?, completed_at=?
+               where id=?""",
+            (
+                next_status, next_stage, next_progress, next_message,
+                error if error is not None else item.get("error") or "",
+                json.dumps(result if result is not None else json.loads(item.get("result_json") or "{}"), ensure_ascii=False),
+                json.dumps(review if review is not None else json.loads(item.get("review_json") or "{}"), ensure_ascii=False),
+                json.dumps(model_trace if model_trace is not None else json.loads(item.get("model_trace_json") or "{}"), ensure_ascii=False),
+                json.dumps(history[-30:], ensure_ascii=False), now(), completed_at, job_id,
+            ),
+        )
+        updated = conn.execute("select * from creator_script_jobs where id=?", (job_id,)).fetchone()
+    return creator_script_job_payload(updated)
+
+
+def default_creator_script_model_runner(stage, messages):
+    script_timeout = max(MMN_DEEP_MODEL_TIMEOUT, int(env_value("MMN_CREATOR_SCRIPT_MODEL_TIMEOUT", "180")))
+    if stage == "draft":
+        return parse_json_object(call_qwen(messages, profile="deep", timeout=script_timeout, max_tokens=5200, enable_thinking=True))
+    if stage == "review":
+        return parse_json_object(call_deepseek(messages, profile="deep", timeout=script_timeout, max_tokens=3200, response_format={"type": "json_object"}))
+    if stage == "final":
+        final_timeout = max(script_timeout, int(env_value("MMN_CREATOR_SCRIPT_FINAL_TIMEOUT", "180")))
+        return parse_json_object(call_kimi(messages, profile="deep", timeout=final_timeout, max_tokens=5600))
+    raise ValueError("未知模型处理阶段。")
+
+
+def run_creator_script_job(job_id, runner=None):
+    runner = runner or default_creator_script_model_runner
+    with db() as conn:
+        row = conn.execute("select * from creator_script_jobs where id=?", (job_id,)).fetchone()
+    if not row:
+        return None
+    item = rowdict(row)
+    request_payload = json.loads(item.get("request_json") or "{}")
+    asset = json.loads(item.get("creator_snapshot_json") or "{}")
+    evidence = json.loads(item.get("evidence_json") or "[]")
+    trace = {}
+    try:
+        progress, message = CREATOR_SCRIPT_STAGES["brief"]
+        update_creator_script_job(job_id, status="running", stage="brief", progress=progress, message=message, error="")
+        progress, message = CREATOR_SCRIPT_STAGES["draft"]
+        update_creator_script_job(job_id, status="running", stage="draft", progress=progress, message=message)
+        draft = runner("draft", creator_script_draft_prompt(request_payload, asset, evidence))
+        if not isinstance(draft, dict):
+            raise ValueError("初稿未返回结构化脚本。")
+        trace["draft"] = {"status": "completed", "engine": "primary"}
+        progress, message = CREATOR_SCRIPT_STAGES["review"]
+        update_creator_script_job(job_id, status="running", stage="review", progress=progress, message=message)
+        review = runner("review", creator_script_review_prompt(request_payload, asset, evidence, draft))
+        if not isinstance(review, dict):
+            raise ValueError("交叉复核未返回结构化结论。")
+        trace["review"] = {"status": "completed", "engine": "independent-review"}
+        progress, message = CREATOR_SCRIPT_STAGES["final"]
+        update_creator_script_job(job_id, status="running", stage="final", progress=progress, message=message, review=review)
+        final = normalize_script_result(runner("final", creator_script_final_prompt(request_payload, asset, evidence, draft, review)))
+        quality = validate_human_tone(final)
+        final["quality"] = quality
+        trace["final"] = {"status": "completed", "engine": "human-tone-editor"}
+        progress, message = CREATOR_SCRIPT_STAGES["delivery"]
+        return update_creator_script_job(
+            job_id, status="completed", stage="delivery", progress=progress, message=message,
+            error="", result=final, review=review, model_trace=trace,
+        )
+    except Exception as exc:
+        current = get_creator_script_job(job_id, item.get("org_id") or "local") or {}
+        return update_creator_script_job(
+            job_id, status="failed", message="生成未完成，原因已保留，可直接重试。",
+            error=public_creator_script_error(exc), model_trace={
+                **trace,
+                "failedStage": current.get("stage"),
+                "internalErrorType": type(exc).__name__,
+                "internalError": str(exc)[:1200],
+            },
+        )
+
+
+def create_creator_script_job(body, *, org_id="local", start_worker=True, runner=None, parent_job=None):
+    body = dict(body or {})
+    edition = edition_from(body.get("edition") or (parent_job or {}).get("request", {}).get("edition") or "china")
+    asset_id = str(body.get("creatorAssetId") or (parent_job or {}).get("creatorAssetId") or "").strip()
+    if not asset_id:
+        raise ValueError("请选择达人。")
+    platform, _ = creator_script_platform_rule(body.get("platform") or (parent_job or {}).get("platform"))
+    base_request = dict((parent_job or {}).get("request") or {})
+    request_payload = {
+        **base_request,
+        "edition": edition,
+        "platform": platform,
+        "brand": str(body.get("brand") if "brand" in body else base_request.get("brand") or "").strip(),
+        "model": str(body.get("model") if "model" in body else base_request.get("model") or "").strip(),
+        "focus": str(body.get("focus") if "focus" in body else base_request.get("focus") or "").strip(),
+        "title": str(body.get("title") if "title" in body else base_request.get("title") or "").strip(),
+        "revisionRequest": str(body.get("revisionRequest") or "").strip(),
+    }
+    for key, label in (("brand", "品牌"), ("model", "车型"), ("focus", "传播重点")):
+        if not request_payload[key]:
+            raise ValueError(f"请填写{label}。")
+    if len(request_payload["focus"]) < 4:
+        raise ValueError("传播重点过短，请说明希望用户记住的核心判断。")
+    if parent_job:
+        with db() as conn:
+            parent_row = conn.execute("select creator_snapshot_json, evidence_json from creator_script_jobs where id=?", (parent_job["id"],)).fetchone()
+        if not parent_row:
+            raise KeyError("原脚本任务不存在。")
+        asset = json.loads(parent_row["creator_snapshot_json"] or "{}")
+        evidence = json.loads(parent_row["evidence_json"] or "[]")
+        revision_no = int(parent_job.get("revisionNo") or 1) + 1
+    else:
+        asset, evidence = creator_script_asset_context(asset_id, edition=edition)
+        revision_no = 1
+    job_id = f"creator_script_{uuid.uuid4().hex}"
+    created = now()
+    history = [{"stage": "brief", "progress": 0, "message": "任务已提交，等待开始生成", "at": created}]
+    with db() as conn:
+        conn.execute(
+            """insert into creator_script_jobs
+               (id, org_id, edition, creator_asset_id, creator_name, platform, status, stage, progress,
+                message, error, request_json, creator_snapshot_json, evidence_json, result_json, review_json,
+                model_trace_json, stage_history_json, parent_job_id, revision_no, created_at, updated_at, completed_at)
+               values (?, ?, ?, ?, ?, ?, 'queued', 'brief', 0, ?, '', ?, ?, ?, '{}', '{}', '{}', ?, ?, ?, ?, ?, null)""",
+            (
+                job_id, org_id or "local", edition, asset_id, asset.get("account_name") or "待确认达人", platform,
+                "任务已提交，等待开始生成", json.dumps(request_payload, ensure_ascii=False),
+                json.dumps(asset, ensure_ascii=False), json.dumps(evidence, ensure_ascii=False),
+                json.dumps(history, ensure_ascii=False), (parent_job or {}).get("id"), revision_no, created, created,
+            ),
+        )
+    if start_worker:
+        Thread(target=run_creator_script_job, args=(job_id, runner), daemon=True, name=f"mmn-creator-script-{job_id[-8:]}").start()
+    return get_creator_script_job(job_id, org_id=org_id)
+
+
+def retry_creator_script_job(job_id, *, org_id="local", runner=None):
+    job = get_creator_script_job(job_id, org_id=org_id)
+    if not job:
+        raise KeyError("脚本任务不存在。")
+    if job.get("status") != "failed":
+        raise ValueError("只有失败的脚本任务可以重试。")
+    update_creator_script_job(
+        job_id, status="queued", stage="brief", progress=0, message="任务已重新排队",
+        error="", result={}, review={}, model_trace={}, reset=True,
+    )
+    Thread(target=run_creator_script_job, args=(job_id, runner), daemon=True, name=f"mmn-creator-script-retry-{job_id[-8:]}").start()
+    return get_creator_script_job(job_id, org_id=org_id)
+
 def ppt_text(text, limit=280):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     return text[:limit] + ("…" if len(text) > limit else "")
@@ -11538,7 +12369,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "kimi": {"configured": kcfg["configured"], "model": kcfg["model"], "baseUrl": kcfg["base_url"]},
                 "kimiDeep": {"configured": kcfg["configured"], "model": kimi_model_for("deep"), "baseUrl": kcfg["base_url"]},
                 "openai": {"configured": ocfg["configured"], "model": ocfg["model"], "baseUrl": ocfg["base_url"]},
-                "rules": {"configured": True, "model": "MMN规则引擎"}
+                "rules": {"configured": True, "model": "MMN规则引擎"},
+                "governance": public_model_governance_contract(),
             })
             return
         if parsed.path == "/api/opportunity-map/own-document":
@@ -11763,6 +12595,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     }
                 force_review = str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
                 payload["executiveBrief"] = executive_brief_state(force=force_review)
+                payload["refreshCadence"] = {
+                    "weekly": payload["executiveBrief"].get("weeklyRefresh") or {},
+                    "monthlySalesWarning": monthly_sales_refresh_status(),
+                }
                 payload["salesWarnings"]["dualModelReview"] = sales_warning_review_state(
                     payload["salesWarnings"],
                     force=force_review,
@@ -11770,6 +12606,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 sales_warning_cycles = load_sales_warning_cycles()
                 attach_sales_warning_history(payload.get("salesWarnings"), sales_warning_cycles)
                 payload["salesWarningCycles"] = sales_warning_cycles
+                payload["modelGovernance"] = cockpit_governance_snapshot(
+                    payload,
+                    subject_key=f"{auth.get('org_id', 'local')}:{requested_policy_model}",
+                )
                 self.send_json(payload)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 500)
@@ -11801,11 +12641,76 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 }
             })
             return
+        if parsed.path == "/api/blogger-skill/import-jobs/latest":
+            q = parse_qs(parsed.query)
+            edition = edition_from(q.get("edition", ["china"])[0])
+            auth = self.current_auth() or {}
+            self.send_json({
+                "ok": True,
+                "job": latest_blogger_skill_import_job(edition=edition, org_id=auth.get("org_id", "local")),
+            })
+            return
+        blogger_import_job_match = re.fullmatch(r"/api/blogger-skill/import-jobs/([^/]+)", parsed.path)
+        if blogger_import_job_match:
+            auth = self.current_auth() or {}
+            job = get_blogger_skill_import_job(
+                blogger_import_job_match.group(1),
+                org_id=auth.get("org_id", "local"),
+            )
+            if not job:
+                self.send_json({"ok": False, "error": "导入任务不存在"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
         if parsed.path == "/api/blogger-skill":
             q = parse_qs(parsed.query)
             edition = edition_from(q.get("edition", ["china"])[0])
             auth = self.current_auth() or {}
             self.send_json(blogger_skill_payload(edition=edition, org_id=auth.get("org_id", "local")))
+            return
+        creator_script_export_match = re.fullmatch(r"/api/content-capability-kb/script-jobs/([^/]+)/export\.docx", parsed.path)
+        if creator_script_export_match:
+            auth = self.require_cloud_auth()
+            if not auth:
+                return
+            job = get_creator_script_job(creator_script_export_match.group(1), org_id=auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "脚本任务不存在。"}, 404)
+                return
+            try:
+                docx = export_script_docx(job)
+                filename = sanitize_filename(f"{job.get('creatorName') or '达人'}-{job.get('result', {}).get('title') or 'MMN原创脚本'}.docx")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
+                self.send_header("Content-Length", str(len(docx)))
+                self.end_headers()
+                self.wfile.write(docx)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": public_creator_script_error(exc)}, 400)
+            return
+        if parsed.path == "/api/content-capability-kb/script-jobs/latest":
+            q = parse_qs(parsed.query)
+            asset_id = q.get("creatorAssetId", [""])[0]
+            edition = edition_from(q.get("edition", ["china"])[0])
+            auth = self.require_cloud_auth()
+            if not auth:
+                return
+            self.send_json({
+                "ok": True,
+                "job": latest_creator_script_job(asset_id, edition=edition, org_id=auth.get("org_id", "local")),
+            })
+            return
+        creator_script_job_match = re.fullmatch(r"/api/content-capability-kb/script-jobs/([^/]+)", parsed.path)
+        if creator_script_job_match:
+            auth = self.require_cloud_auth()
+            if not auth:
+                return
+            job = get_creator_script_job(creator_script_job_match.group(1), org_id=auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "脚本任务不存在。"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
             return
         if parsed.path == "/api/content-capability-kb":
             q = parse_qs(parsed.query)
@@ -12041,6 +12946,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        scheduled_refresh_paths = {
+            "/api/group-dashboard/refresh-weekly",
+            "/api/group-dashboard/refresh-monthly-sales",
+        }
+        if parsed.path in scheduled_refresh_paths:
+            internal_scheduler = (
+                self.headers.get("X-MMN-Scheduler") == "1"
+                and self.headers.get("Host", "").split(":", 1)[0] == "mmn-app"
+            )
+            if not internal_scheduler and not self.require_cloud_auth({"admin"} if cloud_login_required() else None):
+                return
+            try:
+                if parsed.path.endswith("refresh-weekly"):
+                    body = self.read_json()
+                    supplied = body.get("snapshot") if isinstance(body, dict) else None
+                    result = run_weekly_group_dashboard_refresh(supplied)
+                else:
+                    result = run_monthly_sales_warning_refresh()
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 500)
+            return
         if cloud_login_required():
             trial_post_allowed = {
                 "/api/ai/rag-strategy",
@@ -12057,6 +12984,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/topic-planning/run",
                 "/api/content-capability-kb/distill-account",
                 "/api/content-capability-kb/collect-public",
+                "/api/content-capability-kb/script-jobs",
                 "/api/opportunity-map/own-document",
                 "/api/opportunity-map/generate",
                 "/api/opportunity-map/review",
@@ -12069,9 +12997,53 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "/api/social-trends/jobs",
                 "/api/social-trends/import",
             }
-            roles = None if parsed.path in trial_post_allowed else {"admin"}
+            creator_script_trial_action = re.fullmatch(
+                r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", parsed.path
+            )
+            roles = None if parsed.path in trial_post_allowed or creator_script_trial_action else {"admin"}
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/content-capability-kb/script-jobs":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                job = create_creator_script_job(body, org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "job": job}, 202)
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": public_creator_script_error(exc)}, 400)
+            return
+        creator_script_retry_match = re.fullmatch(r"/api/content-capability-kb/script-jobs/([^/]+)/retry", parsed.path)
+        if creator_script_retry_match:
+            try:
+                auth = self.current_auth() or {}
+                job = retry_creator_script_job(creator_script_retry_match.group(1), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "job": job}, 202)
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": public_creator_script_error(exc)}, 400)
+            return
+        creator_script_revise_match = re.fullmatch(r"/api/content-capability-kb/script-jobs/([^/]+)/revise", parsed.path)
+        if creator_script_revise_match:
+            try:
+                auth = self.current_auth() or {}
+                parent = get_creator_script_job(creator_script_revise_match.group(1), org_id=auth.get("org_id", "local"))
+                if not parent:
+                    raise KeyError("原脚本任务不存在。")
+                if parent.get("status") != "completed":
+                    raise ValueError("原脚本尚未完成，不能提交修改要求。")
+                body = self.read_json()
+                if not str(body.get("revisionRequest") or "").strip():
+                    raise ValueError("请填写具体修改要求。")
+                job = create_creator_script_job(body, org_id=auth.get("org_id", "local"), parent_job=parent)
+                self.send_json({"ok": True, "job": job}, 202)
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": public_creator_script_error(exc)}, 400)
+            return
         if parsed.path == "/api/eval/run":
             try:
                 auth = self.current_auth() or {}
@@ -12914,7 +13886,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             edition = edition_from(q.get("edition", ["china"])[0])
             try:
                 data = self.rfile.read(length)
-                self.send_json(import_blogger_skill_file(data, filename, edition=edition, limit=30))
+                auth = self.current_auth() or {}
+                job = start_blogger_skill_import_job(
+                    data,
+                    filename,
+                    edition=edition,
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        blogger_import_retry_match = re.fullmatch(r"/api/blogger-skill/import-jobs/([^/]+)/retry", parsed.path)
+        if blogger_import_retry_match:
+            try:
+                auth = self.current_auth() or {}
+                job = retry_blogger_skill_import_job(
+                    blogger_import_retry_match.group(1),
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -12943,7 +13936,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 edition = edition_from(body.get("edition", "china"))
-                self.send_json(scan_blogger_skill_imports(edition=edition, limit=30))
+                auth = self.current_auth() or {}
+                self.send_json(scan_blogger_skill_imports(
+                    edition=edition,
+                    limit=30,
+                    org_id=auth.get("org_id", "local"),
+                ), 202)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

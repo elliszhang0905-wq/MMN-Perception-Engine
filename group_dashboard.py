@@ -302,6 +302,7 @@ def build_sales_warning_full(payload):
         body_type = str(item.get("body_type") or "待复核")
         size_class = str(item.get("size_class") or "待复核")
         energy_type = str(item.get("energy_type") or "待复核")
+        segment_energy_type = str(item.get("energy_group") or energy_type)
         vehicle_start_price = item.get("vehicle_start_price_wan")
         vehicle_start_price_source = str(item.get("vehicle_start_price_source") or "")
         if vehicle_start_price is not None and vehicle_start_price_source != "dongchedi_dealer_price":
@@ -377,8 +378,9 @@ def build_sales_warning_full(payload):
             "bodyType": body_type,
             "sizeClass": size_class,
             "energyType": energy_type,
+            "segmentEnergyType": segment_energy_type,
             "segmentKey": str(item.get("segment_key") or ""),
-            "segmentLabel": " · ".join((body_type, size_class, energy_type)),
+            "segmentLabel": " · ".join((size_class, segment_energy_type)),
             "sales": sales,
             "rank": int(item.get("segment_rank") or 0),
             "priceDisplay": own_price_view["priceDisplay"],
@@ -454,7 +456,7 @@ def build_sales_warning_full(payload):
             "greenCount": sum(item["level"] == "green" for item in saic_models),
             "grayCount": sum(item["level"] == "gray" for item in saic_models),
             "warningCount": sum(item["level"] in {"red", "orange", "yellow"} for item in saic_models),
-            "method": "市场总量覆盖全部车型；预警基准为排除本品后的同细分市场销量前3名竞品中位数，少于3款不计算",
+            "method": "新能源车型按尺寸×新能源分群，新能源包含纯电动、增程式和插电式混动；预警基准为排除本品后的同市场销量前3名竞品中位数，少于3款不计算",
             "levelRules": {
                 "red": f"头部基准达成率＜{red_ratio:.0%}",
                 "yellow": f"{red_ratio:.0%}≤头部基准达成率＜{green_ratio:.0%}",

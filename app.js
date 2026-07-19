@@ -113,8 +113,9 @@ let strategyKb=loadStrategyKb();
 let modelJudgments=loadModelJudgments();
 let modelIdentities=loadModelIdentities(),modelIdentitySyncing=false;
 let founderState=loadFounderState(),founderSearch="",founderFilters={brand:"all",person:"all",topic:"all"};
-let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]},bloggerSkillPersonFilter="",bloggerTaskPollToken=0;
+let bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[],importJob:null},bloggerSkillPersonFilter="",bloggerTaskPollToken=0,bloggerImportPollToken=0,bloggerImportPollingJobId="";
 let contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]},contentCapabilitySearch="",contentCapabilitySelectedTags=[];
+let creatorScriptWorkspaceAsset=null,creatorScriptCurrentJob=null,creatorScriptPollToken=0;
 let selectedKnowledgeCluster="";
 let ragResultsExpanded=false;
 let dashboardTopicPlanState={loading:false,result:null,error:""};
@@ -669,8 +670,9 @@ function resetBrowserScopeTransientState(){
  if(socialTrendState.stageTimer)clearInterval(socialTrendState.stageTimer);if(socialTrendState.progressTimer)clearInterval(socialTrendState.progressTimer);
  Object.assign(socialTrendState,{loading:false,result:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:socialTrendState.runToken+1,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"own"});
  Object.assign(creatorAssetState,{tab:"distill",tasks:[],creators:[],methods:[],selectedCreator:null,selectedAsset:null,processingAssetId:"",loading:false,error:""});
- bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[]};bloggerSkillPersonFilter="";bloggerTaskPollToken++;
+ bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[],importJob:null};bloggerSkillPersonFilter="";bloggerTaskPollToken++;bloggerImportPollToken++;bloggerImportPollingJobId="";
  contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]};contentCapabilitySearch="";contentCapabilitySelectedTags=[];
+ creatorScriptWorkspaceAsset=null;creatorScriptCurrentJob=null;creatorScriptPollToken++;
  workspaceState=defaultWorkspaceState();
 }
 function saveSession(s){
@@ -1045,6 +1047,23 @@ function applyModelSelection(model){
   restoreOpportunityContext();
  }
 }
+function selectDashboardVehicleContext(model,{source="dashboard",notify=true}={}){
+ const models=modelOptions();
+ if(!models.includes(model))return false;
+ const changed=state.config.model!==model;
+ applyModelSelection(model);
+ dashBrandOpen=brandForDisplay(model);
+ dashboardTopicPlanState={loading:false,result:null,error:""};
+ save();
+ render();
+ window.dispatchEvent(new CustomEvent("mmn:vehicle-context-updated",{detail:{model,source,changed}}));
+ if(changed&&notify)toast(source==="sales-warning"?`驾驶舱已跟随销量预警切换为 ${model}`:`已切换为 ${model}`);
+ return true;
+}
+window.MMNVehicleContext={
+ getModel:()=>state.config.model,
+ select:(model,options={})=>selectDashboardVehicleContext(model,options)
+};
 function isSummaryImport(){return state.importQuality?.kind==="PRODUCT_EVALUATION_SUMMARY"}
 function isBlockedImport(){return state.importQuality?.kind==="INVALID_LEGACY_SUMMARY_IMPORT"}
 function summaryMetric(model=state.config.model){return state.summaryMetrics?.[model]||{}}
@@ -1295,6 +1314,7 @@ function renderEditionChrome(){
  const managementButton=document.querySelector("button[data-domestic-mode=\"management\"]");
  if(managementButton){const active=edition==="china"&&managementDashboardVisible;managementButton.hidden=edition!=="china";managementButton.classList.toggle("active",active);managementButton.setAttribute("aria-pressed",String(active));managementButton.setAttribute("aria-expanded",String(active));const hint=managementButton.querySelector("small");if(hint)hint.textContent=active?"收起集团看板":"打开集团看板"}
  const managementPanel=document.querySelector("#management-dashboard-panel");if(managementPanel)managementPanel.hidden=!(edition==="china"&&managementDashboardVisible);
+ const leadPanel=document.querySelector("#lead-dashboard-panel");if(leadPanel)leadPanel.hidden=edition!=="china";
  const eyebrow=document.querySelector("#edition-eyebrow");if(eyebrow)eyebrow.textContent=cfg.eyebrow;
  const sideTitle=document.querySelector("#side-run-title");if(sideTitle)sideTitle.textContent=cfg.sideTitle;
  const sideDesc=document.querySelector("#side-run-desc");if(sideDesc)sideDesc.textContent=cfg.sideDesc;
@@ -3838,10 +3858,38 @@ async function loadBloggerSkill(){
   mergeDistilledCreatorLibraries(data.creatorLibraries);
   renderBloggerSkill();
   renderCreatorLibrary();
+  const job=data.importJob;
+  if(job?.id&&["queued","running"].includes(job.status)&&bloggerImportPollingJobId!==job.id){
+   pollBloggerImportJob(job.id).catch(err=>toast(`导入进度跟踪失败：${err.message}`));
+  }
  }catch(err){
   bloggerSkillState={...bloggerSkillState,error:err.message};
   renderBloggerSkill();
  }
+}
+const BLOGGER_IMPORT_PHASES=[
+ ["import","导入","识别文件与达人身份"],
+ ["distillation","蒸馏","拆解内容与判断方法"],
+ ["analysis","分析","生成画像并完成证据质检"],
+ ["delivery","交付","保存完整能力卡与可调用资产"],
+];
+function bloggerImportProgressMarkup(job){
+ if(!job?.id)return "";
+ const progress=Math.max(0,Math.min(100,Number(job.progress)||0));
+ const currentIndex=Math.max(0,BLOGGER_IMPORT_PHASES.findIndex(([key])=>key===job.stage));
+ const completed=job.status==="completed",failed=job.status==="failed";
+ const stateLabel=completed?"已完成":failed?"未完成":job.status==="queued"?"等待开始":"处理中";
+ return `<section class="blogger-import-progress ${completed?"completed":failed?"failed":"running"}" aria-live="polite">
+  <div class="blogger-import-progress-head"><div><span>公开主证据 · 能力卡生成任务</span><b>${escapeHtml(job.creatorName||job.filename||"新达人")}</b><small>${escapeHtml(job.message||"任务已提交")}</small></div><strong>${stateLabel} · ${progress}%</strong></div>
+  <div class="blogger-import-meter"><progress max="100" value="${progress}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}" aria-label="达人能力卡生成进度"></progress></div>
+  <div class="blogger-import-phases">${BLOGGER_IMPORT_PHASES.map(([key,label,desc],index)=>{
+   const phaseState=completed||index<currentIndex?"done":failed&&index===currentIndex?"failed":index===currentIndex?"active":"pending";
+   return `<div class="${phaseState}"><i>${completed||index<currentIndex?"✓":index+1}</i><span><b>${label}</b><small>${desc}</small></span></div>`;
+  }).join("")}</div>
+  ${job.error?`<p class="blogger-import-error">${escapeHtml(publicMmnText(job.error))}</p>`:""}
+  ${failed?`<button type="button" class="secondary" data-blogger-import-retry="${escapeAttr(job.id)}">重新处理此文件</button>`:""}
+  <small class="blogger-import-job-id">任务 ID：${escapeHtml(job.id)} · 页面刷新后仍会保留进度</small>
+ </section>`;
 }
 function renderBloggerSkill(){
  const root=document.querySelector("#blogger-skill-samples");if(!root)return;
@@ -3898,21 +3946,22 @@ function renderBloggerSkill(){
  const rag=document.querySelector("#blogger-skill-rag-list");
  if(rag){
   const chunks=(bloggerSkillState.knowledgeItems||[]).filter(x=>!bloggerSkillPersonFilter||[x.title,x.body,x.keywords,x.metadata?.author,x.metadata?.source_account_name,x.metadata?.entity].join(" ").includes(bloggerSkillPersonFilter));
-  rag.innerHTML=chunks.length?chunks.slice(0,10).map(x=>`<div class="skill-rag-card"><span>${x.metadata?.entity||"底盘工程样本"}</span><b>${x.title}</b><p>${clip(x.body,180)}</p><small>已进入MMN RAG｜来源与导入时间保存在后台</small></div>`).join(""):`<p class="empty">暂无可进入RAG的底盘工程 chunk。</p>`;
+  rag.innerHTML=chunks.length?chunks.slice(0,10).map(x=>`<div class="skill-rag-card"><span>${x.metadata?.entity||x.metadata?.domain||"垂直专业样本"}</span><b>${x.title}</b><p>${clip(x.body,180)}</p><small>已进入MMN RAG｜来源与导入时间保存在后台</small></div>`).join(""):`<p class="empty">暂无可进入RAG的专业内容片段。</p>`;
  }
 }
 function bloggerIncubationStatusLabel(value){return value==="incubation_ready"?"已审核，可进入账号孵化":value==="evidence_ready"?"证据已入库，档案待审核":"等待账号采集与证据补全"}
 function bloggerPlatformMetric(profile,key){const item=profile?.[key];return item&&item.availability==="available"&&item.value!=null?Number(item.value).toLocaleString():"未返回"}
 function renderBloggerIncubationWorkbench(workbench,profile,clip){
  const root=document.querySelector("#blogger-incubation-workbench"),status=document.querySelector("#blogger-incubation-status");if(!root)return;
+ const importPanel=bloggerImportProgressMarkup(bloggerSkillState.importJob);
  if(!workbench){
   if(status)status.textContent=profile?"能力 Skill 已存在，等待关联平台档案":"等待选择孵化对象";
-  root.innerHTML=profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>公开导出数据作为主证据；如仍缺少平台档案，可按需补充账号字段和异步任务状态，且不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`;
+  root.innerHTML=importPanel+(profile?`<div class="blogger-incubation-empty"><b>${escapeHtml(profile.blogger_name)}的能力蒸馏结果已安全保留</b><p>公开导出数据作为主证据；如仍缺少平台档案，可按需补充账号字段和异步任务状态，且不会改写现有样本。</p></div>`:`<p class="empty">选择博主后加载平台档案与孵化准备状态。</p>`);
   return;
  }
  const platformProfile=workbench.platformProfile||{},dna=workbench.dna||{},incubation=workbench.incubation||{},task=workbench.latestTask||{};
  const taskProgress=Math.max(0,Math.min(100,Number(task.progress)||0)),taskFailed=["failed","degraded"].includes(task.status),taskComplete=task.status==="completed";
- const statusText=taskFailed?"采集失败":task.id&&!taskComplete?`${creatorTaskStageLabel(task.stage)} ${taskProgress}%`:bloggerIncubationStatusLabel(workbench.lifecycleStatus);if(status)status.textContent=statusText;
+ const statusText=taskFailed?"账号补充采集失败（不影响主证据）":task.id&&!taskComplete?`账号补充采集 · ${creatorTaskStageLabel(task.stage)} ${taskProgress}%`:bloggerIncubationStatusLabel(workbench.lifecycleStatus);if(status)status.textContent=statusText;
  const steps=[
   ["账号档案",Boolean(workbench.creatorId),workbench.identityStatus==="needs_review"?"待身份复核":"已建立"],
   ["代表作证据",workbench.assetCount>0,`${workbench.assetCount||0} 条作品`],
@@ -3927,7 +3976,7 @@ function renderBloggerIncubationWorkbench(workbench,profile,clip){
   ${taskError?`<p>${escapeHtml(taskError)}</p>`:""}
   ${taskFailed?`<button type="button" class="secondary" data-blogger-task-retry="${escapeAttr(task.id)}" data-blogger-name="${escapeAttr(workbench.displayName)}">重试补充采集</button>`:""}
  </section>`:"";
- root.innerHTML=`<div class="blogger-incubation-head"><div><span>${assetPlatformName(workbench.platform)}平台档案</span><h3>${escapeHtml(workbench.displayName)}</h3><p>${escapeHtml(platformProfile.signature||dna.summary||"等待补充账号说明")}</p></div><b class="blogger-readiness ${workbench.lifecycleStatus}">${statusText}</b></div>
+ root.innerHTML=`${importPanel}<div class="blogger-incubation-head"><div><span>${assetPlatformName(workbench.platform)}平台档案</span><h3>${escapeHtml(workbench.displayName)}</h3><p>${escapeHtml(platformProfile.signature||dna.summary||"等待补充账号说明")}</p></div><b class="blogger-readiness ${workbench.lifecycleStatus}">${statusText}</b></div>
  ${taskPanel}
  <div class="blogger-incubation-steps">${steps.map(([name,done,note])=>`<div class="${done?"done":"pending"}"><i></i><b>${name}</b><small>${escapeHtml(note)}</small></div>`).join("")}</div>
  <div class="blogger-profile-metrics"><div><span>粉丝</span><b>${bloggerPlatformMetric(platformProfile,"followers")}</b></div><div><span>公开作品</span><b>${bloggerPlatformMetric(platformProfile,"postCount")}</b></div><div><span>获赞与收藏</span><b>${bloggerPlatformMetric(platformProfile,"likesAndCollects")}</b></div><div><span>最新任务</span><b>${escapeHtml(taskCopy)}</b></div></div>
@@ -3989,24 +4038,60 @@ async function scanBloggerSkillImports(){
  try{
   toast("正在扫描本地导入目录…");
   const data=await api("/api/blogger-skill/scan-imports",{method:"POST",body:JSON.stringify({edition:activeEdition()})});
-  bloggerSkillState={...bloggerSkillState,...data};
-  mergeDistilledCreatorLibraries(data.creatorLibraries);
-  renderBloggerSkill();renderCreatorLibrary();renderStrategyKb();
-  toast(`扫描完成：导入 ${data.imported||0} 条样本`);
+  if(!data.job?.id)throw new Error("未取得本地文件处理任务");
+  bloggerSkillState={...bloggerSkillState,importJob:data.job};renderBloggerSkill();
+  toast(data.remainingFiles?`最新文件已进入队列；另有 ${data.remainingFiles} 个文件需逐个处理`:"最新文件已进入能力卡生成队列");
+  await pollBloggerImportJob(data.job.id);
  }catch(err){toast(`扫描失败：${err.message}`)}
+}
+async function pollBloggerImportJob(jobId){
+ const token=++bloggerImportPollToken,deadline=Date.now()+30*60*1000;
+ bloggerImportPollingJobId=jobId;
+ try{
+  while(token===bloggerImportPollToken&&Date.now()<deadline){
+   const data=await api(`/api/blogger-skill/import-jobs/${encodeURIComponent(jobId)}`),job=data.job;
+   if(!job)throw new Error("导入任务状态不可用");
+   bloggerSkillState={...bloggerSkillState,importJob:job};
+   renderBloggerSkill();
+   if(["completed","failed"].includes(job.status)){
+    bloggerImportPollingJobId="";
+    if(job.status==="completed"){
+     if(job.result?.creatorName)bloggerSkillPersonFilter=job.result.creatorName;
+     await loadBloggerSkill();renderStrategyKb();
+     toast(`${job.result?.creatorName||"达人"}完整能力卡已生成：${job.importedCount||0} 条样本`);
+    }else toast(`能力卡生成未完成：${job.error||"请查看任务详情后重试"}`);
+    return job;
+   }
+   await new Promise(resolve=>setTimeout(resolve,800));
+  }
+  if(token===bloggerImportPollToken)throw new Error("任务处理超过30分钟，进度已保留，可刷新页面继续查看");
+ }finally{
+  if(token===bloggerImportPollToken)bloggerImportPollingJobId="";
+ }
+}
+async function retryBloggerImportJob(button){
+ const jobId=button.dataset.bloggerImportRetry;
+ button.disabled=true;button.textContent="正在重新排队…";
+ try{
+  const data=await api(`/api/blogger-skill/import-jobs/${encodeURIComponent(jobId)}/retry`,{method:"POST",body:"{}"});
+  bloggerSkillState={...bloggerSkillState,importJob:data.job};renderBloggerSkill();
+  toast("文件已重新进入处理队列，进度会持续保留");
+  await pollBloggerImportJob(data.job?.id||jobId);
+ }catch(err){toast(`重新处理失败：${err.message}`);button.disabled=false;button.textContent="重新处理此文件"}
 }
 async function importBloggerSkillFile(file){
  if(!file)return;
  try{
   const socialAssistant=file.name.includes("社媒助手");
-  toast(socialAssistant?"正在导入公开主证据并蒸馏…":"正在导入补充样本并蒸馏…");
+  toast(socialAssistant?"公开主证据已提交，正在建立处理任务…":"补充样本已提交，正在建立处理任务…");
   const res=await fetch(`/api/blogger-skill/import-file?edition=${encodeURIComponent(activeEdition())}&filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});
   const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");
-  bloggerSkillState={...bloggerSkillState,...json};
-  mergeDistilledCreatorLibraries(json.creatorLibraries);
+  if(!json.job?.id)throw new Error("未取得导入任务状态");
+  bloggerSkillState={...bloggerSkillState,importJob:json.job};
   contentAssetView="bloggerDistill";
-  renderBloggerSkill();renderCreatorLibrary();renderStrategyKb();showPage("videos");
-  toast(`${json.sourceMode==="social_assistant"?"公开主证据":"补充样本"}已入库并完成交叉质检：${json.imported||0} 条样本，${json.stats?.ragChunks||0} 条RAG chunk`);
+  renderBloggerSkill();showPage("videos");
+  toast("任务已开始：导入 → 蒸馏 → 分析 → 交付");
+  await pollBloggerImportJob(json.job.id);
  }catch(err){toast(`样本导入失败：${err.message}`)}
 }
 function contentCapabilityQueryString(){
@@ -4022,8 +4107,120 @@ async function loadContentCapabilityKb(){
   renderContentCapabilityKb();
  }catch(err){
   contentCapabilityState={...contentCapabilityState,error:err.message};
-  renderContentCapabilityKb();
+ renderContentCapabilityKb();
  }
+}
+function creatorScriptStageLabel(stage){return {brief:"理解任务",draft:"生成初稿",review:"交叉复核",final:"成稿优化",delivery:"完成交付"}[stage]||"等待开始"}
+function ensureCreatorScriptWorkspace(){
+ let dialog=document.querySelector("#creator-script-workspace");if(dialog)return dialog;
+ dialog=document.createElement("dialog");dialog.id="creator-script-workspace";dialog.className="creator-script-dialog";
+ dialog.innerHTML=`<div class="creator-script-shell">
+  <header><div><span>MMN ORIGINAL SCRIPT WORKBENCH</span><h2>达人方法论原创脚本</h2><p>三重能力协同生成：平台成稿、独立复核、自然表达优化。只迁移方法论，不复制达人身份或原文。</p></div><button type="button" class="creator-script-close" aria-label="关闭脚本工作台">×</button></header>
+  <div class="creator-script-layout">
+   <form id="creator-script-form" class="creator-script-brief">
+    <label><span>选择达人</span><select name="creatorAssetId" required></select></label>
+    <fieldset><legend>发布平台</legend><div class="creator-platform-choice">
+     <label><input type="radio" name="platform" value="douyin" checked><span>抖音</span></label>
+     <label><input type="radio" name="platform" value="wechat_channels"><span>视频号</span></label>
+     <label><input type="radio" name="platform" value="bilibili"><span>B站</span></label>
+     <label><input type="radio" name="platform" value="xiaohongshu"><span>小红书</span></label>
+    </div></fieldset>
+    <div class="creator-script-pair"><label><span>品牌</span><input name="brand" required placeholder="例如：上汽奥迪"></label><label><span>车型</span><input name="model" required placeholder="例如：奥迪E7X"></label></div>
+    <label><span>标题 / 主题 <small>可留空由MMN生成</small></span><input name="title" placeholder="例如：家庭用户该不该选这台车"></label>
+    <label><span>传播重点</span><textarea name="focus" required rows="4" placeholder="写清希望用户记住的核心判断、使用场景和不能越过的表达边界"></textarea></label>
+    <button type="submit" class="primary creator-script-generate">MMN自动生成</button>
+   </form>
+   <section class="creator-script-delivery" aria-live="polite"><div id="creator-script-status"></div><div id="creator-script-output"></div></section>
+  </div>
+ </div>`;
+ document.body.appendChild(dialog);
+ dialog.querySelector(".creator-script-close").onclick=()=>{creatorScriptPollToken++;dialog.close()};
+ dialog.addEventListener("cancel",()=>{creatorScriptPollToken++});
+ dialog.querySelector("#creator-script-form").onsubmit=submitCreatorScriptJob;
+ dialog.querySelector('[name="creatorAssetId"]').onchange=async e=>{
+  creatorScriptWorkspaceAsset=(contentCapabilityState.creatorAssets||[]).find(x=>x.id===e.target.value)||null;
+  creatorScriptCurrentJob=null;renderCreatorScriptWorkspace();
+  await restoreLatestCreatorScriptJob(e.target.value);
+ };
+ return dialog;
+}
+function creatorScriptJobStatusMarkup(job){
+ if(!job)return `<div class="creator-script-empty"><b>填写任务后开始生成</b><p>生成过程中可关闭窗口；进度、成稿和失败原因都会持久化，重新打开后可继续查看。</p></div>`;
+ const failed=job.status==="failed",done=job.status==="completed",progress=Math.max(0,Math.min(100,Number(job.progress)||0));
+ const phases=[["brief","理解任务"],["draft","生成初稿"],["review","交叉复核"],["final","成稿优化"],["delivery","完成交付"]];
+ const order=phases.map(x=>x[0]),current=order.indexOf(job.stage);
+ return `<div class="creator-script-progress ${failed?"failed":done?"completed":"running"}">
+  <div class="creator-script-progress-head"><div><span>${failed?"生成未完成":done?"可直接交付":"正在生成"}</span><b>${escapeHtml(job.message||creatorScriptStageLabel(job.stage))}</b><small>任务 ${escapeHtml(job.id)} · 第 ${job.revisionNo||1} 版</small></div><strong>${progress}%</strong></div>
+  <progress max="100" value="${progress}" aria-label="原创脚本生成进度"></progress>
+  <div class="creator-script-phases">${phases.map(([key,label],i)=>`<div class="${failed&&key===job.stage?"failed":i<current||done?"done":i===current?"active":"pending"}"><i>${i<current||done?"✓":i+1}</i><span>${label}</span></div>`).join("")}</div>
+  ${job.error?`<p class="creator-script-error"><b>失败原因</b>${escapeHtml(job.error)}</p>`:""}
+  ${failed?`<button type="button" class="secondary" data-creator-script-retry="${escapeAttr(job.id)}">修正后重试</button>`:""}
+ </div>`;
+}
+function creatorScriptCopyText(job){
+ const r=job?.result||{},visuals=(r.visualSuggestions||[]).map(x=>`${x.timing?`[${x.timing}] `:""}${x.shot}${x.subtitle?`｜字幕：${x.subtitle}`:""}`).join("\n");
+ return [`标题：${r.title||""}`,`开头钩子：${r.openingHook||""}`,"完整口播稿：",r.spokenScript||"","字幕重点：",...(r.subtitleHighlights||[]).map(x=>`- ${x}`),"画面建议：",visuals].join("\n");
+}
+function creatorScriptResultMarkup(job){
+ const r=job?.result||{};if(job?.status!=="completed"||!r.spokenScript)return "";
+ return `<article class="creator-script-result">
+  <div class="creator-script-result-head"><div><span>${escapeHtml(job.platformLabel||"")} · 第 ${job.revisionNo||1} 版</span><h3>${escapeHtml(r.title)}</h3></div><div><button type="button" class="secondary" data-creator-script-copy="all">一键复制</button><button type="button" class="secondary" data-creator-script-export="${escapeAttr(job.id)}">导出Word</button></div></div>
+  <section><div><span>开头钩子</span><button type="button" data-creator-script-copy="hook">复制</button></div><p class="creator-script-hook">${escapeHtml(r.openingHook)}</p></section>
+  <section><div><span>完整口播稿</span><button type="button" data-creator-script-copy="script">复制</button></div><div class="creator-script-spoken">${escapeHtml(r.spokenScript).replace(/\n/g,"<br>")}</div></section>
+  <section><div><span>字幕重点</span></div><ul>${(r.subtitleHighlights||[]).map(x=>`<li>${escapeHtml(x)}</li>`).join("")}</ul></section>
+  <section><div><span>画面建议</span></div><div class="creator-script-shots">${(r.visualSuggestions||[]).map(x=>`<article><b>${escapeHtml(x.timing||"镜头")}</b><p>${escapeHtml(x.shot)}</p>${x.subtitle?`<small>字幕：${escapeHtml(x.subtitle)}</small>`:""}</article>`).join("")}</div></section>
+  <form id="creator-script-revision-form" class="creator-script-revision"><label><span>修改要求</span><textarea name="revisionRequest" required rows="3" placeholder="例如：开头更直接，删掉泛泛的品牌介绍，把家庭长途场景讲具体"></textarea></label><button type="submit" class="primary">按要求重新生成</button></form>
+  <small class="creator-script-quality">已完成平台适配、事实边界与自然表达复核。</small>
+ </article>`;
+}
+function renderCreatorScriptWorkspace(){
+ const dialog=ensureCreatorScriptWorkspace(),assets=contentCapabilityState.creatorAssets||[],select=dialog.querySelector('[name="creatorAssetId"]');
+ const selectedId=creatorScriptWorkspaceAsset?.id||select.value||assets[0]?.id||"";
+ select.innerHTML=assets.map(x=>`<option value="${escapeAttr(x.id)}">${escapeHtml(x.account_name)} · ${escapeHtml(x.platform||"公开平台")} · ${x.sample_count||0}条样本</option>`).join("");select.value=selectedId;
+ creatorScriptWorkspaceAsset=assets.find(x=>x.id===select.value)||creatorScriptWorkspaceAsset;
+ dialog.querySelector("#creator-script-status").innerHTML=creatorScriptJobStatusMarkup(creatorScriptCurrentJob);
+ dialog.querySelector("#creator-script-output").innerHTML=creatorScriptResultMarkup(creatorScriptCurrentJob);
+ const retry=dialog.querySelector("[data-creator-script-retry]");if(retry)retry.onclick=()=>retryCreatorScriptJob(retry);
+ dialog.querySelectorAll("[data-creator-script-copy]").forEach(btn=>btn.onclick=()=>copyCreatorScript(btn.dataset.creatorScriptCopy));
+ const exportBtn=dialog.querySelector("[data-creator-script-export]");if(exportBtn)exportBtn.onclick=()=>exportCreatorScriptWord(exportBtn.dataset.creatorScriptExport);
+ const revision=dialog.querySelector("#creator-script-revision-form");if(revision)revision.onsubmit=submitCreatorScriptRevision;
+}
+async function openCreatorScriptWorkspace(asset){
+ creatorScriptWorkspaceAsset=asset;creatorScriptCurrentJob=null;const dialog=ensureCreatorScriptWorkspace();renderCreatorScriptWorkspace();
+ if(typeof dialog.showModal==="function"&&!dialog.open)dialog.showModal();else dialog.setAttribute("open","");
+ dialog.querySelector('[name="creatorAssetId"]')?.focus();await restoreLatestCreatorScriptJob(asset.id);
+}
+async function restoreLatestCreatorScriptJob(assetId){
+ try{const data=await api(`/api/content-capability-kb/script-jobs/latest?edition=${encodeURIComponent(activeEdition())}&creatorAssetId=${encodeURIComponent(assetId)}`);creatorScriptCurrentJob=data.job||null;renderCreatorScriptWorkspace();if(data.job&&["queued","running"].includes(data.job.status))pollCreatorScriptJob(data.job.id)}catch(err){toast(`历史脚本读取失败：${err.message}`)}
+}
+async function submitCreatorScriptJob(e){
+ e.preventDefault();const form=e.currentTarget,body=Object.fromEntries(new FormData(form));body.edition=activeEdition();
+ const btn=form.querySelector("button[type=submit]");btn.disabled=true;btn.textContent="任务提交中…";
+ try{const data=await api("/api/content-capability-kb/script-jobs",{method:"POST",body:JSON.stringify(body)});creatorScriptCurrentJob=data.job;renderCreatorScriptWorkspace();pollCreatorScriptJob(data.job.id)}catch(err){toast(`脚本任务创建失败：${err.message}`);btn.disabled=false;btn.textContent="MMN自动生成"}
+}
+async function pollCreatorScriptJob(jobId){
+ const token=++creatorScriptPollToken,deadline=Date.now()+20*60*1000;
+ while(token===creatorScriptPollToken&&Date.now()<deadline){
+  try{const data=await api(`/api/content-capability-kb/script-jobs/${encodeURIComponent(jobId)}`);creatorScriptCurrentJob=data.job;renderCreatorScriptWorkspace();if(["completed","failed"].includes(data.job.status)){toast(data.job.status==="completed"?"原创脚本已完成，可直接复制或导出Word":`脚本生成未完成：${data.job.error||"请查看失败原因"}`);return}}
+  catch(err){toast(`进度读取失败：${err.message}`);return}
+  await new Promise(resolve=>setTimeout(resolve,1000));
+ }
+}
+async function retryCreatorScriptJob(button){
+ button.disabled=true;button.textContent="正在重新排队…";
+ try{const data=await api(`/api/content-capability-kb/script-jobs/${encodeURIComponent(button.dataset.creatorScriptRetry)}/retry`,{method:"POST",body:"{}"});creatorScriptCurrentJob=data.job;renderCreatorScriptWorkspace();pollCreatorScriptJob(data.job.id)}catch(err){toast(`重试失败：${err.message}`);button.disabled=false;button.textContent="修正后重试"}
+}
+async function submitCreatorScriptRevision(e){
+ e.preventDefault();const requirement=new FormData(e.currentTarget).get("revisionRequest")?.trim();if(!requirement)return;
+ const btn=e.currentTarget.querySelector("button");btn.disabled=true;btn.textContent="正在提交修改…";
+ try{const data=await api(`/api/content-capability-kb/script-jobs/${encodeURIComponent(creatorScriptCurrentJob.id)}/revise`,{method:"POST",body:JSON.stringify({revisionRequest:requirement})});creatorScriptCurrentJob=data.job;renderCreatorScriptWorkspace();pollCreatorScriptJob(data.job.id)}catch(err){toast(`重新生成失败：${err.message}`);btn.disabled=false;btn.textContent="按要求重新生成"}
+}
+async function copyCreatorScript(part){
+ const r=creatorScriptCurrentJob?.result||{},text=part==="hook"?r.openingHook:part==="script"?r.spokenScript:creatorScriptCopyText(creatorScriptCurrentJob);
+ try{await navigator.clipboard.writeText(text||"");toast("脚本内容已复制")}catch(err){toast("复制失败，请检查浏览器剪贴板权限")}
+}
+async function exportCreatorScriptWord(jobId){
+ try{toast("正在生成Word文档…");const res=await fetch(`/api/content-capability-kb/script-jobs/${encodeURIComponent(jobId)}/export.docx`,{headers:authHeaders()});if(!res.ok){const data=await res.json().catch(()=>({}));throw new Error(data.error||"Word导出失败")};const blob=await res.blob(),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`${creatorScriptCurrentJob?.creatorName||"达人"}-${creatorScriptCurrentJob?.result?.title||"MMN原创脚本"}.docx`;a.click();URL.revokeObjectURL(a.href);toast("Word文档已导出")}catch(err){toast(`Word导出失败：${err.message}`)}
 }
 function renderContentCapabilityKb(){
  const root=document.querySelector("#content-capability-list");if(!root)return;
@@ -4072,7 +4269,7 @@ function renderContentCapabilityKb(){
     <section><span>客户brief模板</span><p>${clip(asset.client_brief_template?.deliverable||"输出选题方向、脚本结构、证据要求和风险边界",130)}</p></section>
   </div>
   <div class="dna-actions">
-    <button type="button" data-dna-action="script" data-dna-id="${escapeAttr(asset.id)}">按TA风格生成脚本</button>
+    <button type="button" data-dna-action="script" data-dna-id="${escapeAttr(asset.id)}">调用TA方法论生成原创脚本</button>
     <button type="button" data-dna-action="incubate" data-dna-id="${escapeAttr(asset.id)}">用TA作为benchmark孵化新账号</button>
     <button type="button" data-dna-action="match" data-dna-id="${escapeAttr(asset.id)}">按客户课题检索适配达人风格</button>
   </div>
@@ -4081,7 +4278,9 @@ function renderContentCapabilityKb(){
  </article>`).join(""):`<p class="empty">还没有达人DNA资产包。导入公开数据文件或输入账号后，MMN会自动沉淀账号定位、内容母题、选题公式、脚本结构、语言风格和调用场景。</p>`;
  root.querySelectorAll("[data-dna-action]").forEach(btn=>btn.onclick=()=>{
   const asset=(contentCapabilityState.creatorAssets||[]).find(x=>x.id===btn.dataset.dnaId);
-  if(asset)toast(dnaText(asset,btn.dataset.dnaAction));
+  if(!asset)return;
+  if(btn.dataset.dnaAction==="script")openCreatorScriptWorkspace(asset);
+  else toast(dnaText(asset,btn.dataset.dnaAction));
  });
  const chunks=contentCapabilityState.chunks||[];
  if(evidenceRoot)evidenceRoot.innerHTML=chunks.length?chunks.slice(0,12).map(x=>`<article class="capability-card">
@@ -4512,6 +4711,7 @@ bindSocialTrendSegments();
 const socialImportButton=document.querySelector("#social-trend-import"),socialImportFile=document.querySelector("#social-trend-import-file");if(socialImportButton&&socialImportFile){socialImportButton.onclick=()=>socialImportFile.click();socialImportFile.onchange=async()=>{const file=socialImportFile.files?.[0];if(file)await importSocialTrendFile(file);socialImportFile.value=""}}
 const socialThresholdReset=document.querySelector("#social-threshold-reset");if(socialThresholdReset)socialThresholdReset.onclick=()=>{document.querySelector("#social-threshold-douyin").value=8000;document.querySelector("#social-threshold-xiaohongshu").value=500;document.querySelector("#social-threshold-weibo").value=500};
 document.addEventListener("click",async e=>{
+ const bloggerImportRetry=e.target.closest("[data-blogger-import-retry]");if(bloggerImportRetry){await retryBloggerImportJob(bloggerImportRetry);return}
  const bloggerRetry=e.target.closest("[data-blogger-task-retry]");if(bloggerRetry){await retryBloggerCreatorTask(bloggerRetry);return}
  const tab=e.target.closest("[data-creator-asset-tab]");if(tab){creatorAssetState.tab=tab.dataset.creatorAssetTab;renderCreatorAssets();return}
  const action=e.target.closest("[data-creator-action]");if(!action)return;

@@ -78,6 +78,7 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(len(state["vehicleActions"]), 9)
         self.assertEqual(len(state["brandImplications"]), 9)
         self.assertEqual(state["providerChecks"], {"qwen": "verified", "deepseek": "verified"})
+        self.assertTrue(state["reviewCompleted"])
 
     def test_model_failure_keeps_summary_private(self):
         packet = server.executive_brief_evidence_packet()
@@ -92,7 +93,49 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         self.assertEqual(state["actions"], [])
         self.assertEqual(state["vehicleActions"], [])
         self.assertEqual(state["brandImplications"], [])
+        self.assertEqual(state["statusLabel"], "双旗舰模型交叉验证未通过 · 暂不发布")
+        self.assertTrue(state["reviewCompleted"])
         self.assertNotIn("secret provider detail", json.dumps(state, ensure_ascii=False))
+
+    def test_new_weekly_batch_rebuilds_summary_and_starts_review_for_same_batch(self):
+        payload = {
+            "facts": [
+                {"id": "retail", "label": "乘用车零售", "value": 50.0, "unit": "万辆", "yoy": -0.10},
+                {"id": "wholesale", "label": "乘用车厂商批发", "value": 48.0, "unit": "万辆", "yoy": -0.12},
+                {"id": "nev_retail", "label": "新能源零售", "value": 33.0, "unit": "万辆", "yoy": 0.05},
+                {"id": "nev_penetration", "label": "新能源零售渗透率", "value": 66.0, "unit": "%"},
+            ],
+            "source": {
+                "label": "中国汽车流通协会乘用车市场信息联席分会《车市扫描(20260713-0719)》",
+                "url": "https://www.cpcaauto.com/newslist.php?types=csjd&id=next",
+                "period": "截至2026年7月19日 · 7月月内累计",
+                "metricPeriod": "2026年7月1—19日",
+                "metricBasis": "month_to_date",
+                "naturalWeekPeriod": "2026年7月13—19日",
+                "naturalWeekEndDate": "2026-07-19",
+            },
+            "publishedAt": "2026-07-22 16:00:00",
+        }
+        captured = {}
+
+        def enqueue(packet, force=False):
+            captured["packet"] = packet
+            captured["force"] = force
+            return True
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(server, "DATA_DIR", Path(tmp)), \
+             patch.object(server, "enqueue_executive_brief_review", side_effect=enqueue):
+            result = server.run_weekly_group_dashboard_refresh(payload)
+
+        packet = captured["packet"]
+        self.assertEqual(result["status"], "published")
+        self.assertTrue(result["reviewStarted"])
+        self.assertTrue(captured["force"])
+        self.assertEqual(packet["batchId"], result["batchId"])
+        self.assertEqual(packet["source"]["naturalWeekPeriod"], "2026年7月13—19日")
+        self.assertIn("乘用车零售同比-10%", packet["candidate"])
+        self.assertEqual(packet["inferences"][3]["detail"], "新能源零售渗透率为66.0%")
 
 
 if __name__ == "__main__":

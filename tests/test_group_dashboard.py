@@ -96,12 +96,13 @@ class GroupDashboardTest(unittest.TestCase):
                     "body_type": "轿车",
                     "size_class": "中型车",
                     "energy_type": "纯电动",
-                    "segment_key": "轿车|中型车|纯电动",
+                    "energy_group": "新能源",
+                    "segment_key": "中型车|新能源",
                     "segment_total_sales": 12000,
                     "segment_model_count": 2,
                     "segment_median_sales": 6000,
                     "segment_rank": 2,
-                    "competitor_pool_rule": "懂车帝同车型种类×同尺寸×同动力形式，仅排除本品",
+                    "competitor_pool_rule": "同尺寸×新能源（纯电动、增程式、插电式混动），仅排除本品",
                     "competitor_pool_count": 1,
                     "competitor_pool": [
                         {"series_id": 1, "series_name": "竞品甲", "manufacturer": "竞品厂商", "sales_volume": 9000, "price": "21-31万"},
@@ -121,7 +122,8 @@ class GroupDashboardTest(unittest.TestCase):
                     "body_type": "SUV",
                     "size_class": "中型SUV",
                     "energy_type": "插电式混动",
-                    "segment_key": "SUV|中型SUV|插电式混动",
+                    "energy_group": "新能源",
+                    "segment_key": "中型SUV|新能源",
                     "segment_total_sales": 6000,
                     "segment_model_count": 1,
                     "segment_median_sales": 6000,
@@ -145,11 +147,13 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(result["mode"], "full_segment_market")
         self.assertEqual(result["source"]["period"], "2026-06")
         self.assertEqual(result["summary"]["saicModelCount"], 2)
-        self.assertEqual(sedan["segmentLabel"], "轿车 · 中型车 · 纯电动")
+        self.assertEqual(sedan["segmentLabel"], "中型车 · 新能源")
+        self.assertEqual(sedan["energyType"], "纯电动")
+        self.assertEqual(sedan["segmentEnergyType"], "新能源")
         self.assertEqual(sedan["marketSales"], 12000)
         self.assertEqual(sedan["benchmark"], 6000)
         self.assertEqual(sedan["peerCount"], 1)
-        self.assertEqual(sedan["peerBasis"], "懂车帝同车型种类×同尺寸×同动力形式，仅排除本品")
+        self.assertEqual(sedan["peerBasis"], "同尺寸×新能源（纯电动、增程式、插电式混动），仅排除本品")
         self.assertEqual([item["model"] for item in sedan["benchmarkAuditPeers"]], ["竞品甲"])
         self.assertEqual(sedan["rank"], 2)
         self.assertEqual(sedan["level"], "red")
@@ -198,7 +202,21 @@ class GroupDashboardTest(unittest.TestCase):
             if peer["manufacturer"] in {"蔚来", "乐道", "萤火虫", "NIO", "ONVO", "firefly"}
         ]
 
-        self.assertEqual({item["model"] for item in affected}, {"蔚来ET5", "蔚来ET5T", "蔚来ET7"})
+        self.assertEqual(
+            {item["model"] for item in affected},
+            {
+                "乐道L60",
+                "乐道L80",
+                "乐道L90",
+                "蔚来EC6",
+                "蔚来ES6",
+                "蔚来ES8",
+                "蔚来ES9",
+                "蔚来ET5",
+                "蔚来ET5T",
+                "蔚来ET7",
+            },
+        )
         self.assertTrue(all(item["baasApplied"] for item in affected))
         self.assertTrue(all("BaaS后" in item["priceDisplay"] for item in affected))
         for item in affected:
