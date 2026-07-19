@@ -275,15 +275,51 @@ class BloggerIncubationWorkbenchTest(unittest.TestCase):
         }
         with patch.object(server, "generic_rows_from_file", return_value=rows), \
                 patch.object(server, "normalize_blogger_source", return_value=normalized) as normalize, \
+                patch.object(server, "normalize_content_capability_source", return_value={
+                    "raw_text": "样本正文", "account_name": "猴哥说车", "platform": "抖音"
+                }) as normalize_capability, \
                 patch.object(server, "save_blogger_skill_items", return_value={}), \
+                patch.object(server, "save_content_capability_items", return_value={
+                    "sources": 100, "chunks": 100, "profiles": []
+                }) as save_capability, \
                 patch.object(server, "blogger_skill_payload", return_value={"ok": True}):
             result = server.import_blogger_skill_file(
                 b"xlsx", "【社媒助手】达人「猴哥说车」的视频数据.xlsx", limit=30
             )
 
         self.assertEqual(normalize.call_count, 100)
+        self.assertEqual(normalize_capability.call_count, 100)
+        save_capability.assert_called_once()
+        self.assertEqual(len(save_capability.call_args.args[0]), 100)
+        self.assertFalse(save_capability.call_args.kwargs["sync_profiles"])
+        self.assertEqual(result["contentCapabilitySync"]["chunks"], 100)
         self.assertEqual(result["sourceMode"], "social_assistant")
         self.assertEqual(result["sourcePriority"], "primary")
+
+    def test_imported_blogger_is_published_to_creator_script_asset_selector(self):
+        rows = [{
+            "视频ID": str(index),
+            "视频描述": f"家庭用户买车要验证的第{index}个动作",
+            "达人昵称": "超哥超车",
+            "平台": "抖音",
+            "视频链接": f"https://www.douyin.com/video/{index}",
+        } for index in range(6)]
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(server, "DB_PATH", Path(temp_dir) / "creator-sync.db"), \
+                patch.object(server, "generic_rows_from_file", return_value=rows), \
+                patch.object(server, "save_blogger_skill_items", return_value={}), \
+                patch.object(server, "blogger_skill_payload", return_value={"ok": True}):
+            server.init_db()
+            result = server.import_blogger_skill_file(
+                b"xlsx", "【社媒助手】达人「超哥超车」的视频数据.xlsx"
+            )
+            payload = server.content_capability_payload(edition="china")
+
+        creator = next(item for item in payload["creatorAssets"] if item["account_name"] == "超哥超车")
+        self.assertEqual(result["contentCapabilitySync"]["sources"], 6)
+        self.assertEqual(creator["platform"], "抖音")
+        self.assertEqual(creator["sample_count"], 6)
+        self.assertIn("短视频脚本", creator["fit_tasks"])
 
     def test_dual_model_gate_requires_shared_evidence(self):
         profile = server.blogger_skill_profile_from_samples([], blogger_name="测试达人")

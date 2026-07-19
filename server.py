@@ -141,7 +141,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260720-cockpit-creator-1"
+APP_VERSION_CODE = "beta-1.02-20260720-cockpit-creator-2"
 APP_RELEASE_DATE = "2026-07-20"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -9872,10 +9872,12 @@ def import_blogger_skill_file(data, filename, edition="china", limit=30, progres
     social_assistant = "社媒助手" in str(filename or "")
     effective_limit = 500 if social_assistant else max(1, min(int(limit or 30), 30))
     sources = []
+    capability_sources = []
     for row in rows[:effective_limit]:
         source = normalize_blogger_source(row, filename, digest, edition=edition)
         if source.get("title") or source.get("content") or source.get("source_url"):
             sources.append(source)
+            capability_sources.append(normalize_content_capability_source(row, filename, digest, edition=edition))
     if not sources:
         raise ValueError("未识别到可蒸馏的内容样本。请确认文件包含标题、正文、作者或链接字段。")
     filename_creator = blogger_name_from_filename(filename)
@@ -9887,15 +9889,23 @@ def import_blogger_skill_file(data, filename, edition="china", limit=30, progres
     creator_name = filename_creator or next(iter(observed_creators), "")
     if not creator_name:
         raise ValueError("未识别到达人名称。请使用包含达人昵称的导出文件，或在文件名中保留达人名称。")
-    for source in sources:
+    for source, capability_source in zip(sources, capability_sources):
         if not source.get("author") or source.get("author") == "待确认博主":
             source["author"] = creator_name
+        capability_source["account_name"] = creator_name
+        capability_source["platform"] = source.get("platform") or capability_source.get("platform") or "公开内容"
     report("import", 20, f"已识别 {creator_name}，准备处理 {len(sources)} 条公开样本")
     result = save_blogger_skill_items(sources, edition=edition, progress_callback=progress_callback)
+    capability_result = save_content_capability_items(
+        [source for source in capability_sources if source.get("raw_text")],
+        edition=edition,
+        sync_profiles=False,
+    )
     payload = blogger_skill_payload(edition=edition, imported=len(sources), result=result)
     payload.update({
         "sourceMode": "social_assistant" if social_assistant else "file_import",
         "sourcePriority": "primary" if social_assistant else "supplemental",
+        "contentCapabilitySync": capability_result,
     })
     report("delivery", 98, f"{creator_name}完整能力卡已生成，正在完成交付校验")
     return payload
@@ -10718,7 +10728,7 @@ def distill_content_capability_chunks(source):
         })
     return chunks
 
-def save_content_capability_items(sources, edition="china"):
+def save_content_capability_items(sources, edition="china", sync_profiles=True):
     chunks = [chunk for source in sources for chunk in distill_content_capability_chunks(source)]
     with db() as conn:
         for source in sources:
@@ -10769,8 +10779,9 @@ def save_content_capability_items(sources, edition="china"):
                 json.dumps(chunk["embedding"], ensure_ascii=False), chunk["source_url"], chunk["created_at"]
             ))
     profile_results = []
-    for account_name in sorted({str(x.get("account_name") or "").strip() for x in sources if x.get("account_name")}):
-        profile_results.append(sync_content_capability_profile(account_name, edition=edition))
+    if sync_profiles:
+        for account_name in sorted({str(x.get("account_name") or "").strip() for x in sources if x.get("account_name")}):
+            profile_results.append(sync_content_capability_profile(account_name, edition=edition))
     return {"sources": len(sources), "chunks": len(chunks), "profiles": profile_results}
 
 def import_content_capability_file(data, filename, edition="china", limit=120):
