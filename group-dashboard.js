@@ -265,7 +265,7 @@ function renderFullSegmentWarnings(warning){
  }
 
  function render(data){
-  const evaluation=data.productEvaluation||{},own=(evaluation.models||[]).find(item=>item.isOwn)||{},source=evaluation.source||{},brief=data.executiveBrief||{},pulse=executivePulseFrom(brief),weeklyRefresh=brief.weeklyRefresh||data.refreshCadence?.weekly||{},factMap=Object.fromEntries((brief.facts||[]).map(item=>[item.id,item]));
+  const evaluation=data.productEvaluation||{};window.MMNVehicleContext?.registerProductEvaluation?.(evaluation);const own=(evaluation.models||[]).find(item=>item.isOwn)||{},source=evaluation.source||{},brief=data.executiveBrief||{},pulse=executivePulseFrom(brief),weeklyRefresh=brief.weeklyRefresh||data.refreshCadence?.weekly||{},factMap=Object.fromEntries((brief.facts||[]).map(item=>[item.id,item]));
   if(data.salesWarnings)data.salesWarnings.refreshCadence=data.refreshCadence?.monthlySalesWarning||{};
   const views=[
    {key:"brief",label:"高管摘要",kicker:"高管摘要",content:renderExecutiveOverview(data.executiveBrief||{})},

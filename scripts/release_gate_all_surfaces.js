@@ -146,6 +146,36 @@ async function auditViewport(browser, viewport) {
       );
     }
 
+    await groupViews.nth(2).click();
+    const e7xWarning = page.locator("#group-dashboard-root [data-warning-series-id]").filter({ hasText: "奥迪E7X" }).first();
+    await e7xWarning.click();
+    await page.waitForFunction(() => document.querySelector("#summary-own-model")?.value === "奥迪E7X");
+    const e7xLinkage = await page.evaluate(() => ({
+      contextModel: state.config.model,
+      datasetModels: state.models || [],
+      rowModels: [...new Set((state.rows || []).map(row => row[0]))],
+      ownSelector: document.querySelector("#summary-own-model")?.value || "",
+      competitorConfig: state.config.competitor,
+      sellingPointModel: document.querySelector("#selling-point-model-select")?.value || "",
+      attributeCount: Object.keys(state.summaryAttributeBenchmark?.["全网"] || {}).length,
+      sourceNote: state.sourceNote || "",
+    }));
+    const expectedE7xModels = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"];
+    add(
+      `${viewport.name}: E7X selection binds the matching product dataset and downstream model context`,
+      e7xLinkage.contextModel === "奥迪E7X"
+        && e7xLinkage.ownSelector === "奥迪E7X"
+        && e7xLinkage.sellingPointModel === "奥迪E7X"
+        && expectedE7xModels.every(model => e7xLinkage.datasetModels.includes(model))
+        && !e7xLinkage.datasetModels.includes("小米SU7")
+        && e7xLinkage.rowModels.length === 1
+        && e7xLinkage.rowModels[0] === "奥迪E7X"
+        && e7xLinkage.attributeCount === 15
+        && expectedE7xModels.filter(model => model !== "奥迪E7X").every(model => e7xLinkage.competitorConfig.includes(model))
+        && e7xLinkage.sourceNote.includes("AUDI E7X等5车产品评价_0710_v2.xlsx"),
+      JSON.stringify(e7xLinkage),
+    );
+
     await page.screenshot({ path: `output/playwright/all-surfaces-${viewport.width}.png`, fullPage: true });
   } finally {
     await page.close();

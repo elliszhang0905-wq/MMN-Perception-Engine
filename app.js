@@ -1030,15 +1030,66 @@ function syncDashboardCompetitors(){
  if(state.config.competitor!==next)state.config.competitor=next;
  return comps;
 }
+const productEvaluationCatalog=new Map();
+function productEvaluationAttributeCategory(label){
+ const text=String(label||"");
+ if(/价格|权益/.test(text))return"价格权益";
+ if(/动力|操控/.test(text))return"动力与操控";
+ if(/外观|内饰|设计/.test(text))return"设计体验";
+ if(/安全|质量/.test(text))return"安全质量";
+ if(/智能|辅助|驾驶|座舱/.test(text))return"智能化";
+ if(/空间|舒适/.test(text))return"空间舒适";
+ if(/品牌|口碑/.test(text))return"品牌信任";
+ return"其他赛道";
+}
+function productEvaluationSummaryDataset(evaluation){
+ if(!evaluation||evaluation.status!=="available"||!evaluation.ownModel)return null;
+ const ownModel=String(evaluation.ownModel),models=(evaluation.models||[]).map(item=>String(item.model||"").trim()).filter(Boolean);
+ if(!models.includes(ownModel)||models.length<2)return null;
+ const competitors=models.filter(model=>model!==ownModel),source=evaluation.source||{},attributes=(evaluation.attributes||[]).filter(item=>item.attribute&&nullableNumber(item.ownNsr)!==null),summaryHeat={},summaryPlatformNsr={},summaryMetrics={};
+ (evaluation.models||[]).forEach(item=>{const model=String(item.model||"").trim();if(!model)return;summaryHeat[model]={volume:Number(item.voice||0),interaction:Number(item.engagement||0),platformVolume:{}};summaryPlatformNsr[model]={"全网":nullableNumber(item.overallNsr),"垂媒车主口碑":nullableNumber(item.verticalNsr),"抖音":nullableNumber(item.douyinNsr)};summaryMetrics[model]={overallNsr:nullableNumber(item.overallNsr)}});
+ const rows=attributes.map(item=>{const nsr=nullableNumber(item.ownNsr),label=String(item.attribute);return[ownModel,"本品","全网",productEvaluationAttributeCategory(label),label,nsr>=.6?"信任":nsr>=.25?"认可":nsr>=0?"期待":"怀疑","目标核心人群","无",100,3,1,4,"汇总NSR评分",`数据整理｜全网｜${label}`,nsr]});
+ const benchmark={"全网":Object.fromEntries(attributes.map(item=>[String(item.attribute),nullableNumber(item.averageNsr)]).filter(([,value])=>value!==null))};
+ return{
+  datasetVersion:"e7x_product_evaluation_2026_06_v1",
+  sourceNote:`已载入《${source.fileName||"E7X产品评价汇总"}》；数据周期：${source.period||"2026.06"}；识别车型：${models.join("、")}；属性竞品口径：四车均值。`,
+  config:{project:`${ownModel}认知诊断｜${competitors.length}车核心竞品`,brand:brandForModel(ownModel),model:ownModel,competitor:competitors.join(" / ")},
+  platforms:{"全网":1,"垂媒车主口碑":1.15,"抖音":1.35},rows,models,summaryHeat,summaryPlatformNsr,summaryMetrics,summaryAttributeBenchmark:benchmark,
+  importQuality:{kind:"PRODUCT_EVALUATION_SUMMARY",timeRange:source.period||"2026.06.01—2026.06.30",metricCoverage:{nsr:true,ips:false,intent:false,risk:false},attributeVolumeAvailable:false,platformVolumeAvailable:false,platformNsrAvailable:true,platformNsrSources:["全网","垂媒车主口碑","抖音"],attributeNsrSources:["全网"],attributeBenchmarkLabel:`${competitors.length}车竞品均值`,attributeBenchmarkModels:competitors,message:"源表提供五车总体声量、互动量、整体/垂媒/抖音NSR，以及E7X属性NSR与四车均值；未提供逐竞品属性NSR，不作推断。"},
+  sourceRowCount:models.length,aggregatedRowCount:rows.length,replace:true
+ };
+}
+function productEvaluationDatasetMatches(model){return Boolean((state.models||[]).includes(model)&&state.summaryHeat?.[model]);}
+function installProductEvaluationDataset(dataset,model){
+ if(!dataset||!(dataset.models||[]).includes(model))return false;
+ const previousConfig=state.config||{};
+ state={...state,...dataset,config:{...previousConfig,...dataset.config,model,brand:brandForModel(model)}};
+ summaryDashboardModels=[model,...dataset.models.filter(item=>item!==model).slice(0,4)];
+ summaryAttributeActiveLabel="";summaryAttributeActiveCategory="全部";summaryAttributeEvidenceExpanded=false;resetSummaryQuadrantCollapse();
+ sellingPointInputModel=model;sellingPointActiveLabel="";sellingPointActiveCompetitor="";
+ return true;
+}
+function registerProductEvaluation(evaluation,{activateCurrent=true}={}){
+ const dataset=productEvaluationSummaryDataset(evaluation);if(!dataset)return false;
+ productEvaluationCatalog.set(dataset.config.model,dataset);
+ if(activateCurrent&&state.config.model===dataset.config.model&&!productEvaluationDatasetMatches(dataset.config.model)){
+  installProductEvaluationDataset(dataset,dataset.config.model);save();queueMicrotask(()=>render());
+ }
+ return true;
+}
 function applyModelSelection(model){
  const models=modelOptions();
- if(!models.includes(model))return;
+ if(!models.includes(model)&&!productEvaluationCatalog.has(model))return;
  const changed=state.config.model!==model;
+ const registered=productEvaluationCatalog.get(model);
+ if(registered&&!productEvaluationDatasetMatches(model))installProductEvaluationDataset(registered,model);
  state.config.model=model;
  state.config.brand=brandForModel(model);
- const comps=dcdTopPositiveCompetitors(model);
+ const datasetCompetitors=productEvaluationDatasetMatches(model)?(state.models||[]).filter(item=>item!==model):[];
+ const comps=datasetCompetitors.length?datasetCompetitors:dcdTopPositiveCompetitors(model);
  state.config.competitor=comps.join(" / ");
  state.config.project=`${model}认知诊断${comps.length?`｜${comps.length}车核心竞品`:""}`;
+ sellingPointInputModel=model;
  if(changed){
   videoState.config={...videoState.config,ownModel:model,competitor1:comps[0]||"",competitor2:comps[1]||"",competitor3:comps[2]||""};
   contentStrategyState={loading:false,result:null,error:""};
@@ -1050,7 +1101,7 @@ function applyModelSelection(model){
 }
 function selectDashboardVehicleContext(model,{source="dashboard",notify=true}={}){
  const models=modelOptions();
- if(!models.includes(model))return false;
+ if(!models.includes(model)&&!productEvaluationCatalog.has(model))return false;
  const changed=state.config.model!==model;
  applyModelSelection(model);
  dashBrandOpen=brandForDisplay(model);
@@ -1063,7 +1114,8 @@ function selectDashboardVehicleContext(model,{source="dashboard",notify=true}={}
 }
 window.MMNVehicleContext={
  getModel:()=>state.config.model,
- select:(model,options={})=>selectDashboardVehicleContext(model,options)
+ select:(model,options={})=>selectDashboardVehicleContext(model,options),
+ registerProductEvaluation:(evaluation,options={})=>registerProductEvaluation(evaluation,options)
 };
 function isSummaryImport(){return state.importQuality?.kind==="PRODUCT_EVALUATION_SUMMARY"}
 function isBlockedImport(){return state.importQuality?.kind==="INVALID_LEGACY_SUMMARY_IMPORT"}
@@ -1573,7 +1625,7 @@ function renderDashboardCompetitorTrend(){
 }
 function dashboardDecisionSignals(){
  const model=state.config.model,competitors=dashboardLatestCompetitorRows(model).map(x=>x.competitor),labels=[...new Set((state.rows||[]).filter(r=>r[0]===model&&r[4]).map(r=>r[4]))];
- return labels.map(label=>{const ownScores=attributeSourceScores(state.rows,model,label),ownAvg=meanNumbers(ownScores.map(item=>item.score));if(ownAvg===null)return null;const rivals=competitors.map(competitor=>({model:competitor,score:meanNumbers(attributeSourceScores(state.rows,competitor,label).map(item=>item.score))})).filter(item=>item.score!==null).sort((a,b)=>b.score-a.score),best=rivals[0],evidence=attributeEvidenceStatus(state.rows,label,model),gap=best?ownAvg-best.score:null;return{label,ownAvg,best,rivals,evidence,gap}}).filter(Boolean).sort((a,b)=>Math.abs(b.gap||0)-Math.abs(a.gap||0));
+ return labels.map(label=>{const ownScores=attributeSourceScores(state.rows,model,label),ownAvg=meanNumbers(ownScores.map(item=>item.score));if(ownAvg===null)return null;const rivals=competitors.map(competitor=>({model:competitor,score:meanNumbers(attributeSourceScores(state.rows,competitor,label).map(item=>item.score))})).filter(item=>item.score!==null).sort((a,b)=>b.score-a.score),benchmark=nullableNumber(state.summaryAttributeBenchmark?.["全网"]?.[label]),best=rivals[0]||(benchmark===null?null:{model:state.importQuality?.attributeBenchmarkLabel||"竞品均值",score:benchmark,benchmark:true}),evidence=attributeEvidenceStatus(state.rows,label,model),gap=best?ownAvg-best.score:null;return{label,ownAvg,best,rivals,evidence,gap,benchmarkUsed:Boolean(best?.benchmark)}}).filter(Boolean).sort((a,b)=>Math.abs(b.gap||0)-Math.abs(a.gap||0));
 }
 function dashboardProductEvidenceTask(label){
  const text=String(label||"");
@@ -2022,7 +2074,7 @@ function renderSummaryAttributeMatrix(rows,models,source){
 function summaryAttributeOpportunityItems(rows,models,source){
  const ownModel=state.config.model,competitors=models.filter(model=>model&&model!==ownModel),byLabel=new Map();
  rows.forEach(row=>{const score=nullableNumber(row[14]);if(row[2]!==source||!models.includes(row[0])||!row[4]||score===null)return;const item=byLabel.get(row[4])||{label:row[4],category:row[3]||"其他赛道",modelScores:new Map(),impacts:[]};const values=item.modelScores.get(row[0])||[];values.push(score);item.modelScores.set(row[0],values);if(row[0]===ownModel&&nullableNumber(row[9])!==null)item.impacts.push(nullableNumber(row[9]));byLabel.set(row[4],item)});
- return[...byLabel.values()].map(item=>{const ownNsr=meanNumbers(item.modelScores.get(ownModel)||[]),competitorScores=competitors.map(model=>meanNumbers(item.modelScores.get(model)||[])).filter(value=>value!==null),competitorMean=meanNumbers(competitorScores),gap=ownNsr!==null&&competitorMean!==null?ownNsr-competitorMean:null,impact=meanNumbers(item.impacts)??3,evidence=attributeEvidenceStatus(rows,item.label,ownModel),priority=impact*20+Math.max(0,-(gap??0))*80+Math.max(0,-(ownNsr??0))*60+(evidence.tone==="risk"||evidence.tone==="conflict"?18:0);return{...item,ownNsr,competitorMean,gap,impact,evidence,priority}}).filter(item=>item.ownNsr!==null).sort((left,right)=>right.priority-left.priority||left.label.localeCompare(right.label,"zh-CN"));
+ return[...byLabel.values()].map(item=>{const ownNsr=meanNumbers(item.modelScores.get(ownModel)||[]),competitorScores=competitors.map(model=>meanNumbers(item.modelScores.get(model)||[])).filter(value=>value!==null),recordedMean=meanNumbers(competitorScores),benchmark=nullableNumber(state.summaryAttributeBenchmark?.[source]?.[item.label]),competitorMean=recordedMean??benchmark,gap=ownNsr!==null&&competitorMean!==null?ownNsr-competitorMean:null,impact=meanNumbers(item.impacts)??3,evidence=attributeEvidenceStatus(rows,item.label,ownModel),priority=impact*20+Math.max(0,-(gap??0))*80+Math.max(0,-(ownNsr??0))*60+(evidence.tone==="risk"||evidence.tone==="conflict"?18:0);return{...item,ownNsr,competitorMean,gap,impact,evidence,priority,benchmarkUsed:recordedMean===null&&benchmark!==null}}).filter(item=>item.ownNsr!==null).sort((left,right)=>right.priority-left.priority||left.label.localeCompare(right.label,"zh-CN"));
 }
 function summaryAttributeCategoryTone(category,label){
  const text=`${category||""} ${label||""}`;
@@ -2058,7 +2110,7 @@ function renderSummaryAttributeOpportunityBoard(rows,models,source){
  if(!categories.includes(summaryAttributeActiveCategory))summaryAttributeActiveCategory="全部";
  const visibleItems=summaryAttributeActiveCategory==="全部"?items:items.filter(item=>item.category===summaryAttributeActiveCategory);
  if(!visibleItems.some(item=>item.label===summaryAttributeActiveLabel))summaryAttributeActiveLabel=visibleItems[0]?.label||items[0].label;
- const active=items.find(item=>item.label===summaryAttributeActiveLabel)||visibleItems[0]||items[0],sources=state.importQuality?.attributeNsrSources||[...new Set(rows.map(row=>row[2]).filter(Boolean))],scoreFor=(model,platform)=>meanNumbers(rows.filter(row=>row[0]===model&&row[2]===platform&&row[4]===active.label).map(row=>nullableNumber(row[14])).filter(value=>value!==null)),sourceRows=sources.map(platform=>{const own=scoreFor(ownModel,platform),competitor=meanNumbers(competitors.map(model=>scoreFor(model,platform)).filter(value=>value!==null));return{platform,own,competitor,gap:own!==null&&competitor!==null?own-competitor:null}}),gapText=active.gap===null?"—":`${active.gap>=0?"领先":"落后"} ${Math.abs(active.gap*100).toFixed(1)}%`;
+ const active=items.find(item=>item.label===summaryAttributeActiveLabel)||visibleItems[0]||items[0],sources=state.importQuality?.attributeNsrSources||[...new Set(rows.map(row=>row[2]).filter(Boolean))],scoreFor=(model,platform)=>meanNumbers(rows.filter(row=>row[0]===model&&row[2]===platform&&row[4]===active.label).map(row=>nullableNumber(row[14])).filter(value=>value!==null)),sourceRows=sources.map(platform=>{const own=scoreFor(ownModel,platform),recorded=meanNumbers(competitors.map(model=>scoreFor(model,platform)).filter(value=>value!==null)),benchmark=nullableNumber(state.summaryAttributeBenchmark?.[platform]?.[active.label]),competitor=recorded??benchmark;return{platform,own,competitor,gap:own!==null&&competitor!==null?own-competitor:null,benchmarkUsed:recorded===null&&benchmark!==null}}),gapText=active.gap===null?"—":`${active.gap>=0?"领先":"落后"} ${Math.abs(active.gap*100).toFixed(1)}%`;
  const quadrants=[
   {key:"weak",title:"认知待建立",note:"用户评价偏负，但表现好于竞品",action:"先建立正面认知",filter:item=>item.ownNsr<0&&(item.gap===null||item.gap>=0)},
   {key:"strength",title:"领先优势",note:"用户评价偏正，且优于竞品",action:"重点放大",filter:item=>item.ownNsr>=0&&(item.gap??0)>=0},
