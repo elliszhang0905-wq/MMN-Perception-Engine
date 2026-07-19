@@ -508,10 +508,11 @@ function localStandardIdentity(model){
   let suffix=cleanModelText(zeekr[2]||"");
   suffix=/^(GT|GT版|ME版|WE版|YOU版)$/i.test(suffix)?"":suffix;
   const family=`极氪${code}`;
-  return{brand_name:"极氪",normalized_name:suffix?`${family} ${suffix}`:family,model_family:family,energy_type:/PHEV|插混/i.test(raw)?"PHEV":/增程|EREV/i.test(raw)?"EREV":/HEV|混动/i.test(raw)?"HEV":/燃油|ICE/i.test(raw)?"ICE":"UNKNOWN",variant_name:suffix,canonical_key:`极氪|${family}|UNKNOWN|${suffix}`};
+  const energy=/PHEV|插混/i.test(raw)?"PHEV":/增程|EREV/i.test(raw)?"EREV":/HEV|混动/i.test(raw)?"HEV":/燃油|ICE/i.test(raw)?"ICE":"UNKNOWN";
+  return{brand_name:"极氪",normalized_name:suffix?`${family} ${suffix}`:family,model_family:family,energy_type:energy,variant_name:suffix,canonical_key:`极氪|${family}|${energy}|${suffix}`};
  }
  const roewe=compact.match(/^荣威(i5|i6|D7|D5X|RX5|RX9|IMAX8)(.*)$/i);
- if(roewe){const code=/^i[56]$/i.test(roewe[1])?String(roewe[1]).toLowerCase():String(roewe[1]).toUpperCase();const family=`荣威${code}`;return{brand_name:"荣威",normalized_name:family+(roewe[2]?` ${roewe[2]}`:""),model_family:family,energy_type:/EV|纯电|BEV/i.test(raw)?"BEV":/DMH|插混|PHEV/i.test(raw)?"PHEV":"UNKNOWN",variant_name:roewe[2]||"",canonical_key:`荣威|${family}|UNKNOWN|${roewe[2]||""}`}}
+ if(roewe){const code=/^i[56]$/i.test(roewe[1])?String(roewe[1]).toLowerCase():String(roewe[1]).toUpperCase();const family=`荣威${code}`;const energy=/EV|纯电|BEV/i.test(raw)?"BEV":/DMH|插混|PHEV/i.test(raw)?"PHEV":"UNKNOWN";return{brand_name:"荣威",normalized_name:family+(roewe[2]?` ${roewe[2]}`:""),model_family:family,energy_type:energy,variant_name:roewe[2]||"",canonical_key:`荣威|${family}|${energy}|${roewe[2]||""}`}}
  const bmw=raw.match(/^(?:宝马|BMW)\s*(i3|i5|iX1|iX3|X1|X3|3系|5系)(.*)$/i);
  if(bmw){const code=String(bmw[1]).toUpperCase().replace(/^IX/,"iX").replace(/^I([0-9])/,"i$1");const family=`宝马${code}`;return{brand_name:"宝马",normalized_name:family+(cleanModelText(bmw[2]||"")?` ${cleanModelText(bmw[2]||"")}`:""),model_family:family,energy_type:/^i/i.test(code)?"BEV":"UNKNOWN",variant_name:cleanModelText(bmw[2]||""),canonical_key:`宝马|${family}|${/^i/i.test(code)?"BEV":"UNKNOWN"}|${cleanModelText(bmw[2]||"")}`}}
  const arcfox=compact.match(/^极狐(?:(阿尔法|α|Alpha|贝塔|β|Beta))?([ST]\d|考拉|森林版|V9)(.*)$/i);
@@ -524,8 +525,8 @@ function localStandardIdentity(model){
  if(im){const family=`智己${String(im[1]).toUpperCase()}`;return{brand_name:"智己",normalized_name:family+(im[2]?` ${im[2]}`:""),model_family:family,energy_type:"UNKNOWN",variant_name:im[2]||"",canonical_key:`智己|${family}|UNKNOWN|${im[2]||""}`}}
  const qijing=compact.match(/^(?:启境|QIJING)(GT7)(.*)$/i);
  if(qijing){const family=`启境${String(qijing[1]).toUpperCase()}`;return{brand_name:"启境",normalized_name:family+(qijing[2]?` ${qijing[2]}`:""),model_family:family,energy_type:"UNKNOWN",variant_name:qijing[2]||"",canonical_key:`启境|${family}|UNKNOWN|${qijing[2]||""}`}}
- const onvo=compact.match(/^(?:乐道|ONVO)?(L60)(.*)$/i);
- if(onvo&&/(乐道|ONVO|L60)/i.test(raw)){const family=`乐道${String(onvo[1]).toUpperCase()}`;return{brand_name:"乐道",normalized_name:family+(onvo[2]?` ${onvo[2]}`:""),model_family:family,energy_type:"BEV",variant_name:onvo[2]||"",canonical_key:`乐道|${family}|BEV|${onvo[2]||""}`}}
+ const onvo=compact.match(/^(?:乐道|ONVO)(L60)(.*)$/i);
+ if(onvo){const family=`乐道${String(onvo[1]).toUpperCase()}`;return{brand_name:"乐道",normalized_name:family+(onvo[2]?` ${onvo[2]}`:""),model_family:family,energy_type:"BEV",variant_name:onvo[2]||"",canonical_key:`乐道|${family}|BEV|${onvo[2]||""}`}}
  const galaxy=compact.match(/^(?:吉利银河|银河)(L6|L7|L8|E5|E8)(.*)$/i);
  if(galaxy){const family=`银河${String(galaxy[1]).toUpperCase()}`;return{brand_name:"吉利银河",normalized_name:family+(galaxy[2]?` ${galaxy[2]}`:""),model_family:family,energy_type:/^E/i.test(galaxy[1])?"BEV":"UNKNOWN",variant_name:galaxy[2]||"",canonical_key:`吉利银河|${family}|${/^E/i.test(galaxy[1])?"BEV":"UNKNOWN"}|${galaxy[2]||""}`}}
  return null;

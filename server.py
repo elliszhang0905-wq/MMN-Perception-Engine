@@ -1675,6 +1675,10 @@ def infer_brand_from_model(model):
         ("007", "极氪"),
         ("MIX", "极氪"),
         ("智己", "智己"),
+        ("乐道L60", "乐道"),
+        ("ONVO L60", "乐道"),
+        ("ONVOL60", "乐道"),
+        ("乐道", "乐道"),
         ("小米", "小米汽车"),
         ("启境GT7", "启境"),
         ("启境", "启境"),
@@ -1855,8 +1859,8 @@ def local_standard_model_identity(raw_name):
             "variantName": suffix,
             "canonicalKey": "|".join(["智己", family, "UNKNOWN", suffix])
         }
-    onvo = re.match(r"^(?:乐道|ONVO)?(L60)(.*)$", compact, re.I)
-    if onvo and re.search(r"乐道|ONVO|L60", raw, re.I):
+    onvo = re.match(r"^(?:乐道|ONVO)(L60)(.*)$", compact, re.I)
+    if onvo:
         suffix = str(onvo.group(2) or "").strip()
         family = "乐道L60"
         return {
@@ -2742,6 +2746,45 @@ def env_value(key, default=""):
 
 def cloud_login_required():
     return os.getenv("MMN_CLOUD_LOGIN_REQUIRED", str(CLOUD_LOGIN_REQUIRED)).lower() in {"1", "true", "yes", "on"}
+
+
+TRIAL_POST_ALLOWED_PATHS = frozenset({
+    "/api/ai/rag-strategy",
+    "/api/ai/fusion-strategy",
+    "/api/ai/qwen-strategy",
+    "/api/ai/creator-tags",
+    "/api/ai/founder-talk",
+    "/api/ai/model-identities",
+    "/api/ai/model-judgment",
+    "/api/product-whitepaper/analyze",
+    "/api/ai/router-feedback",
+    "/api/ai/router-review",
+    "/api/agents/run",
+    "/api/topic-planning/run",
+    "/api/content-capability-kb/distill-account",
+    "/api/content-capability-kb/collect-public",
+    "/api/content-capability-kb/script-jobs",
+    "/api/opportunity-map/own-document",
+    "/api/opportunity-map/generate",
+    "/api/opportunity-map/review",
+    "/api/opportunity-map/manual-reviews",
+    "/api/group-dashboard/cycle-review",
+    "/api/cockpit/execution-cycles",
+    "/api/cockpit/execution-cycles/monitoring",
+    "/api/douyin-hot/recognize",
+    "/api/social-trends/collect",
+    "/api/social-trends/jobs",
+    "/api/social-trends/import",
+})
+
+
+def cloud_post_required_roles(path):
+    """Keep trial analysis actions explicit while defaulting mutations to admin-only."""
+    creator_script_action = re.fullmatch(
+        r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", str(path or "")
+    )
+    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action else {"admin"}
+
 
 def auth_secret():
     return env_value("MMN_AUTH_SECRET") or env_value("DASHSCOPE_API_KEY") or "mmn-local-demo-secret"
@@ -12980,38 +13023,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, 500)
             return
         if cloud_login_required():
-            trial_post_allowed = {
-                "/api/ai/rag-strategy",
-                "/api/ai/fusion-strategy",
-                "/api/ai/qwen-strategy",
-                "/api/ai/creator-tags",
-                "/api/ai/founder-talk",
-                "/api/ai/model-identities",
-                "/api/ai/model-judgment",
-                "/api/product-whitepaper/analyze",
-                "/api/ai/router-feedback",
-                "/api/ai/router-review",
-                "/api/agents/run",
-                "/api/topic-planning/run",
-                "/api/content-capability-kb/distill-account",
-                "/api/content-capability-kb/collect-public",
-                "/api/content-capability-kb/script-jobs",
-                "/api/opportunity-map/own-document",
-                "/api/opportunity-map/generate",
-                "/api/opportunity-map/review",
-                "/api/opportunity-map/manual-reviews",
-                "/api/group-dashboard/cycle-review",
-                "/api/cockpit/execution-cycles",
-                "/api/cockpit/execution-cycles/monitoring",
-                "/api/douyin-hot/recognize",
-                "/api/social-trends/collect",
-                "/api/social-trends/jobs",
-                "/api/social-trends/import",
-            }
-            creator_script_trial_action = re.fullmatch(
-                r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", parsed.path
-            )
-            roles = None if parsed.path in trial_post_allowed or creator_script_trial_action else {"admin"}
+            roles = cloud_post_required_roles(parsed.path)
             if not self.require_cloud_auth(roles):
                 return
         if parsed.path == "/api/content-capability-kb/script-jobs":

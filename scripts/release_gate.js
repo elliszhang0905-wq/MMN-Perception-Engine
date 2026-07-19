@@ -379,13 +379,14 @@ async function main() {
       volvoBrand: brandForDisplay("沃尔沃EX90"),
       onvoBrand: brandForDisplay("乐道L60"),
       galaxyBrand: brandForDisplay("银河L6"),
+      bareL60Brand: brandForDisplay("L60"),
       imModels: byBrand["智己"] || [],
       hasPendingBrand: Object.keys(byBrand).includes("待确认品牌")
     };
   });
   add("vehicle identity assigns pending brands", identityCheck.avatrBrand === "阿维塔" && identityCheck.volvoBrand === "沃尔沃" && !identityCheck.hasPendingBrand, JSON.stringify(identityCheck));
   add("vehicle identity deduplicates Zeekr aliases", identityCheck.zeekrCount === 1 && identityCheck.zeekrLabel.includes("极氪009"), JSON.stringify(identityCheck));
-  add("vehicle identity keeps IM Motors clean", identityCheck.onvoBrand === "乐道" && identityCheck.galaxyBrand === "吉利银河" && identityCheck.imModels.every(name => name.includes("智己")), JSON.stringify(identityCheck));
+  add("vehicle identity keeps IM Motors clean", identityCheck.onvoBrand === "乐道" && identityCheck.galaxyBrand === "吉利银河" && identityCheck.bareL60Brand === "待人工确认" && identityCheck.imModels.every(name => name.includes("智己")), JSON.stringify(identityCheck));
 
   const socialNav = await page.evaluate(() => ({
     parent: Boolean(document.querySelector('.cockpit-nav [data-page="dashboard"]')),

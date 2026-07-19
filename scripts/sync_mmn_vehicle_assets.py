@@ -56,6 +56,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         create table if not exists vehicle_assets (
             id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
             platform text not null,
             brand_name text,
             model_name text not null,
@@ -67,7 +69,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             period_last text,
             import_count integer not null default 1,
             extra_json text not null default '{}',
-            unique(platform, model_name)
+            unique(org_id, edition, platform, model_name)
         );
         create table if not exists mmn_vehicle_asset_sync_runs (
             id text primary key,
@@ -84,6 +86,42 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    columns = {row[1] for row in conn.execute("pragma table_info(vehicle_assets)")}
+    if "org_id" not in columns:
+        conn.execute("alter table vehicle_assets add column org_id text not null default 'local'")
+    if "edition" not in columns:
+        conn.execute("alter table vehicle_assets add column edition text not null default 'china'")
+    conn.execute(
+        "create unique index if not exists idx_vehicle_assets_unique "
+        "on vehicle_assets(org_id, edition, platform, model_name)"
+    )
+
+
+def normalize_asset_row(row: dict) -> dict:
+    """Apply the canonical server identity rules before writing monthly assets."""
+    from server import corrected_brand_name, local_standard_model_identity
+
+    raw_model = str(row.get("model_name") or "").strip()
+    source_brand = str(row.get("brand_name") or "").strip()
+    composite = raw_model if source_brand and source_brand in raw_model else f"{source_brand}{raw_model}"
+    standard = local_standard_model_identity(raw_model) or local_standard_model_identity(composite) or {}
+    brand = corrected_brand_name(standard.get("brandName") or source_brand, composite)
+    energy = str(standard.get("energyType") or row.get("energy_type") or "UNKNOWN").upper()
+    if energy == "UNKNOWN" and row.get("energy_type"):
+        energy = str(row["energy_type"]).upper()
+    normalized = str(standard.get("normalizedName") or raw_model).strip()
+    family = str(standard.get("modelFamily") or normalized).strip()
+    variant = str(standard.get("variantName") or "").strip()
+    canonical = str(standard.get("canonicalKey") or "|".join([brand, family, energy, variant]))
+    return {
+        **row,
+        "brand_name": brand,
+        "normalized_name": normalized,
+        "model_family": family,
+        "variant_name": variant,
+        "energy_type": energy,
+        "canonical_key": canonical,
+    }
 
 
 def fetch_public_tree(url: str, timeout: int = 30, retries: int = 2) -> tuple[bytes, str]:
@@ -150,17 +188,21 @@ def save_raw(raw: bytes, captured_at: str, payload_hash: str) -> Path:
 
 def upsert_assets(conn: sqlite3.Connection, rows: list[dict], captured_at: str, source_url: str, payload_hash: str) -> int:
     count = 0
-    for row in rows:
+    for source_row in rows:
+        row = normalize_asset_row(source_row)
         brand = row["brand_name"]
         model = row["model_name"]
+        normalized = row["normalized_name"]
+        family = row["model_family"]
+        variant = row["variant_name"]
         energy = row["energy_type"]
-        canonical = "|".join([brand, model, energy, ""])
+        canonical = row["canonical_key"]
         asset_id = stable_id("model-identity", "china", model, canonical)
         conn.execute(
             """
             insert into model_identity_assets
             (id, edition, raw_name, normalized_name, brand_name, model_family, energy_type, variant_name, canonical_key, confidence, source, qwen_checked, qwen_reason, first_seen_at, updated_at)
-            values (?, 'china', ?, ?, ?, ?, ?, '', ?, 'high', ?, 0, ?, ?, ?)
+            values (?, 'china', ?, ?, ?, ?, ?, ?, ?, 'high', ?, 0, ?, ?, ?)
             on conflict(edition, raw_name, canonical_key) do update set
               normalized_name=excluded.normalized_name,
               brand_name=excluded.brand_name,
@@ -174,10 +216,11 @@ def upsert_assets(conn: sqlite3.Connection, rows: list[dict], captured_at: str, 
             (
                 asset_id,
                 model,
-                model,
+                normalized,
                 brand,
-                model,
+                family,
                 energy,
+                variant,
                 canonical,
                 ASSET_SOURCE,
                 "MMN标准车型树月度撞库确认",
@@ -188,9 +231,9 @@ def upsert_assets(conn: sqlite3.Connection, rows: list[dict], captured_at: str, 
         conn.execute(
             """
             insert into vehicle_assets
-            (id, platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source, period_first, period_last, import_count, extra_json)
-            values (?, ?, ?, ?, ?, ?, ?, ?, '', '', 1, ?)
-            on conflict(platform, model_name) do update set
+            (id, org_id, edition, platform, brand_name, model_name, first_seen_at, last_seen_at, first_source, last_source, period_first, period_last, import_count, extra_json)
+            values (?, 'local', 'china', ?, ?, ?, ?, ?, ?, ?, '', '', 1, ?)
+            on conflict(org_id, edition, platform, model_name) do update set
               brand_name=excluded.brand_name,
               last_seen_at=excluded.last_seen_at,
               last_source=excluded.last_source,

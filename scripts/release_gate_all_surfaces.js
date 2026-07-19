@@ -49,6 +49,23 @@ async function auditViewport(browser, viewport) {
     await page.waitForSelector("#dashboard");
     await page.waitForTimeout(500);
 
+    const identityState = await page.evaluate(() => {
+      const cases = ["乐道L60", "银河L6", "智己L6", "智己LS7", "L60"];
+      return Object.fromEntries(cases.map(model => [model, {
+        brand: brandForDisplay(model),
+        family: standardIdentityFor(model)?.model_family || "",
+      }]));
+    });
+    add(
+      `${viewport.name}: brand-model ownership rules stay clean`,
+      identityState["乐道L60"].brand === "乐道"
+        && identityState["银河L6"].brand === "吉利银河"
+        && identityState["智己L6"].brand === "智己"
+        && identityState["智己LS7"].brand === "智己"
+        && identityState.L60.brand === "待人工确认",
+      JSON.stringify(identityState),
+    );
+
     const navSelector = '#nav button[data-page]:not([hidden])';
     const pageIds = await page.locator(navSelector).evaluateAll(nodes => nodes.map(node => node.dataset.page));
     add(`${viewport.name}: all customer navigation entries are present`, pageIds.length === 19, JSON.stringify(pageIds));

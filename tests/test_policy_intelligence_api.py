@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 import unittest
 
-from server import run_policy_strategy_validation, validate_policy_vehicle_inputs
+from server import TRIAL_POST_ALLOWED_PATHS, run_policy_strategy_validation, validate_policy_vehicle_inputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +21,7 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
 
     def test_login_seeds_policy_baseline_for_the_authenticated_org(self):
         login_route = self.server.split('parsed.path == "/api/login"', 1)[1].split(
-            "trial_post_allowed = {", 1
+            "scheduled_refresh_paths = {", 1
         )[0]
         self.assertEqual(
             login_route.count('seed_policy_mvp(conn, org_id=org_id, edition="china")'),
@@ -42,8 +42,7 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
             "/api/policy-intelligence/evaluate",
         ):
             self.assertIn('parsed.path == "%s"' % route, self.server)
-        trial_block = self.server.split("trial_post_allowed = {", 1)[1].split("}", 1)[0]
-        self.assertNotIn("/api/policy-intelligence/", trial_block)
+        self.assertFalse(any(path.startswith("/api/policy-intelligence/") for path in TRIAL_POST_ALLOWED_PATHS))
 
     def test_policy_model_gateway_is_source_locked_and_json_only(self):
         self.assertIn("def policy_model_gateway(messages):", self.server)
