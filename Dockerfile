@@ -6,7 +6,9 @@ ENV PYTHONUNBUFFERED=1 \
     MMN_PORT=8765 \
     MMN_AUTO_OPEN_BROWSER=false \
     MMN_DESKTOP_BRIDGE_ENABLED=false \
+    MMN_DATA_ROOT=/app/data \
     MMN_DATA_DIR=/app/data \
+    MMN_BACKUP_ROOT=/app/backups \
     MMN_DB_PATH=/app/data/commercial_demo.db
 
 WORKDIR /app

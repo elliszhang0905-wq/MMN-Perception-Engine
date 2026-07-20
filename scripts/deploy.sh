@@ -45,16 +45,20 @@ docker compose --env-file .env build
 echo "启动新版本服务。"
 docker compose --env-file .env up -d
 
-echo "同步随版本发布的销量与 RAG 数据资产到持久化卷。"
-docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
+echo "同步随版本发布的数据资产到统一持久化根目录。"
+docker compose --env-file .env exec -T mmn-app mkdir -p /app/data/modules/product_evaluation /app/data/imports/raw/product_evaluation /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
 for eval_fixture in data/eval/mmn_eval_seed_v0.1.jsonl data/eval/mmn_eval_seed_outputs_v0.1.jsonl; do
   if [[ -f "$eval_fixture" ]]; then
     docker compose --env-file .env cp "$eval_fixture" "mmn-app:/app/$eval_fixture"
   fi
 done
-if [[ -f data/e7x_product_evaluation_2026-06.json ]]; then
-  docker compose --env-file .env cp data/e7x_product_evaluation_2026-06.json mmn-app:/app/data/e7x_product_evaluation_2026-06.json
+if [[ -f data/modules/product_evaluation/e7x_product_evaluation_2026-06.json ]]; then
+  docker compose --env-file .env cp data/modules/product_evaluation/e7x_product_evaluation_2026-06.json mmn-app:/app/data/modules/product_evaluation/e7x_product_evaluation_2026-06.json
 fi
+for source_asset in data/imports/raw/product_evaluation/*; do
+  [[ -f "$source_asset" ]] || continue
+  docker compose --env-file .env cp "$source_asset" "mmn-app:/app/data/imports/raw/product_evaluation/$(basename "$source_asset")"
+done
 if [[ -f data/sales_warning_demo_2026-06.json ]]; then
   docker compose --env-file .env cp data/sales_warning_demo_2026-06.json mmn-app:/app/data/sales_warning_demo_2026-06.json
 fi

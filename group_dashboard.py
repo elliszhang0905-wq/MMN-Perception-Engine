@@ -13,6 +13,8 @@ import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+
+from mmn_data import module_path
 from statistics import median
 
 
@@ -53,10 +55,20 @@ SAIC_BRANDS = {
 
 SAIC_VOLKSWAGEN_MODELS = ("朗逸", "帕萨特", "途观", "途岳", "途昂", "凌渡", "威然", "ID.3", "ID.4 X", "ID.6 X", "ID. ERA")
 SAIC_AUDI_MODELS = ("奥迪E5", "奥迪E7X")
-E7X_EVALUATION_PATH = Path(__file__).with_name("data") / "e7x_product_evaluation_2026-06.json"
-SALES_WARNING_DEMO_PATH = Path(__file__).with_name("data") / "sales_warning_demo_2026-06.json"
-SALES_WARNING_LATEST_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_latest.json"
-SALES_WARNING_OBSERVED_PATH = Path(__file__).with_name("data") / "dongchedi_sales" / "sales_warning_observed_2026-06.json"
+E7X_EVALUATION_PATH = module_path(
+    "product_evaluation",
+    "e7x_product_evaluation_2026-06.json",
+    legacy=("e7x_product_evaluation_2026-06.json",),
+)
+SALES_WARNING_DEMO_PATH = module_path(
+    "sales_warning", "sales_warning_demo_2026-06.json", legacy=("sales_warning_demo_2026-06.json",)
+)
+SALES_WARNING_LATEST_PATH = module_path(
+    "sales_warning", "sales_warning_latest.json", legacy=("dongchedi_sales/sales_warning_latest.json",)
+)
+SALES_WARNING_OBSERVED_PATH = module_path(
+    "sales_warning", "sales_warning_observed_2026-06.json", legacy=("dongchedi_sales/sales_warning_observed_2026-06.json",)
+)
 SALES_WARNING_MONITOR_SOURCE = "周对比次数正反向排名"
 
 # 销量预警量价图的电池租用口径。这里保留懂车帝经销商报价原值，

@@ -31,6 +31,8 @@ import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 
+from mmn_data import DATA_ROOT
+
 from consulting_output import (
     CONSULTING_OUTPUT_INSTRUCTION,
     inspect_consulting_output,
@@ -141,7 +143,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260720-cloud-demo-consistency-2"
+APP_VERSION_CODE = "beta-1.02-20260720-cloud-demo-consistency-3"
 APP_RELEASE_DATE = "2026-07-20"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -149,7 +151,7 @@ PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
 AUTO_OPEN_BROWSER = os.getenv("MMN_AUTO_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
 DESKTOP_BRIDGE_ENABLED = os.getenv("MMN_DESKTOP_BRIDGE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 CLOUD_LOGIN_REQUIRED = os.getenv("MMN_CLOUD_LOGIN_REQUIRED", "false").lower() in {"1", "true", "yes", "on"}
-DATA_DIR = Path(os.getenv("MMN_DATA_DIR", str(ROOT / "data"))).expanduser().resolve()
+DATA_DIR = DATA_ROOT
 DB_PATH = Path(os.getenv("MMN_DB_PATH", str(DATA_DIR / "commercial_demo.db"))).expanduser().resolve()
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 QWEN_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"

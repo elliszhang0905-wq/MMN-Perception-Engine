@@ -34,7 +34,9 @@ services:
       MMN_ADMIN_PASSWORD: ${MMN_ADMIN_PASSWORD:-}
       MMN_TRIAL_USERNAME: ${MMN_TRIAL_USERNAME:-MMN}
       MMN_TRIAL_PASSWORD: ${MMN_TRIAL_PASSWORD:-}
+      MMN_DATA_ROOT: /app/data
       MMN_DATA_DIR: /app/data
+      MMN_BACKUP_ROOT: /app/backups
       MMN_DB_PATH: /app/data/commercial_demo.db
       DATABASE_URL: ${DATABASE_URL:-postgresql://mmn:${POSTGRES_PASSWORD:-change-me}@mmn-db:5432/mmn}
     expose:
@@ -114,7 +116,9 @@ services:
     env_file:
       - .env
     environment:
+      MMN_DATA_ROOT: /app/data
       MMN_DATA_DIR: /app/data
+      MMN_BACKUP_ROOT: /app/backups
       MMN_DB_PATH: /app/data/commercial_demo.db
     command: ["bash", "scripts/run_scheduler.sh"]
     volumes:

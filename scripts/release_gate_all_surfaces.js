@@ -157,7 +157,11 @@ async function auditViewport(browser, viewport) {
       ownSelector: document.querySelector("#summary-own-model")?.value || "",
       competitorConfig: state.config.competitor,
       sellingPointModel: document.querySelector("#selling-point-model-select")?.value || "",
-      attributeCount: Object.keys(state.summaryAttributeBenchmark?.["全网"] || {}).length,
+      attributeCount: new Set((state.rows || []).filter(row => row[0] === "奥迪E7X").map(row => row[4])).size,
+      attributeSources: [...new Set((state.rows || []).map(row => row[2]))],
+      rowCount: (state.rows || []).length,
+      platformVolumeCount: Object.keys(state.summaryHeat?.["奥迪E7X"]?.platformVolume || {}).length,
+      platformNsrCount: Object.keys(state.summaryPlatformNsr?.["奥迪E7X"] || {}).length,
       sourceNote: state.sourceNote || "",
     }));
     const expectedE7xModels = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"];
@@ -168,9 +172,12 @@ async function auditViewport(browser, viewport) {
         && e7xLinkage.sellingPointModel === "奥迪E7X"
         && expectedE7xModels.every(model => e7xLinkage.datasetModels.includes(model))
         && !e7xLinkage.datasetModels.includes("小米SU7")
-        && e7xLinkage.rowModels.length === 1
-        && e7xLinkage.rowModels[0] === "奥迪E7X"
+        && expectedE7xModels.every(model => e7xLinkage.rowModels.includes(model))
+        && e7xLinkage.rowCount === 207
         && e7xLinkage.attributeCount === 15
+        && ["全网", "垂媒车主口碑", "抖音"].every(source => e7xLinkage.attributeSources.includes(source))
+        && e7xLinkage.platformVolumeCount === 9
+        && e7xLinkage.platformNsrCount === 7
         && expectedE7xModels.filter(model => model !== "奥迪E7X").every(model => e7xLinkage.competitorConfig.includes(model))
         && e7xLinkage.sourceNote.includes("AUDI E7X等5车产品评价_0710_v2.xlsx"),
       JSON.stringify(e7xLinkage),
@@ -219,15 +226,18 @@ async function auditViewport(browser, viewport) {
     const restoredE7x = await page.evaluate(() => ({
       models: state.models || [],
       rowModels: [...new Set((state.rows || []).map(row => row[0]))],
-      attributeCount: Object.keys(state.summaryAttributeBenchmark?.["全网"] || {}).length,
+      attributeCount: new Set((state.rows || []).filter(row => row[0] === "奥迪E7X").map(row => row[4])).size,
+      rowCount: (state.rows || []).length,
+      platformVolumeCount: Object.keys(state.summaryHeat?.["奥迪E7X"]?.platformVolume || {}).length,
       sellingPointModel: document.querySelector("#selling-point-model-select")?.value || "",
     }));
     add(
       `${viewport.name}: a registered model dataset restores after visiting models without product data`,
       restoredE7x.models.includes("奥迪E7X")
-        && restoredE7x.rowModels.length === 1
-        && restoredE7x.rowModels[0] === "奥迪E7X"
+        && expectedE7xModels.every(model => restoredE7x.rowModels.includes(model))
+        && restoredE7x.rowCount === 207
         && restoredE7x.attributeCount === 15
+        && restoredE7x.platformVolumeCount === 9
         && restoredE7x.sellingPointModel === "奥迪E7X",
       JSON.stringify(restoredE7x),
     );

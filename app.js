@@ -1079,6 +1079,11 @@ function productEvaluationAttributeCategory(label){
 }
 function productEvaluationSummaryDataset(evaluation){
  if(!evaluation||evaluation.status!=="available"||!evaluation.ownModel)return null;
+ if(evaluation.dataset?.config?.model===evaluation.ownModel){
+  const dataset={...evaluation.dataset,config:{...evaluation.dataset.config},productEvaluationSourceModel:evaluation.ownModel};
+  dataset.sourceNote=`${dataset.sourceNote||"已载入产品评价数据"}；原始文件已登记校验：${evaluation.sourceAsset?.sha256?.slice(0,12)||"待登记"}。`;
+  return dataset;
+ }
  const ownModel=String(evaluation.ownModel),models=(evaluation.models||[]).map(item=>String(item.model||"").trim()).filter(Boolean);
  if(!models.includes(ownModel)||models.length<2)return null;
  const competitors=models.filter(model=>model!==ownModel),source=evaluation.source||{},attributes=(evaluation.attributes||[]).filter(item=>item.attribute&&nullableNumber(item.ownNsr)!==null),summaryHeat={},summaryPlatformNsr={},summaryMetrics={};

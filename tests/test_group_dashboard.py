@@ -293,8 +293,9 @@ class GroupDashboardTest(unittest.TestCase):
 
     def test_deploy_publishes_e7x_evaluation_into_persistent_data_volume(self):
         deploy_script = (ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn("data/e7x_product_evaluation_2026-06.json", deploy_script)
-        self.assertIn("mmn-app:/app/data/e7x_product_evaluation_2026-06.json", deploy_script)
+        self.assertIn("data/modules/product_evaluation/e7x_product_evaluation_2026-06.json", deploy_script)
+        self.assertIn("mmn-app:/app/data/modules/product_evaluation/e7x_product_evaluation_2026-06.json", deploy_script)
+        self.assertIn("data/imports/raw/product_evaluation", deploy_script)
         self.assertIn("data/sales_warning_demo_2026-06.json", deploy_script)
         self.assertIn("mmn-app:/app/data/sales_warning_demo_2026-06.json", deploy_script)
         self.assertIn("sales_warning_observed_????-??.json", deploy_script)
@@ -576,6 +577,11 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(own["overallNsrRank"], 2)
         self.assertEqual(own["verticalNsrRank"], 1)
         self.assertEqual(result["validVerticalModels"], 4)
+        self.assertEqual(len(result["dataset"]["rows"]), 207)
+        self.assertEqual(len(result["dataset"]["summaryHeat"]["奥迪E7X"]["platformVolume"]), 9)
+        self.assertEqual(len(result["dataset"]["summaryPlatformNsr"]["奥迪E7X"]), 7)
+        self.assertEqual(result["dataset"]["importQuality"]["attributeNsrSources"], ["全网", "垂媒车主口碑", "抖音"])
+        self.assertRegex(result["sourceAsset"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_e7x_attribute_delta_is_computed_without_inventing_sample_size(self):
         result = load_e7x_product_evaluation()
