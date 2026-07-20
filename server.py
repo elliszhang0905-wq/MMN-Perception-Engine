@@ -143,7 +143,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260720-cloud-demo-consistency-5"
+APP_VERSION_CODE = "beta-1.02-20260720-cloud-demo-consistency-6"
 APP_RELEASE_DATE = "2026-07-20"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -5378,17 +5378,27 @@ def normalize_model_identity_records(records, edition="china", source="model_ide
             raw = str(rec.get("rawName") or rec.get("raw_name") or rec.get("normalizedName") or "").strip()
             if not raw:
                 continue
-            standard = local_standard_model_identity(raw) or local_standard_model_identity(rec.get("normalizedName") or raw)
-            normalized = str((standard or {}).get("normalizedName") or rec.get("normalizedName") or raw).strip()
-            brand = corrected_brand_name((standard or {}).get("brandName") or rec.get("brandName"), raw)
-            if not brand:
-                brand = corrected_brand_name("", normalized)
-            family = str((standard or {}).get("modelFamily") or rec.get("modelFamily") or normalized).strip()
-            energy = str((standard or {}).get("energyType") or rec.get("energyType") or "UNKNOWN").strip().upper()
-            if energy not in {"BEV", "EREV", "PHEV", "HEV", "ICE", "UNKNOWN"}:
+            ambiguous_bare_model = re.sub(r"[\s_-]+", "", raw).upper() in {"L60"}
+            if ambiguous_bare_model:
+                normalized = raw
+                brand = "待人工确认"
+                family = raw
                 energy = "UNKNOWN"
-            variant = str((standard or {}).get("variantName") or rec.get("variantName") or "").strip()
-            canonical = str((standard or {}).get("canonicalKey") or rec.get("canonicalKey") or "|".join([brand or "UNKNOWN", family, energy, variant])).strip()
+                variant = ""
+                canonical = "|".join([brand, family, energy, variant])
+                conn.execute("delete from model_identity_assets where edition=? and upper(replace(replace(replace(raw_name, ' ', ''), '_', ''), '-', ''))=?", (edition, "L60"))
+            else:
+                standard = local_standard_model_identity(raw) or local_standard_model_identity(rec.get("normalizedName") or raw)
+                normalized = str((standard or {}).get("normalizedName") or rec.get("normalizedName") or raw).strip()
+                brand = corrected_brand_name((standard or {}).get("brandName") or rec.get("brandName"), raw)
+                if not brand:
+                    brand = corrected_brand_name("", normalized)
+                family = str((standard or {}).get("modelFamily") or rec.get("modelFamily") or normalized).strip()
+                energy = str((standard or {}).get("energyType") or rec.get("energyType") or "UNKNOWN").strip().upper()
+                if energy not in {"BEV", "EREV", "PHEV", "HEV", "ICE", "UNKNOWN"}:
+                    energy = "UNKNOWN"
+                variant = str((standard or {}).get("variantName") or rec.get("variantName") or "").strip()
+                canonical = str((standard or {}).get("canonicalKey") or rec.get("canonicalKey") or "|".join([brand or "UNKNOWN", family, energy, variant])).strip()
             item_id = stable_id("model-identity", edition, raw, canonical)
             payload = {
                 "id": item_id,
@@ -5401,7 +5411,7 @@ def normalize_model_identity_records(records, edition="china", source="model_ide
                 "variant_name": variant,
                 "display_model_name": display_model_name_under_brand(brand, normalized),
                 "canonical_key": canonical,
-                "confidence": rec.get("confidence") or "low",
+                "confidence": "low" if ambiguous_bare_model else rec.get("confidence") or "low",
                 "source": source,
                 "qwen_checked": 1 if "qwen" in source else 0,
                 "qwen_reason": rec.get("reason") or ""
