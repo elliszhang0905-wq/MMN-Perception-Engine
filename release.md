@@ -17,7 +17,7 @@
 - 统一数据治理：新增 `MMN_DATA_ROOT` 与模块路径注册表；本地统一保存于 `data/`，服务器统一保存于 `/app/data`，原始导入与处理资产分区保存并记录 SHA-256。部署前服务器备份现在包含逐文件清单、归档校验值，并在宿主机与 `/app/backups` 各保留一份。
 - 数据保护：未重建、清空或覆盖 `data/commercial_demo.db`；月度同步兼容性使用临时数据库验证。当前数据库与 2026-07-18、2026-07-19 两份备份中的项目快照均无 E7X 逐条产品评价行，快照状态一致。
 - 本地验证：完整 Python 测试 `430/430` 通过；发布门禁 Python 专项 `147/147` 通过；JavaScript、数据优先浏览器检查、桌面与 390 像素全表面检查通过。覆盖 19 个客户页面、8 个管理视图，并真实点击 E7X 后断言五车数据集、207 条记录、15 个属性、3 类属性来源、9 个分平台声量字段、7 个平台 NSR、竞品配置及卖点车型一致；另将同车型浏览器缓存降级为旧版后，桌面与移动端均自动恢复完整服务器数据；`failed: []`、`runtimeErrors: []`、`failedResponses: []`，整页横向溢出为 0。
-- 备份验证：本地完整数据备份 `backups/data-governance/local_data_20260720_185850.tar.gz`，SHA-256 `e6f41909e3878edae1fafce044b779c0e5b5e39cc071a60f45be7da79c5d6a94`，附逐文件清单；本轮最终服务器发布前数据备份 `/opt/mmn-perception-engine/backups/mmn_backup_20260720_224830.tar.gz`，附逐文件清单与 SHA-256 文件，并已同步副本到容器 `/app/backups`。
+- 备份验证：本地完整数据备份 `backups/data-governance/local_data_20260720_185850.tar.gz`，SHA-256 `e6f41909e3878edae1fafce044b779c0e5b5e39cc071a60f45be7da79c5d6a94`，附逐文件清单；本轮最终服务器发布前数据备份 `/opt/mmn-perception-engine/backups/mmn_backup_20260720_224830.tar.gz`，SHA-256 `fad93cc5f1d4eec3e2a6514df8d7d0088aa88b49805ecb6716b9d544575abd0c`，附逐文件清单，并已同步副本到容器 `/app/backups`。
 - 生产部署：GitHub `main` 运行提交 `9257486`；ECS 健康接口返回 `beta-1.02-20260720-cloud-demo-consistency-6`，应用、任务、数据库、缓存、调度与反向代理六个容器均正常。
 - 生产浏览器验收：完整 82 项桌面与 390 像素门禁通过，`failed: []`、`runtimeErrors: []`、`failedResponses: []`；E7X 仍为 207 条记录、5 车、15 个属性、3 类属性来源、9 个分平台声量字段和 7 个平台 NSR，逐一切换无数据车型后未复用上一车型数据，切回 E7X 可恢复完整资产。
 - 生产权限与污染验收：真实试用账号调用 `/api/ai/model-identities` 返回 HTTP 200；`乐道L60`、`银河L6`、`智己L6` 归属正确，裸 `L60` 返回“待人工确认 / UNKNOWN / low”。同一账号调用月度销量刷新接口返回 HTTP 403；生产库中裸 `L60` 仅保留 1 条安全记录。部署后日志未出现 `Traceback`、HTTP 5xx 或 `BrokenPipeError`。
