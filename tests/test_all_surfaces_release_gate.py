@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
-    RELEASE_VERSION = "beta-1.02-20260720-cloud-demo-consistency-3"
+    RELEASE_VERSION = "beta-1.02-20260720-cloud-demo-consistency-4"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")
@@ -22,6 +22,17 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn("failedResponses", source)
         self.assertIn("MMN_USERNAME", source)
         self.assertIn("#cloud-login-screen", source)
+
+    def test_same_model_stale_cache_upgrade_is_a_release_contract(self):
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        gate = (ROOT / "scripts" / "release_gate_all_surfaces.js").read_text(encoding="utf-8")
+        self.assertIn("productEvaluationDatasetSignature", app)
+        self.assertIn("productEvaluationDatasetNeedsUpgrade", app)
+        self.assertIn("legacy_cached_e7x", gate)
+        self.assertIn("stale same-model browser cache upgrades", gate)
+        self.assertIn("staleSameModelUpgrade.rowCount === 207", gate)
+        self.assertIn("staleSameModelUpgrade.platformVolumeCount === 9", gate)
+        self.assertIn("staleSameModelUpgrade.platformNsrCount === 7", gate)
 
     def test_global_release_version_busts_changed_customer_assets(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")

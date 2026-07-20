@@ -183,6 +183,40 @@ async function auditViewport(browser, viewport) {
       JSON.stringify(e7xLinkage),
     );
 
+    const staleSameModelUpgrade = await page.evaluate(async () => {
+      const response = await fetch("/api/group-dashboard-demo?edition=china", {
+        credentials: "same-origin",
+        headers: typeof authHeaders === "function" ? authHeaders() : {},
+      });
+      const payload = await response.json();
+      state.datasetVersion = "legacy_cached_e7x";
+      state.productEvaluationBoundModel = "奥迪E7X";
+      state.rows = (state.rows || []).filter(row => row[0] === "奥迪E7X" && row[2] === "全网").slice(0, 15);
+      state.summaryHeat = Object.fromEntries(Object.entries(state.summaryHeat || {}).map(([model, item]) => [model, { ...item, platformVolume: {} }]));
+      state.summaryPlatformNsr = Object.fromEntries(Object.entries(state.summaryPlatformNsr || {}).map(([model, item]) => [model, Object.fromEntries(Object.entries(item || {}).filter(([platform]) => ["全网", "垂媒车主口碑", "抖音"].includes(platform))) ]));
+      registerProductEvaluation(payload.productEvaluation);
+      return {
+        datasetVersion: state.datasetVersion,
+        boundModel: state.productEvaluationBoundModel,
+        rowCount: (state.rows || []).length,
+        rowModels: [...new Set((state.rows || []).map(row => row[0]))],
+        attributeSources: [...new Set((state.rows || []).map(row => row[2]))],
+        platformVolumeCount: Object.keys(state.summaryHeat?.["奥迪E7X"]?.platformVolume || {}).length,
+        platformNsrCount: Object.keys(state.summaryPlatformNsr?.["奥迪E7X"] || {}).length,
+      };
+    });
+    add(
+      `${viewport.name}: stale same-model browser cache upgrades to the complete server dataset`,
+      staleSameModelUpgrade.datasetVersion !== "legacy_cached_e7x"
+        && staleSameModelUpgrade.boundModel === "奥迪E7X"
+        && staleSameModelUpgrade.rowCount === 207
+        && expectedE7xModels.every(model => staleSameModelUpgrade.rowModels.includes(model))
+        && ["全网", "垂媒车主口碑", "抖音"].every(source => staleSameModelUpgrade.attributeSources.includes(source))
+        && staleSameModelUpgrade.platformVolumeCount === 9
+        && staleSameModelUpgrade.platformNsrCount === 7,
+      JSON.stringify(staleSameModelUpgrade),
+    );
+
     const warningModels = await page.locator("#group-dashboard-root [data-warning-series-id]").evaluateAll(items => [...new Set(items.map(item => item.closest(".sales-warning-row")?.querySelector(".sales-warning-model b")?.textContent?.trim()).filter(Boolean))]);
     for (const model of warningModels) {
       await page.evaluate(target => window.MMNVehicleContext.select(target, { source: "release-gate", notify: false }), model);

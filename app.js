@@ -1062,8 +1062,9 @@ function unavailableProductEvaluationDataset(model){
 function reconcileProductEvaluationBinding(){
  const model=state.config?.model;if(!model)return false;
  rememberCurrentProductEvaluationDataset();
- if(productEvaluationDatasetMatches(model))return true;
- installProductEvaluationDataset(productEvaluationCatalogGet(model)||unavailableProductEvaluationDataset(model),model);
+ const registered=productEvaluationCatalogGet(model);
+ if(registered&&!productEvaluationDatasetNeedsUpgrade(registered,model))return true;
+ installProductEvaluationDataset(registered||unavailableProductEvaluationDataset(model),model);
  return true;
 }
 function productEvaluationAttributeCategory(label){
@@ -1100,6 +1101,23 @@ function productEvaluationSummaryDataset(evaluation){
  };
 }
 function productEvaluationDatasetMatches(model){return state.productEvaluationBoundModel===model&&productEvaluationSupportedModels(state).includes(model)}
+function productEvaluationDatasetSignature(dataset={}){
+ const platformVolumeCount=Object.values(dataset.summaryHeat||{}).reduce((count,item)=>count+Object.keys(item?.platformVolume||{}).length,0);
+ const platformNsrCount=Object.values(dataset.summaryPlatformNsr||{}).reduce((count,item)=>count+Object.keys(item||{}).length,0);
+ return JSON.stringify({
+  datasetVersion:String(dataset.datasetVersion||""),
+  sourceModel:String(dataset.productEvaluationSourceModel||dataset.config?.model||""),
+  models:productEvaluationSupportedModels(dataset).sort(),
+  rowCount:(dataset.rows||[]).length,
+  rowModels:[...new Set((dataset.rows||[]).map(row=>String(row?.[0]||"")).filter(Boolean))].sort(),
+  attributeSources:[...new Set((dataset.rows||[]).map(row=>String(row?.[2]||"")).filter(Boolean))].sort(),
+  platformVolumeCount,
+  platformNsrCount,
+ });
+}
+function productEvaluationDatasetNeedsUpgrade(dataset,model){
+ return!productEvaluationDatasetMatches(model)||productEvaluationDatasetSignature(state)!==productEvaluationDatasetSignature(dataset);
+}
 function installProductEvaluationDataset(dataset,model){
  if(!dataset||!productEvaluationSupportedModels(dataset).includes(model))return false;
  const previousConfig=state.config||{};
@@ -1114,7 +1132,7 @@ function registerProductEvaluation(evaluation,{activateCurrent=true}={}){
  const dataset=productEvaluationSummaryDataset(evaluation);if(!dataset)return false;
  registerProductEvaluationDataset(dataset);
  const currentModel=state.config.model,registered=productEvaluationCatalogGet(currentModel);
- if(activateCurrent&&registered&&!productEvaluationDatasetMatches(currentModel)){
+ if(activateCurrent&&registered&&productEvaluationDatasetNeedsUpgrade(registered,currentModel)){
   installProductEvaluationDataset(registered,currentModel);save();queueMicrotask(()=>render());
  }
  return true;
