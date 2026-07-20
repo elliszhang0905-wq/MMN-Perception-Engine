@@ -1,5 +1,17 @@
 # MMN Perception Engine 智能体研发交接手册
 
+## 2026-07-21｜beta 1.03 抖音热点内容攻防交接
+
+- 本次是大版本更新，统一版本码为 `beta-1.03-20260721-douyin-content-defense-1`。
+- 榜单采集与视频洞察必须保持解耦：每日只更新六榜与原有品牌车型识别，只有用户点击单条“生成洞察”才允许取证和调用三旗舰；不得恢复全榜自动分析。
+- 内部三路运行必须读取同一证据包版本且彼此独立；保留原始结构化输出、模型/提示词版本、时间、错误和分歧。客户侧统一显示“MMN三旗舰交叉分析”。
+- 证据引用 ID 属于内部追溯字段，客户正文必须清理类似 `V:18ffe...` 的哈希串；完整证据统一通过“引用证据”面板展示可读类型、内容、时间点与来源。
+- 原页能打开不等于后台已读完整视频。当字幕、关键帧、OCR 或评论缺失时，结果必须保留 `limited_analysis`/`incomplete`/`manual_required` 语义和缺口，不得用互动率、标题关键词或规则模板补齐。
+- 本地使用已登录 Chrome CDP；服务器容器使用系统 Chromium 无头公开页模式。任一模式遇到登录/验证码/风控必须停止并降级，不得绕过。
+- 数据持久化按 `orgId + edition + itemId + sourceFingerprint + promptVersion` 隔离。播放、点赞等传播指标变化不触发重分析；证据或提示词版本变化时生成新版本，不覆盖旧记录。
+- 核心模块：`douyin_video_insights.py`、`douyin_browser_evidence.py`、`content_defense.py`、`creator_distillation/media_processing.py`、`server.py`、`douyin-hot-demo.js`、`douyin-hot-demo.css`。
+- 发布后必须重新验证未点击视频不调模型、单条点击完整链路、缓存复用、失败降级、刷新恢复、组织隔离、1440/390 页面与客户侧供应商名扫描。
+
 ## 1. 交接目的
 
 本文档用于将 MMN Perception Engine 的后续研发工作交接给 Qwen Agent 或其他具备代码执行能力的研发智能体。

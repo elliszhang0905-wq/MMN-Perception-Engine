@@ -19,7 +19,15 @@ assert.match(functionBody("stop_stuck_server", "start_server"), /return 0\s*\n}\
 assert.match(source, /screen -dmS mmn_local_watchdog zsh scripts\/run_local_mmn_watchdog\.sh/);
 assert.match(source, /local_mmn_watchdog\.pid/);
 assert.match(watchdog, /echo "\$\$" >"\$\{WATCHDOG_PID_FILE\}"/);
+assert.match(watchdog, /local_mmn_watchdog\.lock/);
+assert.match(watchdog, /trap shutdown TERM INT HUP/);
+assert.match(watchdog, /trap cleanup EXIT/);
 assert.match(watchdog, /while true; do/);
+assert.match(watchdog, /backend_code_is_newer/);
+assert.match(watchdog, /activeLocalJobs/);
+assert.match(watchdog, /检测到本地后端代码更新，正在自动同步服务/);
+assert.match(watchdog, /kill "\$\{child_pid\}"/);
+assert.match(source, /find \. -type f -name '\*\.py'/);
 assert.match(watchdog, /exit_code=0\s+wait "\$\{child_pid\}" \|\| exit_code=\$\?/);
 assert.match(watchdog, /sleep 2/);
 

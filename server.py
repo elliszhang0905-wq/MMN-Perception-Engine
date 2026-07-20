@@ -11,6 +11,7 @@ import webbrowser
 import zipfile
 import re
 import subprocess
+import tempfile
 import shutil
 import hashlib
 import time
@@ -22,7 +23,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
-from threading import Lock, Thread, Timer
+from threading import Lock, Thread, Timer, Semaphore
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import HTTPError, URLError
@@ -46,6 +47,7 @@ from product_whitepaper import (
     dual_model_consensus,
     extraction_prompt as product_whitepaper_extraction_prompt,
     normalize_capabilities as normalize_product_capabilities,
+    product_page_candidates,
     readable_pdf_pages,
     review_prompt as product_whitepaper_review_prompt,
     select_product_pages,
@@ -91,6 +93,37 @@ from creator_script_generation import (
 )
 from creator_distillation import CreatorDistillationService
 from creator_distillation.service import api_error as creator_distillation_api_error
+from creator_distillation.media_processing import process_representative_media
+from douyin_browser_evidence import extract_browser_video_evidence
+from content_defense import (
+    build_evidence_package as build_content_defense_evidence_package,
+    create_job as create_content_defense_job,
+    cross_validate_reviews as cross_validate_content_defense_reviews,
+    get_job as get_content_defense_job,
+    init_schema as init_content_defense_schema,
+    list_jobs as list_content_defense_jobs,
+    load_media_cache as load_content_defense_media_cache,
+    save_media_cache as save_content_defense_media_cache,
+    strategy_messages as content_defense_strategy_messages,
+    update_job as update_content_defense_job,
+)
+from douyin_video_insights import (
+    INTERNAL_PROVIDERS as VIDEO_INSIGHT_PROVIDERS,
+    acquire_video_evidence,
+    build_evidence_package as build_video_insight_evidence_package,
+    create_job as create_video_insight_job,
+    cross_validate as cross_validate_video_insights,
+    get_job as get_video_insight_job,
+    init_schema as init_video_insight_schema,
+    latest_internal_runs as latest_video_insight_runs,
+    list_jobs as list_video_insight_jobs,
+    log_retry as log_video_insight_retry,
+    resolve_video_access,
+    save_manual_review as save_video_insight_manual_review,
+    save_run as save_video_insight_run,
+    strategy_messages as video_insight_strategy_messages,
+    update_job as update_video_insight_job,
+)
 from douyin_hot_entities import (
     finalize_manual_review as finalize_douyin_hot_manual_review,
     init_schema as init_douyin_hot_entity_schema,
@@ -142,9 +175,9 @@ except Exception:
     enqueue_distillation = None
 
 ROOT = Path(__file__).resolve().parent
-APP_VERSION = "beta 1.02"
-APP_VERSION_CODE = "beta-1.02-20260720-cloud-demo-consistency-6"
-APP_RELEASE_DATE = "2026-07-20"
+APP_VERSION = "beta 1.03"
+APP_VERSION_CODE = "beta-1.03-20260721-douyin-content-defense-1"
+APP_RELEASE_DATE = "2026-07-21"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -178,6 +211,11 @@ OPPORTUNITY_JOB_LOCK = Lock()
 OPPORTUNITY_JOB_TASKS = {}
 BLOGGER_IMPORT_JOB_LOCK = Lock()
 CREATOR_SCRIPT_JOB_LOCK = Lock()
+CONTENT_DEFENSE_JOB_LOCK = Lock()
+CONTENT_DEFENSE_THREADS = {}
+VIDEO_INSIGHT_JOB_LOCK = Lock()
+VIDEO_INSIGHT_THREADS = {}
+VIDEO_INSIGHT_SEMAPHORE = Semaphore(max(1, int(os.getenv("MMN_DOUYIN_VIDEO_INSIGHT_CONCURRENCY", "2"))))
 SOCIAL_TREND_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_TASKS = {}
 SOCIAL_TREND_JOB_LIMIT = 100
@@ -247,12 +285,69 @@ DOUYIN_COLLECTOR_NODE_MODULES = Path(os.getenv(
     "MMN_DOUYIN_COLLECTOR_NODE_MODULES",
     str(Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"),
 )).expanduser()
+DOUYIN_BROWSER_EXECUTABLE = os.getenv("MMN_DOUYIN_BROWSER_EXECUTABLE", "").strip()
 
 def db():
     DATA_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def active_local_job_summary():
+    """Return restart-safety state for the project-local service watchdog."""
+    active_statuses = {"queued", "running"}
+    task_maps = (
+        ("socialTrend", SOCIAL_TREND_JOB_LOCK, SOCIAL_TREND_JOB_TASKS),
+        ("douyinCollector", DOUYIN_COLLECTOR_LOCK, DOUYIN_COLLECTOR_TASKS),
+        ("opportunityMap", OPPORTUNITY_JOB_LOCK, OPPORTUNITY_JOB_TASKS),
+        ("routerReview", ROUTER_REVIEW_LOCK, ROUTER_REVIEW_TASKS),
+        ("executiveBriefReview", EXECUTIVE_BRIEF_REVIEW_LOCK, EXECUTIVE_BRIEF_REVIEW_TASKS),
+        ("salesWarningReview", SALES_WARNING_REVIEW_LOCK, SALES_WARNING_REVIEW_TASKS),
+    )
+    by_type = {}
+    for label, lock, tasks in task_maps:
+        with lock:
+            by_type[label] = sum(
+                str(task.get("status") or "").lower() in active_statuses
+                for task in tasks.values()
+                if isinstance(task, dict)
+            )
+
+    persistent_tables = (
+        ("contentDefense", "douyin_content_defense_jobs"),
+        ("videoInsight", "douyin_video_insight_jobs"),
+        ("bloggerImport", "blogger_skill_import_jobs"),
+        ("creatorScript", "creator_script_jobs"),
+        ("briefParsing", "bf_parse_jobs"),
+    )
+    persistent_check = "ok"
+    try:
+        with db() as conn:
+            existing = {
+                row["name"] for row in conn.execute(
+                    "select name from sqlite_master where type='table'"
+                ).fetchall()
+            }
+            for label, table in persistent_tables:
+                if table not in existing:
+                    by_type[label] = 0
+                    continue
+                statuses = ("queued", "resolving_video", "extracting_media", "transcribing", "building_evidence", "analyzing", "cross_validating") if table == "douyin_video_insight_jobs" else ("queued", "running")
+                placeholders = ",".join("?" for _ in statuses)
+                by_type[label] = int(conn.execute(
+                    f"select count(*) from {table} where status in ({placeholders})", statuses
+                ).fetchone()[0])
+    except (OSError, sqlite3.Error):
+        # Fail closed: an unreadable job store must defer an automatic restart.
+        persistent_check = "unknown"
+        by_type["persistentStateUnknown"] = 1
+
+    return {
+        "total": sum(by_type.values()),
+        "byType": by_type,
+        "persistentCheck": persistent_check,
+    }
 
 def brand_penetration_snapshot(conn, org_id="local", edition="china"):
     """Return the shared, verified MMN showcase snapshot without weakening tenant scope elsewhere."""
@@ -860,6 +955,15 @@ def init_db():
     with db() as conn:
         init_social_trend_schema(conn)
         init_douyin_hot_entity_schema(conn)
+        init_content_defense_schema(conn)
+        init_video_insight_schema(conn)
+        conn.execute("""
+          update douyin_video_insight_jobs
+          set status='incomplete',stage='incomplete',progress=min(progress,95),retryable=1,
+              message='服务重启中断了本轮分析，已保留证据与已完成结果，可安全重试。',updated_at=?
+          where status in ('resolving_video','extracting_media','transcribing','building_evidence','analyzing','cross_validating')
+        """, (now(),))
+        conn.commit()
 
 
 def backfill_strategy_knowledge_assets(conn):
@@ -1435,9 +1539,11 @@ def collect_douyin_creator_snapshots(progress_callback=None):
 
 
 def run_douyin_collector_pipeline(*, org_id="local", edition="china", progress_callback=None,
-                                  collector_runner=None, recognition_runner=None):
+                                  collector_runner=None, recognition_runner=None, insight_starter=None):
     collector_runner = collector_runner or collect_douyin_creator_snapshots
     recognition_runner = recognition_runner or run_douyin_hot_entity_recognition
+    # Kept as a compatibility-only test seam. Collection must never start video
+    # insight jobs; the POST action from an explicit per-row click is the only trigger.
 
     def report(stage, progress, message):
         if progress_callback:
@@ -1469,13 +1575,380 @@ def run_douyin_collector_pipeline(*, org_id="local", edition="china", progress_c
                 + (f"：{details}" if details else "：未形成完整双模型结果")
             )
         report("analysis", 62 + round(31 * (index + 1) / len(saved)), f"双模型已分析 {index + 1}/6 个榜单")
+    report("analysis", 94, "榜单与品牌车型识别已完成；视频洞察按用户点击生成")
     report("delivery", 97, "分析完成，正在刷新看板并生成交付状态")
     return {
         "snapshotCount": len(saved),
         "itemCount": sum(len(snapshot.get("items") or []) for snapshot in saved),
         "analysisCount": len(analyses),
+        "videoInsightJobCount": 0,
+        "videoInsightErrors": [],
+        "videoInsightTriggerMode": "manual",
         "capturedAt": max((snapshot.get("capturedAt") or "" for snapshot in saved), default=now()),
     }
+
+
+def content_defense_nsr_rows(model):
+    """Load the preserved E7X product-evaluation asset; absence stays explicit."""
+    path = DATA_DIR / "modules" / "product_evaluation" / "e7x_product_evaluation_2026-06.json"
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if str(payload.get("ownModel") or "").strip() != str(model or "").strip():
+        return []
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    own_volume = next((row.get("voice") for row in payload.get("models") or [] if row.get("model") == model), 0)
+    rows = []
+    for item in payload.get("attributes") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            own_nsr = float(item.get("ownNsr"))
+            average_nsr = float(item.get("averageNsr"))
+        except (TypeError, ValueError):
+            continue
+        label = "辅助/自动驾驶" if item.get("attribute") == "辅助驾驶" else item.get("attribute")
+        rows.append({
+            "model": model, "attribute": label, "nsr": own_nsr,
+            "competitorDelta": own_nsr - average_nsr,
+            "source": source.get("fileName") or path.name, "volume": own_volume,
+        })
+    return rows
+
+
+def content_defense_item(org_id, edition, view, range_key, item_id):
+    with db() as conn:
+        snapshot = latest_douyin_hot_rank_snapshot(
+            conn, org_id=org_id, edition=edition, view=view, range_key=range_key,
+        )
+    return next((item for item in snapshot.get("items") or [] if str(item.get("itemId")) == str(item_id)), None)
+
+
+def run_content_defense_reviews(package, provider_runner=None):
+    messages = content_defense_strategy_messages(package)
+
+    def run_one(provider):
+        if provider_runner:
+            raw = provider_runner(provider, messages)
+        elif provider == "qwen":
+            raw = call_qwen(messages, temperature=.05, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT,
+                            max_tokens=2400, enable_thinking=False)
+        elif provider == "deepseek":
+            raw = call_deepseek(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                                max_tokens=5000, response_format={"type": "json_object"})
+        else:
+            raw = call_kimi(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=3000)
+        return parse_json_object(raw)
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(run_one, provider) for provider in ("qwen", "deepseek", "kimi")}
+        for provider, future in futures.items():
+            try:
+                outputs[provider] = future.result()
+            except Exception as exc:
+                errors[provider] = str(exc)
+    return cross_validate_content_defense_reviews(package, outputs, errors)
+
+
+def execute_content_defense_job(job_id, org_id, edition, request, *, media_runner=None, provider_runner=None):
+    try:
+        with db() as conn:
+            job = get_content_defense_job(conn, job_id, org_id)
+            if not job:
+                return
+            update_content_defense_job(conn, job_id, status="running", stage="evidence", progress=12,
+                                       message="正在整理榜单、视频与可追溯证据")
+        item = content_defense_item(org_id, edition, job["view"], job["range"], job["itemId"])
+        if not item:
+            raise ValueError("榜单内容已变化，请刷新后重新发起内容防线分析。")
+        with db() as conn:
+            cached = None if request.get("force") is True else load_content_defense_media_cache(conn, item)
+        if cached:
+            raw_media = cached.get("evidence") or []
+            media_errors = (cached.get("diagnostics") or {}).get("errors") or []
+            cache_hit = True
+        else:
+            asset = {
+                "source_id": str(item.get("itemId")), "title": item.get("title"),
+                "duration_ms": int(float(item.get("duration") or 0) * 1000),
+                "media": {"videoUrl": item.get("sourceUrl") or "",
+                          "imageUrls": [item.get("coverUrl")] if item.get("coverUrl") else [],
+                          "subtitleUrls": []},
+            }
+            runner = media_runner or process_representative_media
+            raw_media, media_stats, media_errors = runner([asset], max_assets=1)
+            with db() as conn:
+                save_content_defense_media_cache(conn, item, raw_media, {"stats": media_stats, "errors": media_errors})
+            cache_hit = False
+        with db() as conn:
+            update_content_defense_job(conn, job_id, stage="facts", progress=48,
+                                       message="正在核对属性NSR与白皮书逐页事实")
+        model = str(request.get("model") or "奥迪E7X").strip()
+        whitepaper = load_product_whitepaper_evidence(model, org_id=org_id, edition=edition)
+        if whitepaper is None and org_id != "local":
+            whitepaper = load_product_whitepaper_evidence(model, org_id="local", edition=edition)
+        package = build_content_defense_evidence_package(
+            item, media=raw_media, media_errors=media_errors,
+            comments=request.get("comments") if isinstance(request.get("comments"), list) else [],
+            nsr_rows=content_defense_nsr_rows(model), whitepaper=whitepaper or {},
+            leads=request.get("leads") if isinstance(request.get("leads"), list) else [], model=model,
+        )
+        package["cacheHit"] = cache_hit
+        with db() as conn:
+            update_content_defense_job(conn, job_id, stage="quality", progress=68,
+                                       message="正在进行三重交叉质检")
+        validation = run_content_defense_reviews(package, provider_runner=provider_runner)
+        result = {"evidencePackage": package, "validation": validation}
+        final_status = "completed" if validation.get("status") == "published" else "manual_required"
+        final_message = "内容防线已通过三重交叉质检" if final_status == "completed" else "证据或质检存在分歧，已转人工确认"
+        with db() as conn:
+            update_content_defense_job(conn, job_id, status=final_status, stage="delivery", progress=100,
+                                       message=final_message, result=result)
+    except Exception as exc:
+        with db() as conn:
+            update_content_defense_job(conn, job_id, status="failed", stage="delivery", progress=100,
+                                       message="内容防线生成失败", error=str(exc))
+    finally:
+        with CONTENT_DEFENSE_JOB_LOCK:
+            CONTENT_DEFENSE_THREADS.pop(job_id, None)
+
+
+def start_content_defense_job(body, *, org_id="local"):
+    edition = edition_from(body.get("edition") or "china")
+    view, range_key = body.get("view") or "videos", body.get("range") or "24h"
+    item = content_defense_item(org_id, edition, view, range_key, body.get("itemId"))
+    if not item:
+        raise ValueError("未找到当前榜单内容，请刷新榜单后重试。")
+    request = {"model": str(body.get("model") or "奥迪E7X").strip(),
+               "comments": body.get("comments") if isinstance(body.get("comments"), list) else [],
+               "leads": body.get("leads") if isinstance(body.get("leads"), list) else [],
+               "force": body.get("force") is True}
+    with db() as conn:
+        job, created = create_content_defense_job(
+            conn, org_id=org_id, edition=edition, view=view, range_key=range_key,
+            item=item, request=request, force=request["force"])
+    if created:
+        thread = Thread(target=execute_content_defense_job,
+                        args=(job["jobId"], org_id, edition, request), daemon=True)
+        with CONTENT_DEFENSE_JOB_LOCK:
+            CONTENT_DEFENSE_THREADS[job["jobId"]] = thread
+        thread.start()
+    return job
+
+
+def run_video_insight_reviews(job_id, package, *, provider_runner=None, retry_slot=""):
+    """Run independent reviewers against one immutable evidence package."""
+    messages = video_insight_strategy_messages(package)
+    slot_map = {str(index): provider for index, provider in enumerate(VIDEO_INSIGHT_PROVIDERS, 1)}
+    selected = {slot_map[retry_slot]} if retry_slot in slot_map else set(VIDEO_INSIGHT_PROVIDERS)
+    outputs, errors = {}, {}
+    with db() as conn:
+        prior = latest_video_insight_runs(conn, job_id)
+        if retry_slot and any(provider not in selected and (
+            provider not in prior or prior[provider]["status"] != "completed"
+            or prior[provider]["evidence_fingerprint"] != package["evidenceFingerprint"]
+        ) for provider in VIDEO_INSIGHT_PROVIDERS):
+            selected = set(VIDEO_INSIGHT_PROVIDERS)
+        for provider, row in prior.items():
+            if provider not in selected and row["status"] == "completed" and row["evidence_fingerprint"] == package["evidenceFingerprint"]:
+                try:
+                    outputs[provider] = json.loads(row["raw_json"] or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    errors[provider] = "此前结构化结果不可读取"
+
+    def run_one(provider):
+        started_at = now()
+        try:
+            if provider_runner:
+                raw = provider_runner(provider, messages)
+            elif provider == "qwen":
+                raw = call_qwen(messages, temperature=.05, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT,
+                                max_tokens=3600, enable_thinking=False)
+            elif provider == "deepseek":
+                raw = call_deepseek(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                                    max_tokens=5200, response_format={"type": "json_object"})
+            else:
+                raw = call_kimi(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=4200)
+            parsed = parse_json_object(raw)
+            with db() as conn:
+                save_video_insight_run(conn, job_id=job_id, provider=provider,
+                                       evidence_fingerprint=package["evidenceFingerprint"], status="completed",
+                                       raw=parsed, started_at=started_at, completed_at=now())
+            return provider, parsed, ""
+        except Exception as exc:
+            with db() as conn:
+                save_video_insight_run(conn, job_id=job_id, provider=provider,
+                                       evidence_fingerprint=package["evidenceFingerprint"], status="failed",
+                                       error=str(exc), started_at=started_at, completed_at=now())
+            return provider, None, str(exc)
+
+    with ThreadPoolExecutor(max_workers=len(selected)) as executor:
+        futures = [executor.submit(run_one, provider) for provider in selected]
+        for future in futures:
+            provider, output, error = future.result()
+            if output is not None:
+                outputs[provider] = output
+                errors.pop(provider, None)
+            else:
+                errors[provider] = error
+    return cross_validate_video_insights(package, outputs, errors)
+
+
+def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=None, provider_runner=None,
+                              evidence_resolver=None, browser_runner=None):
+    with VIDEO_INSIGHT_SEMAPHORE:
+        try:
+            with db() as conn:
+                job = get_video_insight_job(conn, job_id, org_id)
+                if not job:
+                    return
+                update_video_insight_job(conn, job_id, status="resolving_video", stage="resolving_video", progress=8,
+                                         message="正在核对原视频页面与后台媒体可用性")
+            item = content_defense_item(org_id, edition, "videos", job["range"], job["itemId"])
+            if not item:
+                request_item = request.get("item") if isinstance(request.get("item"), dict) else None
+                item = request_item
+            if not item:
+                raise ValueError("榜单内容已变化，当前任务无法定位原视频。")
+            comments = request.get("comments") if isinstance(request.get("comments"), list) else []
+            resolver = evidence_resolver or acquire_video_evidence
+            try:
+                item, acquired_comments, resolution = resolver(item)
+                if not comments:
+                    comments = acquired_comments
+            except Exception as exc:
+                resolution = resolve_video_access(item)
+                resolution["errors"] = [*resolution.get("errors", []), str(exc)]
+            with db() as conn:
+                update_video_insight_job(conn, job_id, status="extracting_media", stage="extracting_media", progress=20,
+                                         message="正在提取视频、字幕、关键镜头与画面文字")
+            raw_media, media_errors = [], []
+            with tempfile.TemporaryDirectory(prefix=f"mmn-douyin-{job_id[:8]}-") as frame_root:
+                browser_evidence = None
+                if media_runner is None and resolution.get("pageUrl"):
+                    try:
+                        frame_extractor = browser_runner or extract_browser_video_evidence
+                        browser_evidence = frame_extractor(
+                            resolution["pageUrl"], str(item.get("itemId")), Path(frame_root),
+                            cdp_url=f"http://127.0.0.1:{DOUYIN_COLLECTOR_CDP_PORT}",
+                            node_binary=str(DOUYIN_COLLECTOR_NODE),
+                            node_modules=str(DOUYIN_COLLECTOR_NODE_MODULES),
+                            browser_executable=DOUYIN_BROWSER_EXECUTABLE or None,
+                        )
+                        resolution["browserMediaAvailable"] = True
+                        resolution["pageVerification"] = "browser_playback"
+                        resolution["mediaAvailability"] = "browser_frames"
+                        resolution["acquisitionStatus"] = "available"
+                        resolution["mediaFingerprint"] = browser_evidence.get("mediaFingerprint") or resolution.get("mediaFingerprint")
+                        resolution["errors"] = [row for row in resolution.get("errors", [])
+                                                if "尚未取得可读取的视频媒体" not in str(row)]
+                    except Exception as exc:
+                        media_errors.append(f"浏览器视频取证: {exc}")
+                asset_media = {
+                    "videoUrl": resolution.get("mediaUrl") or "",
+                    "audioUrl": resolution.get("audioUrl") or "",
+                    "imageUrls": [item.get("coverUrl")] if item.get("coverUrl") else [],
+                    "subtitleUrls": [resolution.get("subtitleUrl")] if resolution.get("subtitleUrl") else [],
+                    "localImagePaths": (browser_evidence or {}).get("imagePaths") or [],
+                    "localImageTimestampsMs": (browser_evidence or {}).get("timestampsMs") or [],
+                }
+                if any(asset_media.values()):
+                    runner = media_runner or process_representative_media
+                    processed, _media_stats, processing_errors = runner([{
+                        "source_id": str(item.get("itemId")), "title": item.get("title"),
+                        "duration_ms": int((browser_evidence or {}).get("durationMs") or float(item.get("duration") or 0) * 1000),
+                        "media": asset_media,
+                    }], max_assets=1)
+                    media_errors.extend(processing_errors or [])
+                    scope = "video_body" if (resolution.get("mediaUrl") or resolution.get("audioUrl")
+                                                or resolution.get("subtitleUrl") or browser_evidence) else "cover"
+                    raw_media = [{**row, "source_scope": row.get("source_scope") or scope}
+                                 for row in (processed or []) if isinstance(row, dict)]
+            with db() as conn:
+                update_video_insight_job(conn, job_id, status="building_evidence", stage="building_evidence", progress=46,
+                                         message="正在生成同一版本的可追溯证据包")
+            package = build_video_insight_evidence_package(
+                item, resolution=resolution, media=raw_media, media_errors=media_errors,
+                comments=comments,
+                captured_at=now(),
+            )
+            with db() as conn:
+                update_video_insight_job(conn, job_id, evidence=package)
+            if package.get("evidenceCoverage") in {"none", "limited"}:
+                validation = cross_validate_video_insights(package, {}, {})
+            else:
+                with db() as conn:
+                    update_video_insight_job(conn, job_id, status="analyzing", stage="analyzing", progress=62,
+                                             message="MMN三路独立分析正在读取同一证据包")
+                validation = run_video_insight_reviews(
+                    job_id, package, provider_runner=provider_runner, retry_slot=str(request.get("retrySlot") or ""))
+            with db() as conn:
+                update_video_insight_job(conn, job_id, status="cross_validating", stage="cross_validating", progress=90,
+                                         message="正在校验证据覆盖、一致判断与关键冲突")
+            quality = validation.get("status")
+            if quality in {"verified", "majority_aligned"}:
+                final_status, message, retryable = "completed", "MMN三旗舰交叉分析已完成", False
+            elif quality == "limited_analysis":
+                final_status, message, retryable = "limited_analysis", "当前仅形成有限分析，缺失证据已明确标注", True
+            elif quality == "manual_required":
+                final_status, message, retryable = "manual_required", "核心判断存在冲突，等待人工复核", True
+            elif quality == "incomplete":
+                final_status, message, retryable = "incomplete", "三路分析未完整返回，可安全重试失败项", True
+            else:
+                final_status, message, retryable = "failed", "当前没有可用内容证据", True
+            with db() as conn:
+                update_video_insight_job(conn, job_id, status=final_status, stage=final_status, progress=100,
+                                         message=message, retryable=retryable,
+                                         result={"validation": validation, "cacheHit": False})
+        except Exception as exc:
+            with db() as conn:
+                update_video_insight_job(conn, job_id, status="failed", stage="failed", progress=100,
+                                         message="逐视频洞察生成失败", error=str(exc), retryable=True)
+        finally:
+            with VIDEO_INSIGHT_JOB_LOCK:
+                VIDEO_INSIGHT_THREADS.pop(job_id, None)
+
+
+def start_video_insight_job(body, *, org_id="local", media_runner=None, provider_runner=None):
+    edition = edition_from(body.get("edition") or "china")
+    view, range_key = body.get("view") or "videos", body.get("range") or "24h"
+    if view != "videos":
+        raise ValueError("热门话题不启动逐视频分析。")
+    item = content_defense_item(org_id, edition, view, range_key, body.get("itemId"))
+    if not item:
+        raise ValueError("未找到当前榜单视频，请刷新榜单后重试。")
+    request = {
+        "item": item,
+        "comments": body.get("comments") if isinstance(body.get("comments"), list) else [],
+        "force": body.get("force") is True,
+        "retrySlot": str(body.get("retrySlot") or ""),
+    }
+    with db() as conn:
+        if request["force"]:
+            existing = conn.execute("""
+              select id from douyin_video_insight_jobs where org_id=? and edition=? and item_id=?
+              order by updated_at desc limit 1
+            """, (org_id, edition, str(item.get("itemId") or ""))).fetchone()
+            if existing and conn.execute("select count(*) from douyin_video_insight_retry_log where job_id=?", (existing["id"],)).fetchone()[0] >= 3:
+                raise ValueError("该视频已达到本版本的安全重试上限，请等待证据或分析版本更新。")
+        job, created = create_video_insight_job(
+            conn, org_id=org_id, edition=edition, view=view, range_key=range_key,
+            item=item, request=request, force=request["force"])
+        if request["force"]:
+            log_video_insight_retry(conn, job["jobId"], request["retrySlot"], "用户重新分析")
+    if created:
+        thread = Thread(target=execute_video_insight_job,
+                        args=(job["jobId"], org_id, edition, request),
+                        kwargs={"media_runner": media_runner, "provider_runner": provider_runner},
+                        daemon=True, name=f"douyin-video-insight-{job['jobId'][:8]}")
+        with VIDEO_INSIGHT_JOB_LOCK:
+            VIDEO_INSIGHT_THREADS[job["jobId"]] = thread
+        thread.start()
+    return job
 
 
 def get_douyin_collector_job(job_id, org_id=""):
@@ -5581,6 +6054,7 @@ def analyze_product_whitepaper(filename, data, model):
         "totalPages": max(pages),
         "readablePages": len(pages),
         "analyzedPages": [item["page"] for item in selected_pages],
+        "attributePageCandidates": product_page_candidates(pages),
         "warnings": parsed.get("warnings") or [],
         "capabilities": [],
         "draftCapabilities": [],
@@ -5599,7 +6073,7 @@ def analyze_product_whitepaper(filename, data, model):
             temperature=.05,
             profile="deep",
             timeout=75,
-            max_tokens=2400,
+            max_tokens=5000,
             enable_thinking=False,
         )
         primary = normalize_product_capabilities(parse_json_object(primary_raw), pages)
@@ -5618,7 +6092,7 @@ def analyze_product_whitepaper(filename, data, model):
             temperature=.02,
             profile="fast",
             timeout=75,
-            max_tokens=2400,
+            max_tokens=5000,
             response_format={"type": "json_object"},
         )
         reviewer = normalize_product_capabilities(parse_json_object(reviewer_raw), pages)
@@ -12220,10 +12694,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            with SOCIAL_TREND_JOB_LOCK:
-                active_social_trend_jobs = sum(
-                    job.get("status") in {"queued", "running"} for job in SOCIAL_TREND_JOB_TASKS.values()
-                )
+            active_jobs = active_local_job_summary()
             self.send_json({
                 "ok": True,
                 "mode": "commercial-demo",
@@ -12231,7 +12702,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "versionCode": APP_VERSION_CODE,
                 "releaseDate": APP_RELEASE_DATE,
                 "db": str(DB_PATH),
-                "activeSocialTrendJobs": active_social_trend_jobs,
+                "activeSocialTrendJobs": active_jobs["byType"].get("socialTrend", 0),
+                "activeLocalJobs": active_jobs["total"],
+                "activeJobs": active_jobs,
             })
             return
         if parsed.path == "/api/product-whitepaper/latest":
@@ -12844,6 +13317,51 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/douyin-hot/content-defense":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    jobs = list_content_defense_jobs(
+                        conn, org_id=auth.get("org_id", "local"),
+                        edition=edition_from(q.get("edition", ["china"])[0]),
+                        view=q.get("view", ["videos"])[0], range_key=q.get("range", ["24h"])[0])
+                self.send_json({"ok": True, "result": {"jobs": jobs,
+                    "outputLabel": "MMN多模态策略输出", "qualityLabel": "三重交叉质检"}})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/video-insights":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                edition = edition_from(q.get("edition", ["china"])[0])
+                with db() as conn:
+                    jobs = list_video_insight_jobs(conn, org_id=auth.get("org_id", "local"), edition=edition)
+                self.send_json({"ok": True, "result": {"jobs": jobs, "qualityLabel": "MMN三旗舰交叉分析"}})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        video_insight_job_match = re.fullmatch(r"/api/douyin-hot/video-insights/jobs/([^/]+)", parsed.path)
+        if video_insight_job_match:
+            auth = self.current_auth() or {}
+            with db() as conn:
+                job = get_video_insight_job(conn, video_insight_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "逐视频洞察任务不存在"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
+        content_defense_job_match = re.fullmatch(r"/api/douyin-hot/content-defense/jobs/([^/]+)", parsed.path)
+        if content_defense_job_match:
+            auth = self.current_auth() or {}
+            with db() as conn:
+                job = get_content_defense_job(conn, content_defense_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "内容防线任务不存在"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
         if parsed.path == "/api/douyin-hot/collector/status":
             q = parse_qs(parsed.query)
             auth = self.current_auth() or {}
@@ -13351,6 +13869,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     reviewed_by=auth.get("user_id") or auth.get("username") or "local",
                 )
                 self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/content-defense/jobs":
+            try:
+                auth = self.current_auth() or {}
+                job = start_content_defense_job(self.read_json(), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/video-insights/jobs":
+            try:
+                auth = self.current_auth() or {}
+                job = start_video_insight_job(self.read_json(), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        video_insight_review_match = re.fullmatch(r"/api/douyin-hot/video-insights/jobs/([^/]+)/review", parsed.path)
+        if video_insight_review_match:
+            try:
+                auth = self.current_auth() or {}
+                body = self.read_json()
+                with db() as conn:
+                    job = save_video_insight_manual_review(
+                        conn, job_id=video_insight_review_match.group(1), org_id=auth.get("org_id", "local"),
+                        action=body.get("action") or "", selected_slot=body.get("selectedSlot"),
+                        note=body.get("note") or "", reviewed_by=auth.get("user_id") or auth.get("username") or "local",
+                    )
+                self.send_json({"ok": True, "job": job})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

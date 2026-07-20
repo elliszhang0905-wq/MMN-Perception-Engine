@@ -1,8 +1,12 @@
 import os
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
+
+import creator_distillation.media_processing as media_processing
 
 from creator_distillation.adapters import (
     AdapterError, DouyinAdapter, XiaohongshuAdapter, validate_creator_identity,
@@ -20,6 +24,30 @@ from creator_distillation.opinion_judgment import (
 
 
 class CreatorDistillationTest(unittest.TestCase):
+    def test_visual_processing_accepts_internal_browser_frames_with_timestamps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame = Path(tmp) / "frame.jpg"
+            frame.write_bytes(b"jpeg-frame")
+            asset = {"source_id": "video-1", "media": {
+                "localImagePaths": [str(frame)], "localImageTimestampsMs": [5000]
+            }}
+            with patch("creator_distillation.media_processing._chat_completion") as model:
+                model.return_value = {"model": "test", "choices": [{"message": {"content": json.dumps({
+                    "visual_summary": "第五秒出现车辆侧面",
+                    "ocr_text": [],
+                    "shots": [{"time_ms": 5000, "description": "车辆侧面进入画面"}],
+                    "content_structure": ["产品展示"],
+                    "product_entities": ["车辆"],
+                    "limitations": [],
+                }, ensure_ascii=False)}}]}
+                evidence, mode = media_processing._run_visual_provider(
+                    asset, "observer", "test", "TEST_API_KEY")
+            self.assertEqual(mode, "observer")
+            self.assertTrue(any(row["evidence_type"] == "shot" and row["start_ms"] == 5000 for row in evidence))
+            sent = model.call_args.args[1][0]["content"]
+            self.assertTrue(sent[0]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
+            self.assertIn("5000ms", sent[-1]["text"])
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.repo=CreatorRepository(f"{self.tmp.name}/creator.db")

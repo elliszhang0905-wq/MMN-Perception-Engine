@@ -204,6 +204,7 @@ class DouyinAdapter(PlatformAdapter):
     def default_endpoints(self):
         return {"profile": "/api/{version}/douyin/web/handler_user_profile",
                 "posts": "/api/{version}/douyin/app/v3/fetch_user_post_videos",
+                "video": "/api/{version}/douyin/app/v3/fetch_one_video_v2",
                 "comments": "/api/{version}/douyin/app/v3/fetch_video_comments"}
 
     @staticmethod

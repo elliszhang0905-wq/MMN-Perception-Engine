@@ -1,0 +1,45 @@
+const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const path=require("node:path");
+
+const root=path.resolve(__dirname,"..");
+const js=fs.readFileSync(path.join(root,"douyin-hot-demo.js"),"utf8");
+const css=fs.readFileSync(path.join(root,"douyin-hot-demo.css"),"utf8");
+const html=fs.readFileSync(path.join(root,"index.html"),"utf8");
+
+assert.match(html,/id="dashboard-douyin-hot"/);
+assert.match(js,/热点内容攻防 · 内容防线/);
+assert.match(js,/contentDefensePanel\(\).*<footer>/s,"内容防线必须位于现有榜单之后、看板页脚之前");
+assert.match(js,/\/api\/douyin-hot\/content-defense\?/);
+assert.match(js,/\/api\/douyin-hot\/content-defense\/jobs/);
+assert.match(js,/\/api\/douyin-hot\/video-insights\?/);
+assert.match(js,/\/api\/douyin-hot\/video-insights\/jobs/);
+assert.match(js,/MMN三旗舰交叉分析/);
+assert.match(js,/打开原视频/);
+assert.match(js,/传播表现/);
+assert.match(js,/按需分析：点击“生成洞察”后才会提取证据并调用MMN三旗舰/);
+assert.match(js,/未点击的视频不会调用模型/);
+assert.match(js,/有限分析/);
+assert.match(js,/引用证据/);
+assert.match(js,/function customerInsightText/);
+assert.match(js,/function customerLimitationText/);
+assert.match(js,/function customerEvidenceType/);
+assert.match(js,/原网页可播放，但后台尚未取得可直接分析的画面文件/);
+assert.match(js,/jobStatus==="limited_analysis"&&!row\.output&&!row\.error\)return "未启动"/);
+assert.match(js,/查看完整洞察/);
+assert.match(js,/人工复核入口/);
+assert.match(js,/video-insights\/jobs\/\$\{encodeURIComponent\(jobId\)\}\/review/);
+assert.doesNotMatch(js,/互动率约/,"互动率模板不得继续冒充逐视频洞察");
+assert.doesNotMatch(js,/function signal\(/,"视频卡不得再依赖旧的走红信号模板");
+assert.match(js,/三重交叉质检/);
+assert.match(js,/视频.*评论.*属性NSR.*白皮书.*线索校验/s);
+assert.match(js,/视频 \/ 评论 \/ 白皮书共同证据/);
+assert.match(js,/热度.*需求、销量或线索因果/s);
+assert.doesNotMatch(js,/Qwen|DeepSeek|Kimi|TikHub|Playwright/i,"客户界面不得暴露模型、插件或数据服务名称");
+assert.match(css,/@media\(max-width:760px\).*\.douyin-defense-grid\{grid-template-columns:1fr\}/s);
+assert.match(css,/\.douyin-content-defense/);
+assert.match(css,/overflow-wrap:anywhere/);
+assert.match(css,/\.douyin-video-insight/);
+assert.match(css,/@media\(max-width:760px\).*\.douyin-video-insight\{grid-column:2\/4/s);
+
+console.log("content defense UI contract passed");

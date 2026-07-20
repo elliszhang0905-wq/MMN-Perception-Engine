@@ -14,6 +14,13 @@ class SocialTrendJobsTest(unittest.TestCase):
         self.assertIn("activeSocialTrendJobs", script)
         self.assertIn("延后重启 MMN 本地服务", script)
 
+    def test_health_restart_guard_counts_active_local_jobs(self):
+        with server.SOCIAL_TREND_JOB_LOCK:
+            server.SOCIAL_TREND_JOB_TASKS["guard-test"] = {"status": "running"}
+        summary = server.active_local_job_summary()
+        self.assertEqual(summary["byType"]["socialTrend"], 1)
+        self.assertGreaterEqual(summary["total"], 1)
+
     def setUp(self):
         with server.SOCIAL_TREND_JOB_LOCK:
             self.original_jobs = dict(server.SOCIAL_TREND_JOB_TASKS)

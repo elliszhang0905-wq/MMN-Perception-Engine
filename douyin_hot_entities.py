@@ -142,6 +142,24 @@ def _cover_url(value):
     return _clean(value, 1600)
 
 
+def _media_url(value):
+    """Read a direct media URL from common collector payload shapes."""
+    if isinstance(value, str):
+        return _clean(value, 2000) if re.match(r"^https?://", value.strip()) else ""
+    if isinstance(value, list):
+        for row in value:
+            url = _media_url(row)
+            if url:
+                return url
+        return ""
+    if isinstance(value, dict):
+        for key in ("url_list", "urlList", "urls", "url", "play_url", "playUrl"):
+            url = _media_url(value.get(key))
+            if url:
+                return url
+    return ""
+
+
 def normalize_rank_item(item, index=0, view="videos"):
     if not isinstance(item, dict):
         return None
@@ -161,6 +179,13 @@ def normalize_rank_item(item, index=0, view="videos"):
     source_url = _clean(item.get("sourceUrl") or item.get("source_url") or item.get("url"), 1200)
     if source_type == "video" and not source_url and re.fullmatch(r"\d{8,}", item_id):
         source_url = f"https://www.douyin.com/video/{item_id}"
+    video = item.get("video") if isinstance(item.get("video"), dict) else {}
+    media_url = _media_url(
+        item.get("mediaUrl") or item.get("videoUrl") or item.get("downloadUrl")
+        or video.get("play_addr") or video.get("playAddr") or item.get("play_addr")
+    )
+    audio_url = _media_url(item.get("audioUrl") or item.get("musicUrl") or item.get("audio"))
+    subtitle_url = _media_url(item.get("subtitleUrl") or item.get("subtitle_url") or item.get("captionUrl"))
     return {
         "id": item_id,
         "itemId": item_id,
@@ -180,6 +205,9 @@ def normalize_rank_item(item, index=0, view="videos"):
         "duration": _number(item.get("duration")),
         "coverUrl": _cover_url(item.get("coverUrl") or item.get("cover_url") or item.get("cover")),
         "sourceUrl": source_url,
+        "mediaUrl": media_url if source_type == "video" else "",
+        "audioUrl": audio_url if source_type == "video" else "",
+        "subtitleUrl": subtitle_url if source_type == "video" else "",
     }
 
 

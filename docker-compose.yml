@@ -38,6 +38,9 @@ services:
       MMN_DATA_DIR: /app/data
       MMN_BACKUP_ROOT: /app/backups
       MMN_DB_PATH: /app/data/commercial_demo.db
+      MMN_DOUYIN_COLLECTOR_NODE: /usr/bin/node
+      MMN_DOUYIN_COLLECTOR_NODE_MODULES: /app/node_modules
+      MMN_DOUYIN_BROWSER_EXECUTABLE: /usr/bin/chromium
       DATABASE_URL: ${DATABASE_URL:-postgresql://mmn:${POSTGRES_PASSWORD:-change-me}@mmn-db:5432/mmn}
     expose:
       - "8765"

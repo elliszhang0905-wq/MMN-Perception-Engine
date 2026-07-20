@@ -430,6 +430,17 @@ class DouyinHotEntityRecognitionTest(unittest.TestCase):
         self.assertEqual(item["tags"], ["汽车", "新车"])
         self.assertEqual(item["transcript"], "字幕中明确提到奥迪Q6L e-tron")
 
+    def test_video_snapshot_preserves_direct_media_without_confusing_page_url(self):
+        result = save_rank_snapshot(self.conn, [{
+            "item_id": "7651268281679977754", "title": "真实媒体结构",
+            "video": {"play_addr": {"url_list": ["https://media.example/video.mp4?token=abc"]}},
+            "subtitle_url": {"url_list": ["https://media.example/subtitle.json"]},
+        }], view="videos", range_key="24h")
+        item = result["items"][0]
+        self.assertEqual(item["sourceUrl"], "https://www.douyin.com/video/7651268281679977754")
+        self.assertEqual(item["mediaUrl"], "https://media.example/video.mp4?token=abc")
+        self.assertEqual(item["subtitleUrl"], "https://media.example/subtitle.json")
+
     def test_collector_status_isolated_by_edition(self):
         snapshots = [{
             "item_id": f"{view}-{range_key}", "title": f"{view}-{range_key}", "play_count": 10,
@@ -470,6 +481,7 @@ class DouyinHotEntityRecognitionTest(unittest.TestCase):
             result = server.run_douyin_collector_pipeline(
                 org_id="org-a", edition="china", collector_runner=collector_runner,
                 recognition_runner=recognition_runner, progress_callback=lambda *row: progress.append(row),
+                insight_starter=lambda body, org_id="local": {"jobId": body["itemId"]},
             )
             with server.db() as conn:
                 count = conn.execute("select count(*) from douyin_hot_rank_snapshots").fetchone()[0]
@@ -492,6 +504,7 @@ class DouyinHotEntityRecognitionTest(unittest.TestCase):
                     recognition_runner=lambda payload, org_id: {
                         "items": [], "dualModelReady": False, "errors": {"primary": "千问超时"},
                     },
+                    insight_starter=lambda body, org_id="local": {"jobId": body["itemId"]},
                 )
 
     def test_collector_job_reports_real_numeric_progress(self):

@@ -9,7 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     MMN_DATA_ROOT=/app/data \
     MMN_DATA_DIR=/app/data \
     MMN_BACKUP_ROOT=/app/backups \
-    MMN_DB_PATH=/app/data/commercial_demo.db
+    MMN_DB_PATH=/app/data/commercial_demo.db \
+    MMN_DOUYIN_COLLECTOR_NODE=/usr/bin/node \
+    MMN_DOUYIN_COLLECTOR_NODE_MODULES=/app/node_modules \
+    MMN_DOUYIN_BROWSER_EXECUTABLE=/usr/bin/chromium
 
 WORKDIR /app
 
@@ -22,7 +25,11 @@ RUN sed -i \
     && apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y --no-install-recommends \
        libreoffice-writer libreoffice-impress libreoffice-calc \
        tesseract-ocr tesseract-ocr-chi-sim fonts-noto-cjk \
+       nodejs npm chromium \
     && rm -rf /var/lib/apt/lists/*
+
+RUN npm install --no-save --ignore-scripts playwright-core@1.53.0 \
+    && npm cache clean --force
 
 COPY requirements-bf-factory.txt /tmp/requirements-bf-factory.txt
 COPY requirements-creator-distillation.txt /tmp/requirements-creator-distillation.txt

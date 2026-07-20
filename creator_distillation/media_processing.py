@@ -1,4 +1,5 @@
 import ipaddress
+import base64
 import json
 import os
 import re
@@ -269,8 +270,18 @@ def transcribe_media(asset):
 def _visual_content(asset):
     media = asset.get("media") or {}
     content = []
+    local_paths = list(media.get("localImagePaths") or [])[:6]
+    timestamps = list(media.get("localImageTimestampsMs") or [])[:6]
+    for image_path in local_paths:
+        path = Path(str(image_path or "")).expanduser().resolve()
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            raise MediaProcessingError("浏览器关键帧不可用")
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + encoded}})
     video_url = media.get("videoUrl")
-    if video_url:
+    if content:
+        pass
+    elif video_url:
         content.append({"type": "video_url", "video_url": {"url": _safe_public_url(video_url), "fps": .2}})
     else:
         for image_url in (media.get("imageUrls") or [])[:6]:
@@ -281,7 +292,8 @@ def _visual_content(asset):
         "你是MMN汽车内容证据分析器。只依据媒体画面输出JSON，不推测看不到的信息。"
         "字段：visual_summary字符串；ocr_text字符串数组；shots数组，每项含time_ms(未知为null)、description；"
         "content_structure字符串数组；product_entities字符串数组；limitations字符串数组。"
-        "不要模仿创作者，不要生成营销文案。"
+        f"输入图片依次对应时间点：{', '.join(str(value) + 'ms' for value in timestamps)}。"
+        "shots.time_ms必须使用这些时间点之一；不要模仿创作者，不要生成营销文案。"
     )})
     return content
 
@@ -364,11 +376,19 @@ def analyze_visual_media(asset):
 def analyze_ocr_media(asset):
     """Use the OCR specialist on still images/covers; video reasoning stays separate."""
     media = asset.get("media") or {}
+    local_paths = list(media.get("localImagePaths") or [])[:6]
     image_urls = list(media.get("imageUrls") or [])[:6]
-    if not image_urls:
+    if not local_paths and not image_urls:
         return [], "unavailable"
-    content = [{"type": "image_url", "image_url": {"url": _safe_public_url(url)}}
-               for url in image_urls]
+    content = []
+    for image_path in local_paths:
+        path = Path(str(image_path or "")).expanduser().resolve()
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            raise MediaProcessingError("浏览器关键帧不可用")
+        content.append({"type": "image_url", "image_url": {
+            "url": "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode("ascii")}})
+    content.extend({"type": "image_url", "image_url": {"url": _safe_public_url(url)}}
+                   for url in image_urls[:max(0, 6 - len(content))])
     content.append({"type": "text", "text": (
         "逐张识别画面中真实可见文字。输出JSON：{\"texts\":[{\"imageIndex\":0,"
         "\"text\":\"...\"}]}。看不清则跳过，不推测品牌、车型或配置。"

@@ -3,6 +3,8 @@ import unittest
 from product_whitepaper import (
     dual_model_consensus,
     normalize_capabilities,
+    product_page_candidates,
+    PRODUCT_LABELS,
     readable_pdf_pages,
     select_product_pages,
 )
@@ -29,6 +31,17 @@ class ProductWhitepaperTest(unittest.TestCase):
         self.assertLessEqual(len(selected), 3)
         self.assertEqual(selected[0]["page"], 1)
         self.assertTrue(all(item["page"] in self.pages for item in selected))
+
+    def test_targeted_candidates_cover_all_fifteen_nsr_labels_without_invention(self):
+        pages = {index + 10: keyword for index, keyword in enumerate((
+            "通勤场景", "外观造型", "内饰材质", "后排空间", "舒适座椅",
+            "标配装备", "底盘操控", "智能座舱", "驾驶辅助", "可靠品质",
+            "奥迪品牌", "售价权益", "售后服务", "碰撞安全", "充电能耗",
+        ))}
+        candidates = product_page_candidates(pages, per_label=1)
+        self.assertEqual(tuple(candidates), PRODUCT_LABELS)
+        self.assertEqual(len(PRODUCT_LABELS), 15)
+        self.assertTrue(all(candidates[label] for label in PRODUCT_LABELS))
 
     def test_normalizer_rejects_hallucinated_quote_and_page(self):
         raw = {"capabilities": [
