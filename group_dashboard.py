@@ -143,8 +143,14 @@ def _baas_price_view(model, manufacturer, price_display, price_source=""):
     }
 
 
-def load_e7x_product_evaluation(path=E7X_EVALUATION_PATH):
+def load_e7x_product_evaluation(path=None):
     """读取由客户工作簿提取的五车聚合口径，并补齐可复核派生指标。"""
+    if path is None:
+        path = module_path(
+            "product_evaluation",
+            "e7x_product_evaluation_2026-06.json",
+            legacy=("e7x_product_evaluation_2026-06.json",),
+        )
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):

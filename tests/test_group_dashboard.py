@@ -3,6 +3,7 @@ import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from group_dashboard import (
     _baas_price_view,
@@ -22,6 +23,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_e7x_loader_resolves_the_canonical_asset_at_call_time(self):
+        canonical = ROOT / "data" / "modules" / "product_evaluation" / "e7x_product_evaluation_2026-06.json"
+        with patch("group_dashboard.module_path", return_value=canonical) as resolver:
+            result = load_e7x_product_evaluation()
+        resolver.assert_called_once_with(
+            "product_evaluation",
+            "e7x_product_evaluation_2026-06.json",
+            legacy=("e7x_product_evaluation_2026-06.json",),
+        )
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(len(result["dataset"]["rows"]), 207)
+
     def test_baas_price_view_covers_all_three_nio_brands(self):
         cases = (
             ("蔚来ET5", "蔚来", "29.80-31.60万", 10.8, "19.00-20.80万（BaaS后）"),
@@ -303,6 +316,8 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIn("data/dongchedi_sales/sales_warning_history.json", deploy_script)
         self.assertIn("mmn-app:/app/data/dongchedi_sales/sales_warning_history.json", deploy_script)
         self.assertIn("保留服务器已有车型上市日期，不用版本文件覆盖", deploy_script)
+        self.assertIn("restart mmn-app mmn-scheduler", deploy_script)
+        self.assertIn('APP_HEALTH" == "healthy', deploy_script)
 
     def test_sales_warning_demo_uses_full_dongchedi_segment_without_price_filter(self):
         result = build_sales_warning_demo()

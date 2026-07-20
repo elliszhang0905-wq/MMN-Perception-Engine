@@ -85,6 +85,21 @@ fi
 if [[ -f data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl ]]; then
   docker compose --env-file .env cp data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl mmn-app:/app/data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl
 fi
+
+echo "版本数据资产同步完成，重启数据读取服务以重新解析规范路径。"
+docker compose --env-file .env restart mmn-app mmn-scheduler
+for _ in {1..30}; do
+  APP_HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' mmn-app 2>/dev/null || true)"
+  if [[ "$APP_HEALTH" == "healthy" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ "${APP_HEALTH:-}" != "healthy" ]]; then
+  echo "数据资产同步后 mmn-app 未恢复健康，停止发布。" >&2
+  docker compose --env-file .env ps
+  exit 1
+fi
 docker compose --env-file .env ps
 
 echo "部署完成。测试地址：${MMN_PUBLIC_BASE_URL:-http://服务器公网IP:${MMN_HTTP_PORT:-8765}/}"
