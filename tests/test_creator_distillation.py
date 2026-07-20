@@ -24,6 +24,15 @@ from creator_distillation.opinion_judgment import (
 
 
 class CreatorDistillationTest(unittest.TestCase):
+    def test_multimodal_json_parser_uses_first_complete_object_without_crashing_job(self):
+        value = media_processing._json_object(
+            '说明文字 {"visual_summary":"车辆入镜","shots":[]}\n{"ignored":true}')
+        self.assertEqual(value["visual_summary"], "车辆入镜")
+
+    def test_multimodal_json_parser_normalizes_invalid_output_to_capability_error(self):
+        with self.assertRaises(MediaProcessingError):
+            media_processing._json_object("没有可解析的结构化结果")
+
     def test_visual_processing_accepts_internal_browser_frames_with_timestamps(self):
         with tempfile.TemporaryDirectory() as tmp:
             frame = Path(tmp) / "frame.jpg"

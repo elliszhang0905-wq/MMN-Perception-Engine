@@ -3,21 +3,23 @@
 ## 状态基线
 
 - 状态包版本：`v2.0`
-- 最后核验时间：`2026-07-21 02:25:01 +0800`（Asia/Shanghai）
-- Git commit：短 hash `fd16ad2`；完整 hash `fd16ad2cf7395719cb6b9d22130d7bac7ed61194`
+- 最后核验时间：`2026-07-21 03:38:13 +0800`（Asia/Shanghai）
+- Git commit：短 hash `ee52340`；完整 hash `ee5234075acb2c67f7d342f9c0e9af83d83c70da`
 - 当前分支：`main`
 - 生成时工作树状态：`dirty`
-- 基线说明：对应当前工作树，待提交；上述 commit 是当前工作树所基于的最后一次已提交版本，不代表本状态包已经提交。
+- 基线说明：`ee52340` 是 beta 1.03 主功能提交；当前工作树另含本轮生产验收发现的多模态 JSON 容错修复、发布验证脚本和最终发布文档，完成本状态包后作为发布收口提交。
 - 未提交修改路径（按 `git status --short`，未展开未跟踪目录内的文件内容）：
-  - `AGENTS.md`
-  - `package.json`
-  - `MMN_CURRENT_STATE.md`
+  - `creator_distillation/media_processing.py`
+  - `scripts/verify_douyin_video_insight_local.js`
+  - `tests/test_creator_distillation.py`
   - `data/blogger_skill_import_jobs/`
   - `data/commercial_demo.db.bak-20260718-creator-profile`
   - `data/commercial_demo.db.bak-20260719-social-assistant-preimport`
+  - `data/commercial_demo.db.bak-20260720-content-defense-local`
+  - `data/commercial_demo.db.bak-20260721-local-auto-sync`
+  - `data/commercial_demo.db.bak-20260721-video-insight-pre`
   - `data/dongchedi_sales/sales_warning_latest.pre-size-nev-20260719.bak`
   - `data/weekly_market_refresh_status.json`
-  - `docs/研发档案/2026-07-20_beta-1.02_系统状态包自动维护机制.md`
   - `local_mmn.log`
   - `output-cycle-before-open.png`
   - `output-cycle-db-prefill.png`
@@ -29,8 +31,6 @@
   - `output/nav-8-one-row.png`
   - `output/pdf/`
   - `output/pptx/`
-  - `scripts/check_mmn_state.mjs`
-  - `tests/test_check_mmn_state.mjs`
   - `tmp/`
 - 维护要求：以后每次更新本状态包时，必须同步刷新状态包版本、最后核验时间、短/完整 commit hash、当前分支、工作树状态和未提交修改路径。
 
@@ -187,7 +187,7 @@
 
 - 状态包事实来源：本轮已审查 `README.md`、`README_DEPLOY.md`、`AGENTS.md`、`package.json`、`Dockerfile`、`docker-compose.yml`、`index.html`、`app.js`、`server.py`、`mmn_data.py`、模块 repository/schema、路由知识图谱与目录结构。
 - 状态检查命令：`npm run check:mmn-state`。检查业务源码、页面/组件、接口、schema、依赖与部署配置；测试、普通文档、锁文件及 `data/`、`output/`、`tmp/`、`backups/`、`logs/` 运行数据/产物不触发状态同步要求。
-- 2026-07-20 本轮新鲜验证：检查器场景测试通过；默认工作区与 `--base HEAD` 两种状态检查通过；`git diff --check` 通过；现有 `npm run release:gate` 通过，其中 147 个 Python 回归测试通过，数据优先浏览器检查无失败/运行时错误，全表面桌面与 390px 移动检查无失败、运行时错误或失败响应。
+- 2026-07-21 beta 1.03 新鲜验证：完整 Python 回归 `467/467` 通过，逐视频洞察与媒体专项 `48/48` 通过，内容防线、启动器和状态包脚本测试通过；本地与生产健康接口均返回 `beta-1.03-20260721-douyin-content-defense-1`。生产全表面桌面/390px 检查无失败、运行时错误或失败响应；真实点击视频任务 `afecda8b179142a19cd96638f8717818` 形成 full 证据、三路独立完成并达到 `verified`，刷新后两端均显示“洞察已完成”，无页面溢出、控制台错误、失败请求、内部错误文案或证据哈希串。服务器另对第二条 117.5 秒视频取得 6 个时间点关键帧，证明取证不依赖固定样本。
 - 仓库没有独立 lint 命令；前端/Python 语法检查已由 `scripts/release_gate.sh` 执行。PPT 生成命令会生成交付产物，不属于本次状态机制影响面，未额外执行。
 
 ## 10. 后续每次任务的固定汇报格式

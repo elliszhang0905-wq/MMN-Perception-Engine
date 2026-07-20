@@ -147,10 +147,18 @@ def _json_object(text):
     try:
         value = json.loads(cleaned)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, flags=re.S)
-        if not match:
+        value = None
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"\{", cleaned):
+            try:
+                candidate, _end = decoder.raw_decode(cleaned[match.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                value = candidate
+                break
+        if value is None:
             raise MediaProcessingError("多模态模型未返回 JSON 对象")
-        value = json.loads(match.group(0))
     if not isinstance(value, dict):
         raise MediaProcessingError("多模态模型结果不是 JSON 对象")
     return value

@@ -11,6 +11,10 @@
 - 数据持久化按 `orgId + edition + itemId + sourceFingerprint + promptVersion` 隔离。播放、点赞等传播指标变化不触发重分析；证据或提示词版本变化时生成新版本，不覆盖旧记录。
 - 核心模块：`douyin_video_insights.py`、`douyin_browser_evidence.py`、`content_defense.py`、`creator_distillation/media_processing.py`、`server.py`、`douyin-hot-demo.js`、`douyin-hot-demo.css`。
 - 发布后必须重新验证未点击视频不调模型、单条点击完整链路、缓存复用、失败降级、刷新恢复、组织隔离、1440/390 页面与客户侧供应商名扫描。
+- 发布终态：主功能提交 `ee52340` 已推送，ECS `/opt/mmn-perception-engine` 已运行 beta 1.03；最终收口提交与 `beta-1.03` 标签随后发布。服务器部署前源码、环境和持久数据备份见 `release.md`。
+- 生产 Gold 样本：视频 `7661947647062083663`，任务 `afecda8b179142a19cd96638f8717818`；full 证据、三路完成、`verified`，刷新后 1440/390 均显示“洞察已完成”。第二条视频 `7663349910708347867` 已在服务器取得 117.5 秒视频本体和 6 个时间点关键帧。
+- 生产验收发现并修复 `_json_object` 对“一个正确 JSON 后又输出第二对象”的异常泄漏；现在只读取第一个完整对象，完全不可解析时统一降级为证据能力错误，不再导致整个异步任务异常退出。对应测试在 `tests/test_creator_distillation.py`。
+- 服务器首次上线前没有六榜快照；本轮仅在空表门禁下新增六份本地已确认真实快照，未覆盖已有生产记录。今后不得把这种一次性发布同步改成每日自动全榜洞察。
 
 ## 1. 交接目的
 
