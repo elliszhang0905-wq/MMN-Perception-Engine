@@ -100,6 +100,19 @@ if [[ "${APP_HEALTH:-}" != "healthy" ]]; then
   docker compose --env-file .env ps
   exit 1
 fi
+echo "应用地址可能因重启变化，重启反向代理以重新解析上游。"
+docker compose --env-file .env restart mmn-web
+for _ in {1..20}; do
+  if docker compose --env-file .env exec -T mmn-web wget -qO- http://127.0.0.1/api/health >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! docker compose --env-file .env exec -T mmn-web wget -qO- http://127.0.0.1/api/health >/dev/null 2>&1; then
+  echo "反向代理未能连接重启后的 mmn-app，停止发布。" >&2
+  docker compose --env-file .env ps
+  exit 1
+fi
 docker compose --env-file .env ps
 
 echo "部署完成。测试地址：${MMN_PUBLIC_BASE_URL:-http://服务器公网IP:${MMN_HTTP_PORT:-8765}/}"

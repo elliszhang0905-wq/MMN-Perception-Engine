@@ -318,6 +318,8 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIn("保留服务器已有车型上市日期，不用版本文件覆盖", deploy_script)
         self.assertIn("restart mmn-app mmn-scheduler", deploy_script)
         self.assertIn('APP_HEALTH" == "healthy', deploy_script)
+        self.assertIn("restart mmn-web", deploy_script)
+        self.assertIn("wget -qO- http://127.0.0.1/api/health", deploy_script)
 
     def test_sales_warning_demo_uses_full_dongchedi_segment_without_price_filter(self):
         result = build_sales_warning_demo()
