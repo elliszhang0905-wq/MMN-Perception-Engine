@@ -1181,6 +1181,7 @@ function applyModelSelection(model){
 function selectDashboardVehicleContext(model,{source="dashboard",notify=true,cycleContext=null}={}){
  const models=modelOptions();
  if(!models.includes(model)&&!productEvaluationCatalogHas(model))return false;
+ if(source==="sales-warning"&&!managementDashboardVisible)return false;
  if(managementDashboardVisible&&source!=="sales-warning"){
   if(notify)toast("管理层看板开启时，分析车型由销量预警统一控制");
   queueMicrotask(()=>render());

@@ -26,8 +26,8 @@
 	};
  const emitWarningModelSelection=(item,{notify=true}={})=>{
   if(!item?.model)return;
-	  const cycleContext=salesWarningCycleContext(item),detail={model:item.model,seriesId:String(item.seriesId||""),level:item.level||"gray",label:item.levelLabel||"待复核",sales:Number(item.sales||0),performanceRate:item.performanceRate??null,cycle:item.cycleStage||item.cycle||"周期待核验",launchDate:cycleContext.launchDate||"",assessmentDate:cycleContext.assessmentDate||"",tLabel:cycleContext.tLabel||"",phaseKey:cycleContext.phaseKey||"",phaseLabel:cycleContext.phaseLabel||"",phaseRange:cycleContext.phaseRange||"",cycleContext,segmentLabel:item.segmentLabel||"",marketSales:item.marketSales??null,marketModelCount:item.marketModelCount??null,marketShare:item.marketShare??null,rank:item.rank??null,benchmark:item.benchmark??null,period:item.period||attributionSalesPeriod||"",source:"sales-warning"};
-	  attributionWarningEvidence={...detail};
+  const cycleContext=salesWarningCycleContext(item),detail={model:item.model,seriesId:String(item.seriesId||""),level:item.level||"gray",label:item.levelLabel||"待复核",sales:Number(item.sales||0),performanceRate:item.performanceRate??null,cycle:item.cycleStage||item.cycle||"周期待核验",launchDate:cycleContext.launchDate||"",assessmentDate:cycleContext.assessmentDate||"",tLabel:cycleContext.tLabel||"",phaseKey:cycleContext.phaseKey||"",phaseLabel:cycleContext.phaseLabel||"",phaseRange:cycleContext.phaseRange||"",cycleContext,segmentLabel:item.segmentLabel||"",marketSales:item.marketSales??null,marketModelCount:item.marketModelCount??null,marketShare:item.marketShare??null,rank:item.rank??null,benchmark:item.benchmark??null,period:item.period||attributionSalesPeriod||"",source:"sales-warning"};
+  attributionWarningEvidence={...detail};
   window.MMNVehicleContext?.select?.(item.model,{source:"sales-warning",notify,cycleContext});
   window.dispatchEvent(new CustomEvent("mmn:sales-warning-model-selected",{detail}));
  };

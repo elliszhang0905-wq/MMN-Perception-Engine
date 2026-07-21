@@ -219,7 +219,7 @@ async function auditViewport(browser, viewport) {
 
     const warningModels = await page.locator("#group-dashboard-root [data-warning-series-id]").evaluateAll(items => [...new Set(items.map(item => item.closest(".sales-warning-row")?.querySelector(".sales-warning-model b")?.textContent?.trim()).filter(Boolean))]);
     for (const model of warningModels) {
-      await page.evaluate(target => window.MMNVehicleContext.select(target, { source: "release-gate", notify: false }), model);
+      await page.evaluate(target => window.MMNVehicleContext.select(target, { source: "sales-warning", notify: false }), model);
       await page.waitForFunction(target => state.config.model === target && state.productEvaluationBoundModel === target, model);
       const binding = await page.evaluate(target => {
         const unavailable = state.importQuality?.kind === "PRODUCT_EVALUATION_UNAVAILABLE";
@@ -255,7 +255,7 @@ async function auditViewport(browser, viewport) {
       );
     }
 
-    await page.evaluate(() => window.MMNVehicleContext.select("奥迪E7X", { source: "release-gate-restore", notify: false }));
+    await page.evaluate(() => window.MMNVehicleContext.select("奥迪E7X", { source: "sales-warning", notify: false }));
     await page.waitForFunction(() => state.config.model === "奥迪E7X" && state.productEvaluationBoundModel === "奥迪E7X");
     const restoredE7x = await page.evaluate(() => ({
       models: state.models || [],

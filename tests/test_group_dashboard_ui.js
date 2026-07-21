@@ -303,6 +303,7 @@ assert.match(app, /function renderModelHighlight/);
 assert.match(app, /highlight_status==="model_verified"/);
 assert.match(app, /managementDashboardVisible=!managementDashboardVisible/);
 assert.match(app, /managementWarningContextReady=false/);
+assert.match(app, /source==="sales-warning"&&!managementDashboardVisible/);
 assert.match(app, /if\(source==="sales-warning"\)managementWarningContextReady=true/);
 assert.match(app, /managementDashboardVisible&&source!=="sales-warning"/);
 assert.match(app, /销量预警统一控制/);

@@ -19,6 +19,7 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn("1440", source)
         self.assertIn("390", source)
         self.assertIn("runtimeErrors", source)
+        self.assertIn('source: "sales-warning"', source)
         self.assertIn("failedResponses", source)
         self.assertIn("MMN_USERNAME", source)
         self.assertIn("#cloud-login-screen", source)
