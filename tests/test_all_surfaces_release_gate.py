@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
-    RELEASE_VERSION = "beta-1.03-20260721-attribution-reasoning-2"
+    RELEASE_VERSION = "beta-1.03-20260722-trend-legibility-1"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")

@@ -2,36 +2,21 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.0`
-- 最后核验时间：`2026-07-21 03:38:13 +0800`（Asia/Shanghai）
-- Git commit：短 hash `ee52340`；完整 hash `ee5234075acb2c67f7d342f9c0e9af83d83c70da`
+- 状态包版本：`v2.1`
+- 最后核验时间：`2026-07-22 00:41:00 +0800`（Asia/Shanghai）
+- Git commit：短 hash `7aa0526`；完整 hash `7aa05262112c4c7c98bca2e6ca32886f07ee1658`
 - 当前分支：`main`
 - 生成时工作树状态：`dirty`
-- 基线说明：`ee52340` 是 beta 1.03 主功能提交；当前工作树另含本轮生产验收发现的多模态 JSON 容错修复、发布验证脚本和最终发布文档，完成本状态包后作为发布收口提交。
+- 基线说明：`7aa0526` 是当前 GitHub `main` 基线；隔离发布工作树仅包含本轮竞争趋势图可读性修复、专项测试、缓存版本与研发档案，尚未提交、推送或部署。
 - 未提交修改路径（按 `git status --short`，未展开未跟踪目录内的文件内容）：
-  - `creator_distillation/media_processing.py`
-  - `scripts/verify_douyin_video_insight_local.js`
-  - `tests/test_creator_distillation.py`
-  - `data/blogger_skill_import_jobs/`
-  - `data/commercial_demo.db.bak-20260718-creator-profile`
-  - `data/commercial_demo.db.bak-20260719-social-assistant-preimport`
-  - `data/commercial_demo.db.bak-20260720-content-defense-local`
-  - `data/commercial_demo.db.bak-20260721-local-auto-sync`
-  - `data/commercial_demo.db.bak-20260721-video-insight-pre`
-  - `data/dongchedi_sales/sales_warning_latest.pre-size-nev-20260719.bak`
-  - `data/weekly_market_refresh_status.json`
-  - `local_mmn.log`
-  - `output-cycle-before-open.png`
-  - `output-cycle-db-prefill.png`
-  - `output-policy-before.png`
-  - `output-policy-intelligence-dashboard.png`
-  - `output-policy-management-dashboard.png`
-  - `output/mmn-eval-seed-report.json`
-  - `output/mmn-eval-seed-report.md`
-  - `output/nav-8-one-row.png`
-  - `output/pdf/`
-  - `output/pptx/`
-  - `tmp/`
+  - `MMN_CURRENT_STATE.md`
+  - `app.js`
+  - `index.html`
+  - `knowhow.css`
+  - `server.py`
+  - `tests/test_all_surfaces_release_gate.py`
+  - `tests/test_vertical_trend_label_layout.js`
+  - `docs/研发档案/2026-07-22_beta-1.03_竞争趋势图稀疏周期可读性修复.md`
 - 维护要求：以后每次更新本状态包时，必须同步刷新状态包版本、最后核验时间、短/完整 commit hash、当前分支、工作树状态和未提交修改路径。
 
 > 应用版本常量：`beta 1.03`
@@ -185,6 +170,7 @@
 - 2026-07-20：建立长期系统状态包机制：在 `AGENTS.md` 增加永久维护规则，创建本文件，新增 `scripts/check_mmn_state.mjs`，并在 `package.json` 增加 `npm run check:mmn-state`。
 - 2026-07-21：大版本升级为 `beta 1.03`，在现有抖音六榜与品牌车型雷达后增加手动逐条视频洞察和热点内容防线；建立证据包、三路独立分析、交叉校验、分歧/降级、缓存幂等、刷新恢复与服务器端公开原页浏览器取证链路。
 - 2026-07-21：修复管理层销量预警与下方T周期的上下文断链；八台重点车型从已核验周期记录继承T0、考核日、T+X、阶段与七段日期，服务端记录优先且本地仅作失败缓存，移除E7X硬编码默认日期，并保护权威T0不被下方普通保存覆盖；代码提交 `37058d6` 已部署至 GitHub `main` 与 ECS `/opt/mmn-perception-engine`。
+- 2026-07-22：修复竞争趋势详情在稀疏周期下只有点、没有线以及横轴标签重叠的问题；跨无记录周期使用带图例说明的虚线，横轴最多显示 6 个关键刻度，完整周期仍保留在明细表。隔离发布工作树已完成本地门禁与真实业务路径验收，待提交、推送和生产验收。
 
 ## 9. 验证状态
 
@@ -192,6 +178,7 @@
 - 状态检查命令：`npm run check:mmn-state`。检查业务源码、页面/组件、接口、schema、依赖与部署配置；测试、普通文档、锁文件及 `data/`、`output/`、`tmp/`、`backups/`、`logs/` 运行数据/产物不触发状态同步要求。
 - 2026-07-21 beta 1.03 新鲜验证：完整 Python 回归 `467/467` 通过，逐视频洞察与媒体专项 `48/48` 通过，内容防线、启动器和状态包脚本测试通过；本地与生产健康接口均返回 `beta-1.03-20260721-douyin-content-defense-1`。生产全表面桌面/390px 检查无失败、运行时错误或失败响应；真实点击视频任务 `afecda8b179142a19cd96638f8717818` 形成 full 证据、三路独立完成并达到 `verified`，刷新后两端均显示“洞察已完成”，无页面溢出、控制台错误、失败请求、内部错误文案或证据哈希串。服务器另对第二条 117.5 秒视频取得 6 个时间点关键帧，证明取证不依赖固定样本。
 - 2026-07-21 销量预警—T周期联动发布验证：集成主线后 Python 全量 `477/477` 通过，新增/相关 Node 周期、适配、持久化与UI契约通过；生产真实浏览器在 1440px 与 390px 验证 MG4 `T+84`、奥迪E7X `T+49`、红色预警奥迪E5 Sportback `T+304`，三车均为上下同车、同考核日、七张真实日期卡和自动当前阶段，刷新后仍保持最后选择车型；生产全页面门禁失败项、运行时错误与失败网络响应均为 0。部署前后八台已核验周期记录数量与 SHA-256 完全一致。`scripts/release_gate.sh` 的本工单语法/周期专项/150项后端子集均通过，但全门禁仍被既有 NSR 地图标签重叠检查拦截（530px 图面检测到 7 处重叠，`runtimeErrors=[]`），未在本工单越界修改。
+- 2026-07-22 竞争趋势图本地发布验证：Python 全量 `477/477`、专项 Node 契约、前端语法、状态包门禁及 `scripts/release_gate.sh` 的 150 项后端子集均通过；桌面/390px 全表面门禁覆盖 19 个客户页面和 8 个管理视图，失败项、运行时错误和失败响应均为 0。真实业务路径选择“汽车之家 → 奥迪E7X → 奔驰GLC EV”后，弹窗呈现 4 段跨缺失周期虚线、6 个横轴关键刻度且标签重叠为 0，控制台错误为 0。全门禁仍只被既有 NSR 地图的 3 项断言拦截（竞品数量、单气泡语义、530px 下 7 处标签重叠），`runtimeErrors=[]`，与本轮竞争趋势图改动无关并未越界修改。
 - 仓库没有独立 lint 命令；前端/Python 语法检查已由 `scripts/release_gate.sh` 执行。PPT 生成命令会生成交付产物，不属于本次状态机制影响面，未额外执行。
 
 ## 10. 后续每次任务的固定汇报格式

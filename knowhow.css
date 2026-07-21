@@ -74,6 +74,7 @@
 .trend-large polyline{fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
 .trend-large .pos-line{stroke:var(--green)}
 .trend-large .neg-line{stroke:var(--red)}
+.trend-large .gap-line{stroke-dasharray:7 6;opacity:.68}
 .trend-large .pos-dot{fill:var(--green)}
 .trend-large .neg-dot{fill:var(--red)}
 .trend-large text{fill:#7a8b96;font-size:11px}
@@ -93,6 +94,7 @@
 .trend-legend span{display:flex;align-items:center;gap:6px}
 .trend-legend em{margin-left:auto;font-style:normal;color:#8b949b;font-size:11px}
 .trend-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.trend-legend .gap-key{width:20px;height:0;border-radius:0;border-top:2px dashed #8b949b;background:transparent}
 .trend-legend .green{background:var(--green)}
 .trend-legend .red{background:var(--red)}
 .video-bars{display:grid;gap:12px}
