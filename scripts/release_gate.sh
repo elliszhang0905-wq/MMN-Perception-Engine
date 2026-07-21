@@ -32,8 +32,11 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check bf-factory.js
 "$NODE_BIN" --check group-dashboard.js
 "$NODE_BIN" --check t-cycle.js
+"$NODE_BIN" --check sales-warning-cycle-context.js
 "$NODE_BIN" --check scripts/release_gate_all_surfaces.js
 "$NODE_BIN" tests/test_t_cycle.js
+"$NODE_BIN" tests/test_sales_warning_cycle_context.js
+"$NODE_BIN" tests/test_marketing_cycle_context.js
 "$NODE_BIN" tests/test_nsr_map.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
 "$NODE_BIN" tests/test_group_dashboard_ui.js
