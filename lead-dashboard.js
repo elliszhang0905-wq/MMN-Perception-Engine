@@ -56,7 +56,7 @@
 	 async function loadAttributionRun(force=false){
 	  if(!activeModel||(!force&&attributionLoadedModel===activeModel))return;
 	  attributionLoadedModel=activeModel;attributionError="";
-	  try{const response=await fetch(`/api/attribution-reasoning?model=${encodeURIComponent(activeModel)}&edition=china`),payload=await response.json();if(!response.ok||payload.ok===false)throw new Error(payload.error||"读取复核记录失败");attributionRun=payload.run||null}
+	  try{const response=await fetch(`/api/attribution-reasoning?model=${encodeURIComponent(activeModel)}&edition=china`,{headers:typeof authHeaders==="function"?authHeaders():{}}),payload=await response.json();if(!response.ok||payload.ok===false)throw new Error(payload.error||"读取复核记录失败");attributionRun=payload.run||null}
 	  catch(error){attributionError=String(error?.message||error||"读取复核记录失败")}
 	  render();
 	 }
@@ -64,7 +64,7 @@
 	 async function runAttributionReview(){
 	  if(attributionLoading||!activeModel)return;
 	  attributionLoading=true;attributionError="";render();
-	  try{const response=await fetch("/api/attribution-reasoning/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:activeModel,edition:"china"})}),payload=await response.json();if(!response.ok||payload.ok===false)throw new Error(payload.error||"三路复核未完成");attributionRun=payload.run||null;attributionLoadedModel=activeModel}
+	  try{const response=await fetch("/api/attribution-reasoning/run",{method:"POST",headers:{...(typeof authHeaders==="function"?authHeaders():{}),"Content-Type":"application/json"},body:JSON.stringify({model:activeModel,edition:"china"})}),payload=await response.json();if(!response.ok||payload.ok===false)throw new Error(payload.error||"三路复核未完成");attributionRun=payload.run||null;attributionLoadedModel=activeModel}
 	  catch(error){attributionError=String(error?.message||error||"三路复核未完成")}
 	  finally{attributionLoading=false;render()}
 	 }
