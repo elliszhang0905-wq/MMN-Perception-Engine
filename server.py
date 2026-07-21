@@ -157,6 +157,14 @@ from policy_intelligence import (
     seed_policy_mvp,
     seed_policy_sources,
 )
+from attribution_reasoning import (
+    PROVIDERS as ATTRIBUTION_PROVIDERS,
+    arbitrate as arbitrate_attribution_reasoning,
+    build_evidence_packet as build_attribution_evidence_packet,
+    init_schema as init_attribution_reasoning_schema,
+    load_run as load_attribution_reasoning_run,
+    save_run as save_attribution_reasoning_run,
+)
 try:
     from creator_distillation.tasks import (
         celery_app as creator_celery_app,
@@ -176,7 +184,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260721-douyin-content-defense-1"
+APP_VERSION_CODE = "beta-1.03-20260721-attribution-reasoning-1"
 APP_RELEASE_DATE = "2026-07-21"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -224,6 +232,8 @@ EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
 EXECUTIVE_BRIEF_REVIEW_TASKS = {}
 SALES_WARNING_REVIEW_LOCK = Lock()
 SALES_WARNING_REVIEW_TASKS = {}
+ATTRIBUTION_REVIEW_LOCK = Lock()
+ATTRIBUTION_REVIEW_TASKS = {}
 DOUYIN_COLLECTOR_LOCK = Lock()
 DOUYIN_COLLECTOR_TASKS = {}
 DOUYIN_COLLECTOR_LAST_JOB = {}
@@ -304,6 +314,7 @@ def active_local_job_summary():
         ("routerReview", ROUTER_REVIEW_LOCK, ROUTER_REVIEW_TASKS),
         ("executiveBriefReview", EXECUTIVE_BRIEF_REVIEW_LOCK, EXECUTIVE_BRIEF_REVIEW_TASKS),
         ("salesWarningReview", SALES_WARNING_REVIEW_LOCK, SALES_WARNING_REVIEW_TASKS),
+        ("attributionReview", ATTRIBUTION_REVIEW_LOCK, ATTRIBUTION_REVIEW_TASKS),
     )
     by_type = {}
     for label, lock, tasks in task_maps:
@@ -907,6 +918,7 @@ def init_db():
         );
         """)
         init_policy_schema(conn)
+        init_attribution_reasoning_schema(conn)
         seed_policy_sources(conn)
         seed_policy_mvp(conn, org_id="local", edition="china")
         migrate_vertical_scope_schema(conn)
@@ -3244,6 +3256,7 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/opportunity-map/review",
     "/api/opportunity-map/manual-reviews",
     "/api/group-dashboard/cycle-review",
+    "/api/attribution-reasoning/run",
     "/api/cockpit/execution-cycles",
     "/api/cockpit/execution-cycles/monitoring",
     "/api/douyin-hot/recognize",
@@ -4064,6 +4077,105 @@ def run_policy_strategy_validation(dashboard_result, provider_runner=None):
         "kimi": kimi_config("deep")["model"],
     }
     return validated
+
+
+def current_attribution_dashboard_payload(org_id="local", edition="china"):
+    """Build the same deterministic evidence base used by the live group dashboard."""
+    candidates = [
+        ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
+        DATA_DIR / "dongchedi_sales" / "latest.json",
+        DATA_DIR / "dongchedi_sales" / "latest_mmn_perception_feed.json",
+    ]
+    sales_payloads = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            sales_payloads.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    sales_payload = merge_sales_payloads(sales_payloads)
+    fuel_snapshot = cpca_fuel_market_payload()
+    fuel_market = parse_cpca_ice_market(fuel_snapshot.get("payload")) if fuel_snapshot else None
+    if fuel_market:
+        fuel_market["sourceFetchedAt"] = fuel_snapshot.get("fetchedAt")
+        fuel_market["sourceStale"] = fuel_snapshot.get("stale") is True
+    with db() as conn:
+        return build_group_dashboard_payload(conn, sales_payload, org_id, edition, fuel_market=fuel_market)
+
+
+def attribution_reasoning_messages(packet):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN跨域归因独立复核角色。只能使用用户消息中的锁定证据，不得补写平台、内容、线索ID、销售跟进、价格金融、库存交付或真实转化率。"
+                "请沿细分市场容量→细分市场销量→声量→线索→订单达成率论证，主动提出反证与替代解释。三路复核彼此独立，不得假设其他角色结论。"
+                "不要在输出中写技术供应商或模型名称。只输出一个合法JSON对象，字段必须完整："
+                "verdict(market_demand_gap|awareness_gap|downstream_funnel_break|mixed|insufficient)、"
+                "primaryBreak(market_capacity|segment_sales|voice|lead|order|unknown)、conclusion、counterEvidence、"
+                "alternativeExplanations(string数组，最多4项)、nextActions(对象数组，最多3项，每项含priority/action/metric/stopCondition)、"
+                "stopCondition、causalBoundary、evidenceIds、confidence(0-1)。"
+                "evidenceIds必须完整复制输入evidenceIds；声量不等于需求，订单达成率不等于同批线索转化率，三路一致也不构成因果证明。"
+            ),
+        },
+        {"role": "user", "content": json.dumps(packet, ensure_ascii=False)},
+    ]
+
+
+def run_attribution_reasoning(group_payload, model="奥迪E7X", provider_runner=None):
+    packet = build_attribution_evidence_packet(group_payload, model)
+    if packet.get("status") != "ready":
+        return packet, {}, {}, {
+            "status": "insufficient_evidence",
+            "providers": {},
+            "providerErrors": {},
+            "reasons": ["跨域证据链未完整，未调用三路复核"],
+            "commonEvidenceIds": [],
+            "finalConclusion": None,
+        }
+    messages = attribution_reasoning_messages(packet)
+
+    def run_one(provider):
+        started = time.perf_counter()
+        if provider_runner:
+            raw = provider_runner(provider, messages)
+            parsed = parse_json_object(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("未返回JSON研判对象")
+            parsed["_latencyMs"] = round((time.perf_counter() - started) * 1000)
+            return parsed
+        timeout = max(MMN_CRITIC_TIMEOUT, int(env_value("MMN_ATTRIBUTION_MODEL_TIMEOUT", "140")))
+        retry_messages = list(messages)
+        last_error = None
+        for attempt in range(2):
+            try:
+                if provider == "qwen":
+                    raw = call_qwen(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, enable_thinking=False)
+                elif provider == "deepseek":
+                    raw = call_deepseek(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, response_format={"type": "json_object"})
+                else:
+                    raw = call_kimi(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600)
+                parsed = parse_json_object(raw)
+                if not isinstance(parsed, dict):
+                    raise ValueError("未返回JSON研判对象")
+                parsed["_latencyMs"] = round((time.perf_counter() - started) * 1000)
+                parsed["_attempt"] = attempt + 1
+                return parsed
+            except Exception as exc:
+                last_error = exc
+                retry_messages = messages + [{"role": "system", "content": "上一次响应未通过结构校验。请缩短文字，只返回一个完整合法JSON对象，不要Markdown。"}]
+        raise last_error or ValueError("三路复核调用失败")
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(run_one, provider) for provider in ATTRIBUTION_PROVIDERS}
+        for provider, future in futures.items():
+            try:
+                outputs[provider] = future.result()
+            except Exception as exc:
+                errors[provider] = str(exc)
+    return packet, outputs, errors, arbitrate_attribution_reasoning(outputs, packet["evidenceIds"], errors)
 
 def normalize_vehicle_config_review(value):
     item = value if isinstance(value, dict) else parse_json_object(value)
@@ -13033,6 +13145,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc), "items": []}, 500)
             return
+        if parsed.path == "/api/attribution-reasoning":
+            q = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            model = str(q.get("model", ["奥迪E7X"])[0] or "奥迪E7X").strip()
+            edition = edition_from(q.get("edition", ["china"])[0])
+            with db() as conn:
+                run = load_attribution_reasoning_run(
+                    conn,
+                    org_id=auth.get("org_id", "local"),
+                    edition=edition,
+                    model=model,
+                )
+            self.send_json({"ok": True, "run": run})
+            return
         if parsed.path == "/api/group-dashboard-demo":
             try:
                 q = parse_qs(parsed.query)
@@ -13723,6 +13849,41 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": True, "policy": policy})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/attribution-reasoning/run":
+            task_id = ""
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                model = str(body.get("model") or "奥迪E7X").strip()
+                edition = edition_from(body.get("edition") or "china")
+                task_id = str(uuid.uuid4())
+                with ATTRIBUTION_REVIEW_LOCK:
+                    ATTRIBUTION_REVIEW_TASKS[task_id] = {"status": "running", "model": model, "startedAt": now()}
+                dashboard_payload = current_attribution_dashboard_payload(
+                    auth.get("org_id", "local"), edition
+                )
+                packet, outputs, errors, arbitration = run_attribution_reasoning(
+                    dashboard_payload, model
+                )
+                with db() as conn:
+                    run = save_attribution_reasoning_run(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                        model=model,
+                        packet=packet,
+                        provider_outputs=outputs,
+                        provider_errors=errors,
+                        arbitration=arbitration,
+                    )
+                self.send_json({"ok": True, "run": run}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": "三路归因复核未完成：%s" % str(exc)}, 400)
+            finally:
+                if task_id:
+                    with ATTRIBUTION_REVIEW_LOCK:
+                        ATTRIBUTION_REVIEW_TASKS[task_id] = {"status": "done", "finishedAt": now()}
             return
         if parsed.path == "/api/policy-intelligence/analyze":
             try:
