@@ -2,21 +2,57 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.0`
-- 最后核验时间：`2026-07-21 03:38:13 +0800`（Asia/Shanghai）
-- Git commit：短 hash `ee52340`；完整 hash `ee5234075acb2c67f7d342f9c0e9af83d83c70da`
+- 状态包版本：`v2.4`
+- 最后核验时间：`2026-07-22 01:25:32 +0800`（Asia/Shanghai）
+- Git commit：短 hash `8368303`；完整 hash `8368303e6f4824713c95330bb39b12740e8895ed`
 - 当前分支：`main`
 - 生成时工作树状态：`dirty`
-- 基线说明：`ee52340` 是 beta 1.03 主功能提交；当前工作树另含本轮生产验收发现的多模态 JSON 容错修复、发布验证脚本和最终发布文档，完成本状态包后作为发布收口提交。
+- 基线说明：`8368303` 是当前 beta 1.03 本地基线；工作树同时包含用户既有/并行修改、车型综合决策闭环、卖点建议、竞争趋势图修复与本轮策略汇报资料包导出能力，尚未提交、推送或部署。
 - 未提交修改路径（按 `git status --short`，未展开未跟踪目录内的文件内容）：
-  - `creator_distillation/media_processing.py`
+  - `douyin-hot-demo.css`
+  - `app.js`
+  - `group-dashboard.js`
+  - `index.html`
+  - `knowhow.css`
+  - `lead-dashboard.css`
+  - `lead-dashboard.js`
   - `scripts/verify_douyin_video_insight_local.js`
-  - `tests/test_creator_distillation.py`
+  - `server.py`
+  - `style.css`
+  - `tests/test_all_surfaces_release_gate.py`
+  - `tests/test_group_dashboard_ui.js`
+  - `tests/test_data_first_cockpit_ui.js`
+  - `tests/test_lead_dashboard_ui.js`
+  - `tests/test_vertical_trend_label_layout.js`
+  - `MMN_CURRENT_STATE.md`
+  - `attribution_reasoning.py`
+  - `selling_point_advisory.py`
+  - `vehicle_decision.py`
+  - `vehicle-decision.js`
+  - `vehicle-decision.css`
+  - `tests/test_attribution_reasoning.py`
+  - `tests/test_attribution_reasoning_api.py`
+  - `tests/test_selling_point_advisory.py`
+  - `tests/test_selling_point_advisory_api.py`
+  - `tests/test_selling_point_advisory_ui.js`
+  - `tests/test_vehicle_decision.py`
+  - `tests/test_vehicle_decision_server.py`
+  - `tests/test_vehicle_decision_ui.js`
+  - `strategy_report_package.py`
+  - `tests/test_strategy_report_package.py`
+  - `tests/test_strategy_report_package_api.py`
+  - `tests/test_strategy_report_package_ui.js`
+  - `tests/test_frontend_lifecycle_scope.js`
+  - `docs/HANDOFF_VEHICLE_DECISION_LOOP_2026-07-21.md`
+  - `docs/研发档案/2026-07-21_beta-1.03_跨域归因三路独立复核.md`
+  - `docs/研发档案/2026-07-21_beta-1.03_车型全驾驶舱综合决策闭环报告.md`
+  - `docs/specs/`
   - `data/blogger_skill_import_jobs/`
   - `data/commercial_demo.db.bak-20260718-creator-profile`
   - `data/commercial_demo.db.bak-20260719-social-assistant-preimport`
   - `data/commercial_demo.db.bak-20260720-content-defense-local`
   - `data/commercial_demo.db.bak-20260721-local-auto-sync`
+  - `data/commercial_demo.db.bak-20260721-attribution-pre`
   - `data/commercial_demo.db.bak-20260721-video-insight-pre`
   - `data/dongchedi_sales/sales_warning_latest.pre-size-nev-20260719.bak`
   - `data/weekly_market_refresh_status.json`
@@ -58,7 +94,10 @@
 | 本地业务存储 | 以 SQLite 与 JSON/JSONL/导入文件为主；浏览器还保存按组织与版本隔离的本地状态 | `server.py`、`mmn_data.py`、`data/`、`app.js` |
 | 异步任务 | 进程内线程任务；达人蒸馏在 Redis 可用时可由 Celery worker 执行，本地可回退为本地队列 | `server.py`、`creator_distillation/tasks.py`、`docker-compose.yml` |
 | 文档/报告 | Python 文档解析与导出；Node/PptxGenJS、Marp、Mermaid 负责 PPT 生成/校验链路 | `bf_factory/`、`creator_script_generation.py`、`src/ppt-agent/`、`package.json` |
+| 车型综合决策闭环 | 八表面快照、不可变报告、冲突裁决、Action/Result/Learning/Know-how 门禁和 Markdown/PPTX 导出 | `vehicle_decision.py`、`vehicle-decision.js`、`vehicle-decision.css`、`server.py` |
 | 销量预警—T周期适配 | 将已核验的销量预警正式上市日、考核日、T+X与阶段原子同步到驾驶舱T周期；服务端优先、本地仅作可靠缓存 | `sales-warning-cycle-context.js`、`group-dashboard.js`、`app.js`、`t-cycle.js` |
+| 卖点机会决策台 | 五类事实证据包、三路独立建议、确定性综合门禁、缓存/过期与人工裁决审计；只覆盖 Evidence → Insight → Decision → Action | `selling_point_advisory.py`、`server.py`、`app.js`、`style.css` |
+| 策略汇报资料包 | 当前组织/项目/品牌/车型/时间范围只读冻结，复用现有三路模型路由并确定性归纳，导出供 Codex 制作管理层 PPT 的 ZIP；MMN 内不生成 PPTX | `strategy_report_package.py`、`server.py`、`app.js`、`index.html`、`style.css` |
 | 测试与验收 | Python `unittest`、Node 脚本测试、Playwright 全表面发布门禁 | `tests/`、`scripts/release_gate.sh`、`scripts/release_gate_all_surfaces.js` |
 
 ### 2.2 启动方式
@@ -82,7 +121,7 @@
 
 | 导航分组 | 页面 ID / 访问语义 | 用途 | 当前完成度与数据状态 |
 | --- | --- | --- | --- |
-| 核心工作流 / 决策驾驶舱 | `dashboard` | 汇总 T 周期、数据导入、诊断、证据、策略与行动复盘 | 已实现交互；混合真实导入、数据库快照、接口结果与明确演示/降级状态。`index.html`、`app.js`、`lead-dashboard.js`、`group-dashboard.js` |
+| 核心工作流 / 决策驾驶舱 | `dashboard` | 汇总 T 周期、数据导入、诊断、证据、策略与行动复盘；页面末尾可冻结当前上下文并导出策略汇报资料包 | 已实现交互；混合真实导入、数据库快照、接口结果与明确演示/降级状态。资料包不补齐缺失事实，不在 MMN 内生成 PPTX。`index.html`、`app.js`、`strategy_report_package.py`、`lead-dashboard.js`、`group-dashboard.js` |
 | 决策驾驶舱子项 | `brandpenetration` | 品牌传播穿透与周度策略视图 | 已实现页面/API；读取社媒快照、周度市场与销量预警数据，缺源时存在降级/演示口径。`app.js`、`server.py`、`group_dashboard.py` |
 | 决策驾驶舱子项 | `socialtrends` | 社媒热度、竞品与证据明细 | 已实现任务、导入与快照；可接真实服务或用户导入，服务不可用时不得视作实时事实。`social-trends.js`、`social_trends.py`、`server.py` |
 | 决策驾驶舱子项 | `policyintelligence` | 政策来源、车型影响、策略交叉验证与人工复核 | MVP 已实现；只有证据完整且通过规则的结果可发布，否则为 `manual_required`/待验证。`policy-intelligence.js`、`policy_intelligence.py`、`server.py` |
@@ -139,6 +178,9 @@
 | 达人蒸馏 | URL/文件/公开数据 → 任务与媒体处理 → 创作者、资产、证据、方法论 | 任务阶段/进度、creator/profile、asset、provenance、evidence、performance、人工纠正；HTTP 200 不等于上游业务成功 | `creator_distillation/`、`migrations/creator_distillation/`、`server.py` |
 | 内容能力与脚本 | 博主/内容能力导入 → `/api/content-capability-kb` → creatorAssets → script-jobs → DOCX | 完整验收链为任务完成、资产可查、脚本成功、导出文件可读；中间任务卡完成不等于下游可用 | `server.py`、`creator_script_generation.py`、`app.js` |
 | Learning/Know-how | 人工结论与策略反馈 → `/api/learnings`/本地知识状态 → 可复用资产 | 保留组织、用户、版本、车型、标签、结论、建议、证据、阶段与时间；人工结论优先于自动推断 | `server.py`、`app.js`、`knowhow.css` |
+| 车型综合决策闭环 | 八类已持久化看板结果 → 只读适配 → 冻结快照/不可变报告 → Action → Result → Learning/Know-how Candidate | 缺失保持 unknown；事实保留证据 ID、时间窗和指纹；Result 中 null 与 0 分离；Learning/Know-how 必须通过观察、重复验证与人工裁决门禁 | `vehicle_decision.py`、`vehicle-decision.js`、`server.py` |
+| 卖点机会建议 | 当前车型/标签/竞品/T周期与五类事实 → 锁定证据包 → 三路盲审 → 确定性聚合 → 人工裁决/动作门禁 | 三路接收同一指纹且首轮不可见彼此答案；无有效证据引用、证据不足、通道失败或证据变化均禁止直接进入营销动作；建议不自动写入 Learning | `selling_point_advisory.py`、`server.py`、`app.js` |
+| 策略汇报资料包 | 当前驾驶舱与已持久化车型表面 → 只读适配/不可变快照 → 三路独立整理 → 确定性综合 → ZIP | 同一快照与证据指纹进入三路；失败通道、来源类型、缺失/冲突/未知原样保留；只有共同证据支持的结论进入管理层推荐；不重算指标、不生成 PPTX | `strategy_report_package.py`、`vehicle_decision.py`、`mmn_model_governance.py`、`server.py`、`app.js` |
 | Eval | 固定样例/最终咨询输出 → 离线 runner/scorer → 报告与人工复核 | 事实/推断/假设/未知、证据引用、评分、阈值、人工裁决；当前不保证请求时实时执行 | `mmn_eval/`、`scripts/run_mmn_eval.py`、`server.py` |
 
 ## 6. API、数据库与权限机制
@@ -152,6 +194,9 @@
   - 驾驶舱与情报：`/api/group-dashboard*`、`/api/cockpit/execution-cycles*`、`/api/social-trends/*`、`/api/policy-intelligence/*`、`/api/douyin-hot/*`；
   - 内容生产：`/api/bf/*`（动态分派）、`/api/blogger-skill/*`、`/api/creator-distillation/*`、`/api/content-capability-kb/*`；
   - 治理：`/api/eval/*`、`/api/learnings`、`/api/agents/run`。
+  - 车型综合决策：`/api/vehicle-decisions/snapshots*`、`/reports*`、`/conflicts/*/adjudicate`、`/actions*`、`/learning-candidates*`、`/knowhow-candidates*`、`/flow`。
+  - 卖点建议：`POST /api/selling-point-advisory/run`、`GET /api/selling-point-advisory/latest`、`POST /api/selling-point-advisory/manual-review`；组织和用户身份只取自服务端会话。
+  - 策略汇报资料包：`POST /api/strategy-report-packages` 创建/复用当前证据冻结快照并生成 ZIP，`GET /api/strategy-report-packages/{package_id}/download` 按组织下载；前端仅显示独立整理 A/B/C，不暴露内部路由名称。
 - 精确方法、参数和响应契约以 `server.py` 与对应测试为准；状态包不复制敏感运行配置。
 
 ### 6.2 数据库/文件
@@ -159,6 +204,8 @@
 - `commercial_demo.db` 主要表包含组织、用户、Learning、Workspace、项目快照、策略/资产和各模块扩展表；schema 由 `server.py` 及模块 `init_schema` 增量创建。
 - BF 表覆盖 project、document、segment、brief、revision、sample、audit/feedback 等结构，定义于 `bf_factory/repository.py`。
 - 社媒与热点表定义于 `social_trends.py`、`douyin_hot_entities.py`；政策表定义于 `policy_intelligence.py`。
+- 车型综合决策表定义于 `vehicle_decision.py`，包括快照、信号、报告、冲突、人工裁决、Action、Result、Learning Candidate、Know-how Candidate 与证据链接；全部按 `org_id` 作用域读写。
+- 策略汇报资料包表定义于 `strategy_report_package.py`，包括不可变快照和 ZIP 包；快照按作用域与证据指纹追溯，包按 `org_id` 隔离下载。
 - 达人本地兼容表定义于 `creator_distillation/repository.py`；PostgreSQL/pgvector 目标 schema 在 `migrations/creator_distillation/*.sql`。
 - 文件资产位于 `data/` 的模块目录，包括导入原件、RAG JSONL、销量历史、状态 JSON、机会地图文档和 BF 资产；部署时映射到持久卷。目录定义：`mmn_data.py`、`docker-compose.yml`。
 
@@ -184,15 +231,29 @@
 
 - 2026-07-20：建立长期系统状态包机制：在 `AGENTS.md` 增加永久维护规则，创建本文件，新增 `scripts/check_mmn_state.mjs`，并在 `package.json` 增加 `npm run check:mmn-state`。
 - 2026-07-21：大版本升级为 `beta 1.03`，在现有抖音六榜与品牌车型雷达后增加手动逐条视频洞察和热点内容防线；建立证据包、三路独立分析、交叉校验、分歧/降级、缓存幂等、刷新恢复与服务器端公开原页浏览器取证链路。
+- 2026-07-21：在现有决策驾驶舱内增加车型全驾驶舱综合决策层，完成八表面冻结快照、不可变版本报告、冲突与人工裁决、Action/Result、Learning/Know-how 候选门禁及 Markdown/PPTX 导出；仅本地验证，未部署。
 - 2026-07-21：修复管理层销量预警与下方T周期的上下文断链；八台重点车型从已核验周期记录继承T0、考核日、T+X、阶段与七段日期，服务端记录优先且本地仅作失败缓存，移除E7X硬编码默认日期，并保护权威T0不被下方普通保存覆盖；仅本地验证，未部署。
+- 2026-07-21：重构“卖点机会决策台”右侧为统一决策侧栏，取消对外精确营销匹配分和证据不足时的强结论，新增五类事实边界、三路独立建议、共同证据/分歧聚合、决策准备度、动作门禁、指纹缓存/过期、失败通道重试和人工裁决审计；仅本地验证，未提交、未推送、未部署。
+- 2026-07-22：修复竞争趋势详情弹窗在稀疏周期下只有点、没有线以及横轴周期文字重叠的问题；相邻有效周期保持实线，跨无记录周期使用带图例说明的虚线，密集横轴只显示 6 个均匀关键刻度，完整周期仍保留在明细表；仅本地验证，未提交、未推送、未部署。
+- 2026-07-22：将“竞品格局 → MMN学习正反向”升级为三路旗舰能力对同一锁定证据包先独立分析、再融合裁决为唯一策略结论；增加证据指纹、三路与融合双重门禁、客户侧中性标签和降级状态，任一路或融合未完成都只显示规则预览且不写入RAG，只有唯一融合结论可持久化为正式学习卡；仅本地验证，未提交、未推送、未部署。
+- 2026-07-22：在现有决策驾驶舱内容最底部增加“导出策略汇报资料包”；实现当前组织/项目/品牌/车型/T周期/时间范围的不可变冻结快照、同指纹三路独立整理、确定性共同结论/分歧归纳和标准 ZIP 导出。资料包含主交接 Markdown、快照、三路综合、证据索引、图表数据、素材说明和 README；不新增导航/页面，不在 MMN 内生成 PPTX；仅本地验证，未提交、未推送、未部署。
+- 2026-07-22：修复智己L6旧版“属性正/负两类聚合行”与奥迪E7X显式属性NSR数据合同不一致的问题；新增只读兼容归一化层，以同车型、同平台、同属性的有效正负样本计算属性NSR，保留原始656行与数据版本不变，并让上层摘要和下层机会地图共用同一属性NSR合同。同步将摘要中的互动量改为来源真实提供的有效样本口径，机会地图按标签数量自适应高度并消除桌面/移动气泡重叠；仅本地验证，未提交、未推送、未部署。
+- 2026-07-22：将上述决策闭环、归因复核、卖点建议、趋势可读性、资料包与属性NSR兼容统一收口为 `beta-1.03-20260722-decision-closure-1` 发布候选；同步修复数据优先发布门禁的固定旧竞品断言，使门禁依据当前导入车型集合和属性合同验收。完整本地发布门禁已通过，等待 GitHub 与 ECS 闭环。
 
 ## 9. 验证状态
 
 - 状态包事实来源：本轮已审查 `README.md`、`README_DEPLOY.md`、`AGENTS.md`、`package.json`、`Dockerfile`、`docker-compose.yml`、`index.html`、`app.js`、`server.py`、`mmn_data.py`、模块 repository/schema、路由知识图谱与目录结构。
 - 状态检查命令：`npm run check:mmn-state`。检查业务源码、页面/组件、接口、schema、依赖与部署配置；测试、普通文档、锁文件及 `data/`、`output/`、`tmp/`、`backups/`、`logs/` 运行数据/产物不触发状态同步要求。
 - 2026-07-21 beta 1.03 新鲜验证：完整 Python 回归 `467/467` 通过，逐视频洞察与媒体专项 `48/48` 通过，内容防线、启动器和状态包脚本测试通过；本地与生产健康接口均返回 `beta-1.03-20260721-douyin-content-defense-1`。生产全表面桌面/390px 检查无失败、运行时错误或失败响应；真实点击视频任务 `afecda8b179142a19cd96638f8717818` 形成 full 证据、三路独立完成并达到 `verified`，刷新后两端均显示“洞察已完成”，无页面溢出、控制台错误、失败请求、内部错误文案或证据哈希串。服务器另对第二条 117.5 秒视频取得 6 个时间点关键帧，证明取证不依赖固定样本。
-- 2026-07-21 销量预警—T周期联动新鲜验证：Python 全量 `486/486` 通过；新增/相关 Node 周期、适配、持久化与UI契约通过；`127.0.0.1:8765` 真实浏览器验证 MG4 `T+84`、奥迪E7X `T+49`、红色预警奥迪E5 Sportback `T+304`，三车均为上下同车、同考核日、七张真实日期卡和自动当前阶段；刷新、快速三车切换、强制接口失败缓存与无重选恢复通过；1440px 与 390px 均通过，390px 页面横向溢出为 false，正常业务流控制台错误、失败请求和 4xx/5xx 响应均为 0。`scripts/release_gate.sh` 的本工单语法/周期专项/150项后端子集均通过，但全门禁仍被既有 NSR 地图标签重叠检查拦截（530px 图面检测到 7 处重叠，`runtimeErrors=[]`），未在本工单越界修改。
 - 仓库没有独立 lint 命令；前端/Python 语法检查已由 `scripts/release_gate.sh` 执行。PPT 生成命令会生成交付产物，不属于本次状态机制影响面，未额外执行。
+- 2026-07-21 车型综合决策新鲜验证：Python 全量 `483/483` 通过；8 个相关 Node UI 契约通过；奥迪 E7X 在隔离数据库中完成快照、v1/v2 报告、人工发布、2 个 Action、2 个 Result、继续观察与人工批准 Learning 两条分支，刷新后持久化；PPTX/Markdown 导出均为 200。独立面板和全表面发布门禁的 1440px/390px 均无页面横向溢出；全表面门禁覆盖 19 个客户导航入口、八类管理驾驶舱和 E7X 跨车型清理，`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。该结果只证明闭环工程能力，不证明真实业务 Learning 或 Know-how。
+- 2026-07-21 销量预警—T周期联动新鲜验证：Python 全量 `486/486` 通过；新增/相关 Node 周期、适配、持久化与UI契约通过；`127.0.0.1:8765` 真实浏览器验证 MG4 `T+84`、奥迪E7X `T+49`、红色预警奥迪E5 Sportback `T+304`，三车均为上下同车、同考核日、七张真实日期卡和自动当前阶段；刷新、快速三车切换、强制接口失败缓存与无重选恢复通过；1440px 与 390px 均通过，390px 页面横向溢出为 false，正常业务流控制台错误、失败请求和 4xx/5xx 响应均为 0。`scripts/release_gate.sh` 的本工单语法/周期专项/150项后端子集均通过，但全门禁仍被既有 NSR 地图标签重叠检查拦截（530px 图面检测到 7 处重叠，`runtimeErrors=[]`），未在本工单越界修改。
+- 2026-07-21 卖点机会决策台新鲜验证：Python 全量 `501/501` 通过，卖点建议后端/API/UI 定向合同通过；隔离服务 `127.0.0.1:18766` 使用临时 SQLite，1440px 实测左右宽度约 `647/431px`，390px 页面与证据区横向溢出均为 false。真实页面验证了五类证据边界、三路卡片展开、部分一致/分歧/准备度/动作门禁、快速切标签不显示旧结论、刷新请求携带证据指纹；控制台错误为 0，相关请求无失败。浏览器中的部分一致状态使用受控响应验收界面，三路真实调用路径及同包/引用/缓存/降级由服务层和 API 测试证明，本轮未消耗外部模型额度验证真实建议文本质量。使用真实业务 SQLite 的隔离副本补跑全表面桌面/移动回归，结果为 `failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`，真实数据库未写入。完整 `release:gate` 的语法、专项、150项后端子集和浏览器运行均完成，但最终被并行工作树中的既有 NSR 门禁拦截：门禁仍预期三个竞品，而页面现含第四个“奥迪Q6L e-tron”，连带“一属性一气泡”断言失败；`runtimeErrors=[]`，本工单未越界回退该并行改动。
+- 2026-07-22 竞争趋势图新鲜验证：`node tests/test_vertical_trend_label_layout.js` 与 `node --check app.js` 通过；`127.0.0.1:8765` 真实点击“竞品格局 → 汽车之家 → 奥迪E7X → 奔驰GLC EV → 查看完整周期趋势”，弹窗 3/14 个有效周期呈现正反向共 4 段跨缺口虚线，横轴 6 个关键刻度经 SVG 边界检测为 0 处重叠，图例明确缺失周期语义；浏览器控制台 0 错误、0 警告。未改动或写入排名数据。
+- 2026-07-22 正反向三路融合新鲜验证：22 个相关 Python 测试、`node --check app.js`、数据优先驾驶舱与集团看板 UI 契约均通过；单元测试证明三路内部分析完成后必须再形成结构完整且不含并列判断的唯一融合文本，任一路或融合失败均保持 `degraded` 且不落库。`127.0.0.1:8765` 真实点击“竞品格局 → 奥迪E7X → MMN学习正反向”，页面只显示一张“正反向竞争格局融合结论”卡片且无三路并列输出；`/api/ai/vertical-rank-learning` 与 `/api/asset-library` 均为 200，控制台 0 错误/0 警告，最新数据库记录门禁为 `three_flagships_fused` 并已写入唯一融合文本；未做提交、推送或部署。
+- 2026-07-22 策略汇报资料包新鲜验证：完整 Python 回归 `512/512` 通过，25 个 Node UI/契约脚本全部通过；仓库级 `npm run release:gate` 首轮通过（全表面 `failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`），最终代码补强失败通道审计后复跑时，语法/Node/150 项后端子集仍通过，但既有 `release_gate_data_first.js` 与异步产品数据恢复发生竞态，门禁期望 2 个竞品时页面已恢复当前 4 个竞品，因而在进入全表面脚本前失败。隔离数据库和 `127.0.0.1:18767` 真实浏览器链路完成当前车型导出，出现 `2/3` 路时页面如实显示“部分完成”，下载 ZIP 含约定 7 个条目且 Markdown/4 个 JSON 均可用 UTF-8 读取。按钮经 DOM 证明是驾驶舱最后一个子元素；1440px 与 390px 页面横向溢出均为 0，控制台错误/警告为 0，导出 POST 为 201、下载成功。验证只证明本地工程链路和降级诚实性，不证明外部模型输出的业务质量；未部署。
+- 2026-07-22 智己L6属性NSR兼容修复新鲜验证：原始数据仍为 `xiaomi_su7_6cars_20260608_v1` 的656行、每行12列，归一化后656/656行均具显式属性NSR且不改写原数组；L6价格与空间以及小米SU7价格的确定性公式断言通过，显式E7X式数据保持不变。相关 Node 合同、43项 Python 子集和状态检查通过；`127.0.0.1:18767` 真实页面显示13个L6属性机会气泡及5个可选竞品，摘要改为“有效样本对比”，没有伪造互动量。1440px地图高778px、390px地图高1498px，两端气泡重叠为0、页面横向溢出为0，控制台错误/警告为0。既有 `release_gate_data_first.js` 仍存在异步状态恢复竞态，期望初始4气泡时页面已恢复15气泡；运行时错误为空，本修复未扩大到该独立竞态。未提交、未推送、未部署。
+- 2026-07-22 决策闭环综合发布候选新鲜验证：Python 完整回归 `512/512` 通过；`npm run release:gate` 的语法、Node 合同、150 项后端专项和数据优先浏览器门禁通过，旧门禁竞态已通过动态核对当前导入竞品集合与属性合同解决。独立补跑全表面脚本覆盖19个客户入口、8个管理视图、E7X 207行/15属性完整数据、同车型旧缓存升级、8台预警车型防串库以及从缺数车型恢复E7X，在1440px和390px均为 `failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。仓库无 npm lockfile，安全审计返回 `ENOLOCK`，未为本次发布临时生成锁文件。
 
 ## 10. 后续每次任务的固定汇报格式
 

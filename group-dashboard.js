@@ -1,7 +1,7 @@
 (function(){
  const root=document.querySelector("#group-dashboard-root");
  if(!root)return;
- let loading=false,refreshingWeekly=false,loadedEdition="";
+ let loading=false,refreshingWeekly=false,loadedEdition="",attributionWarningEvidence=null,attributionProductEvaluation=null,attributionSalesPeriod="";
  const uiState={viewKey:"brief",brand:"",vehicleId:"",marketDimension:"",warningModel:"奥迪E5 Sportback",warningSeriesId:"",policyCompareModel:"",policyRegion:"上海"};
  uiState.policyModel="奥迪E7X";
  const POLICY_REGIONS=[{value:"北京",label:"北京市"},{value:"上海",label:"上海市"},{value:"广东",label:"广东省"},{value:"浙江",label:"浙江省"},{value:"四川",label:"四川省"},{value:"湖北",label:"湖北省"},{value:"江苏",label:"江苏省"}];
@@ -14,9 +14,20 @@
  const saveSalesWarningCycles=value=>{try{localStorage.setItem(SALES_WARNING_CYCLE_STORAGE_KEY,JSON.stringify(value))}catch(_){}};
  const salesWarningCycleContext=item=>window.MMNSalesWarningCycleContext?.adapt?.(item,{serverCycles:persistedSalesWarningCycles,localCycles:loadLocalSalesWarningCycles(),databaseRecord:item?.cycleEvidence||null})||{model:item?.model||"",seriesId:String(item?.seriesId||""),status:"missing",source:"sales-warning"};
  const selectedDashboardModel=()=>window.MMNVehicleContext?.getModel?.()||"";
+	const productAttributionEvidence=model=>{
+	 const evaluation=attributionProductEvaluation||{},models=(evaluation.models||[]).filter(item=>Number.isFinite(Number(item.voice))),own=models.find(item=>item.model===model);
+	 if(!own)return null;
+	 const ranked=[...models].sort((a,b)=>Number(b.voice)-Number(a.voice)),rank=ranked.findIndex(item=>item.model===model)+1;
+	 return{model,voice:Number(own.voice),engagement:Number(own.engagement||0),overallNsr:Number.isFinite(Number(own.overallNsr))?Number(own.overallNsr):null,voiceRank:rank||null,comparisonCount:ranked.length,period:evaluation.source?.period||"",scope:evaluation.source?.scope||"",voiceFormula:evaluation.source?.voiceFormula||""};
+	};
+	window.MMNAttributionContext={
+	 getWarningEvidence:model=>attributionWarningEvidence?.model===model?{...attributionWarningEvidence}:null,
+	 getProductEvidence:model=>productAttributionEvidence(model)
+	};
  const emitWarningModelSelection=(item,{notify=true}={})=>{
   if(!item?.model)return;
-  const cycleContext=salesWarningCycleContext(item),detail={model:item.model,seriesId:String(item.seriesId||""),level:item.level||"gray",label:item.levelLabel||"待复核",sales:Number(item.sales||0),performanceRate:item.performanceRate??null,cycle:item.cycleStage||item.cycle||"周期待核验",launchDate:cycleContext.launchDate||"",assessmentDate:cycleContext.assessmentDate||"",tLabel:cycleContext.tLabel||"",phaseKey:cycleContext.phaseKey||"",phaseLabel:cycleContext.phaseLabel||"",phaseRange:cycleContext.phaseRange||"",cycleContext,source:"sales-warning"};
+	  const cycleContext=salesWarningCycleContext(item),detail={model:item.model,seriesId:String(item.seriesId||""),level:item.level||"gray",label:item.levelLabel||"待复核",sales:Number(item.sales||0),performanceRate:item.performanceRate??null,cycle:item.cycleStage||item.cycle||"周期待核验",launchDate:cycleContext.launchDate||"",assessmentDate:cycleContext.assessmentDate||"",tLabel:cycleContext.tLabel||"",phaseKey:cycleContext.phaseKey||"",phaseLabel:cycleContext.phaseLabel||"",phaseRange:cycleContext.phaseRange||"",cycleContext,segmentLabel:item.segmentLabel||"",marketSales:item.marketSales??null,marketModelCount:item.marketModelCount??null,marketShare:item.marketShare??null,rank:item.rank??null,benchmark:item.benchmark??null,period:item.period||attributionSalesPeriod||"",source:"sales-warning"};
+	  attributionWarningEvidence={...detail};
   window.MMNVehicleContext?.select?.(item.model,{source:"sales-warning",notify,cycleContext});
   window.dispatchEvent(new CustomEvent("mmn:sales-warning-model-selected",{detail}));
  };
@@ -267,7 +278,7 @@ function renderFullSegmentWarnings(warning){
  }
 
  function render(data){
-  const evaluation=data.productEvaluation||{};window.MMNVehicleContext?.registerProductEvaluation?.(evaluation);const own=(evaluation.models||[]).find(item=>item.isOwn)||{},source=evaluation.source||{},brief=data.executiveBrief||{},pulse=executivePulseFrom(brief),weeklyRefresh=brief.weeklyRefresh||data.refreshCadence?.weekly||{},factMap=Object.fromEntries((brief.facts||[]).map(item=>[item.id,item]));
+	  const evaluation=data.productEvaluation||{};attributionProductEvaluation=evaluation;attributionSalesPeriod=data.salesWarnings?.source?.period||"";window.MMNVehicleContext?.registerProductEvaluation?.(evaluation);const own=(evaluation.models||[]).find(item=>item.isOwn)||{},source=evaluation.source||{},brief=data.executiveBrief||{},pulse=executivePulseFrom(brief),weeklyRefresh=brief.weeklyRefresh||data.refreshCadence?.weekly||{},factMap=Object.fromEntries((brief.facts||[]).map(item=>[item.id,item]));
   if(data.salesWarnings)data.salesWarnings.refreshCadence=data.refreshCadence?.monthlySalesWarning||{};
   const views=[
    {key:"brief",label:"高管摘要",kicker:"高管摘要",content:renderExecutiveOverview(data.executiveBrief||{})},

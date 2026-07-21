@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.03-20260721-douyin-content-defense-1">
-  <link rel="stylesheet" href="knowhow.css?v=beta-1.01">
-  <link rel="stylesheet" href="douyin-hot-demo.css?v=beta-1.03-douyin-content-defense-1">
-  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.03-20260721-douyin-content-defense-1">
-  <link rel="stylesheet" href="lead-dashboard.css?v=beta-1.03-20260721-douyin-content-defense-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.03-20260722-decision-closure-1">
+  <link rel="stylesheet" href="vehicle-decision.css?v=beta-1.03-20260722-decision-closure-1">
+  <link rel="stylesheet" href="knowhow.css?v=beta-1.03-20260722-decision-closure-1">
+  <link rel="stylesheet" href="douyin-hot-demo.css?v=beta-1.03-20260722-decision-closure-1">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.03-20260722-decision-closure-1">
+  <link rel="stylesheet" href="lead-dashboard.css?v=beta-1.03-20260722-decision-closure-1">
   <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-20260718-overnight-iteration-1">
   <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.02-20260718-ui-health-2">
 </head>
@@ -116,7 +117,7 @@
           <div class="group-dashboard-loading" role="status"><b>集团营销经营数据准备中</b><span></span><span></span><span></span></div>
         </div>
       </section>
-      <section id="lead-dashboard-panel" class="lead-dashboard-panel" aria-label="车型线索看板">
+      <section id="lead-dashboard-panel" class="lead-dashboard-panel" aria-label="车型线索看板" hidden>
         <div id="lead-dashboard-root" aria-live="polite">
           <div class="lead-dashboard-loading" role="status">车型线索数据准备中</div>
         </div>
@@ -288,6 +289,17 @@
         </form>
         <div id="model-judgment-result" class="model-judgment-result"></div>
       </article>
+      <section id="strategy-report-export" class="strategy-report-export" aria-label="策略汇报资料包导出">
+        <div>
+          <b>策略汇报资料包</b>
+          <span id="strategy-report-export-status" role="status" aria-live="polite">冻结当前驾驶舱数据，交由三路独立整理后生成Codex资料包。</span>
+        </div>
+        <div class="strategy-report-export-actions">
+          <button type="button" class="primary" id="strategy-report-export-run">导出策略汇报资料包</button>
+          <button type="button" class="ghost" id="strategy-report-export-download" hidden>下载资料包</button>
+          <button type="button" class="ghost" id="strategy-report-export-regenerate" hidden>重新生成</button>
+        </div>
+      </section>
     </section>
 
     <section class="page" id="policyintelligence">
@@ -1250,17 +1262,19 @@
     <span aria-hidden="true">⌂</span><b>首页</b>
   </button>
   <script src="data_20260608.js?v=beta-1.01"></script>
+  <script src="legacy-product-evaluation.js?v=beta-1.03-20260722-decision-closure-1"></script>
   <script src="opportunity-source-parser.js?v=beta-1.02-system-iteration-1"></script>
   <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
   <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
-  <script src="sales-warning-cycle-context.js?v=beta-1.03-sales-warning-cycle-1"></script>
-  <script src="app.js?v=beta-1.03-20260721-douyin-content-defense-1"></script>
-  <script src="group-dashboard.js?v=beta-1.03-20260721-douyin-content-defense-1"></script>
-  <script src="lead-dashboard.js?v=beta-1.03-20260721-douyin-content-defense-1"></script>
+  <script src="sales-warning-cycle-context.js?v=beta-1.03-20260722-decision-closure-1"></script>
+  <script src="app.js?v=beta-1.03-20260722-decision-closure-1"></script>
+  <script src="vehicle-decision.js?v=beta-1.03-20260722-decision-closure-1"></script>
+  <script src="group-dashboard.js?v=beta-1.03-20260722-decision-closure-1"></script>
+  <script src="lead-dashboard.js?v=beta-1.03-20260722-decision-closure-1"></script>
   <script src="policy-intelligence.js?v=beta-1.02-20260718-ui-health-2"></script>
-  <script src="douyin-hot-demo.js?v=beta-1.03-douyin-content-defense-1"></script>
+  <script src="douyin-hot-demo.js?v=beta-1.03-20260722-decision-closure-1"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>
 </html>

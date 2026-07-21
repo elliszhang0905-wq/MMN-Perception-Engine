@@ -68,12 +68,24 @@ async function verify(viewport) {
   }
   if ((await toggle.textContent()).includes("查看")) await toggle.click();
   await row.locator(".douyin-video-insight-detail").waitFor({ state: "visible" });
+  await row.getByRole("button", { name: "收起", exact: true }).click();
+  await row.locator(".douyin-video-insight-detail").waitFor({ state: "hidden" });
+  await row.screenshot({ path: `output/playwright/douyin-video-insight-collapsed-${viewport.width}.png` });
+  await row.getByRole("button", { name: "查看完整洞察", exact: true }).click();
+  await row.locator(".douyin-video-insight-detail").waitFor({ state: "visible" });
+  const fontSizes = await row.evaluate(root => ({
+    summary: Number.parseFloat(getComputedStyle(root.querySelector(".douyin-video-insight-summary p")).fontSize),
+    sectionTitle: Number.parseFloat(getComputedStyle(root.querySelector(".douyin-video-insight-detail section > b")).fontSize),
+    body: Number.parseFloat(getComputedStyle(root.querySelector(".douyin-video-insight-detail p")).fontSize),
+    action: Number.parseFloat(getComputedStyle(root.querySelector(".douyin-video-insight-actions button")).fontSize),
+  }));
+  await row.screenshot({ path: `output/playwright/douyin-video-insight-expanded-${viewport.width}.png` });
   const text = await row.innerText();
   const pageMetrics = await page.evaluate(() => ({ innerWidth, scrollWidth: document.documentElement.scrollWidth }));
   const required = ["视频本体", "MMN独立分析 1", "MMN独立分析 2", "MMN独立分析 3"];
   const forbidden = ["HTTP 400", "非公网媒体地址", "JSON 对象", "partial", "limited", "V:"];
   const result = {
-    viewport, target, status: (await row.locator(".douyin-video-insight-summary span").first().textContent()).trim(),
+    viewport, target, status: (await row.locator(".douyin-video-insight-summary span").first().textContent()).trim(), fontSizes,
     required: Object.fromEntries(required.map(value => [value, text.includes(value)])),
     forbidden: forbidden.filter(value => text.includes(value)),
     overflow: pageMetrics.scrollWidth > pageMetrics.innerWidth + 1,
@@ -82,7 +94,9 @@ async function verify(viewport) {
   await page.screenshot({ path: `output/playwright/douyin-video-insight-${viewport.width}.png`, fullPage: false });
   await browser.close();
   if (Object.values(result.required).some(value => !value) || result.forbidden.length || result.overflow
-      || result.consoleErrors.length || result.failedRequests.length) {
+      || result.consoleErrors.length || result.failedRequests.length
+      || result.fontSizes.summary < 12 || result.fontSizes.sectionTitle < 11
+      || result.fontSizes.body < 11 || result.fontSizes.action < 10) {
     throw new Error(JSON.stringify(result));
   }
   return result;

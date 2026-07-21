@@ -126,7 +126,7 @@ assert.equal(twoOrgStorage.getItem(orgBKey), null, "a second organization must n
 
 assert.match(app, /function startAppDataLoads\(\)\{\s*restoreOpportunityContext\(\)/);
 assert.match(app, /function signalAppAuthReady\(\)[\s\S]*?mmn:auth-ready/);
-assert.match(app, /initCloudLoginGate\(\)\.then\(ok=>\{\s*if\(!ok\)return;\s*render\(\);\s*startAppDataLoads\(\);\s*signalAppAuthReady\(\);/);
+assert.match(app, /initCloudLoginGate\(\)\.then\(ok=>\{\s*if\(!ok\)return;\s*reconcileProductEvaluationBinding\(\);\s*render\(\);\s*startAppDataLoads\(\);\s*signalAppAuthReady\(\);/);
 assert.doesNotMatch(app, /\nrender\(\);\s*\ninitCloudLoginGate\(\)/, "protected modules must not render before the cloud login gate resolves");
 assert.match(douyinHot, /if\(window\.mmnAuthReady\)start\(\);\s*else window\.addEventListener\("mmn:auth-ready",start,\{once:true\}\)/);
 assert.match(app, /function storageKey\([\s\S]*?scope\.canMigrateLegacy/);

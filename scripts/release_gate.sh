@@ -29,8 +29,11 @@ fi
 
 echo "MMN release gate: syntax checks"
 "$NODE_BIN" --check app.js
+"$NODE_BIN" --check legacy-product-evaluation.js
 "$NODE_BIN" --check bf-factory.js
 "$NODE_BIN" --check group-dashboard.js
+"$NODE_BIN" --check lead-dashboard.js
+"$NODE_BIN" --check vehicle-decision.js
 "$NODE_BIN" --check t-cycle.js
 "$NODE_BIN" --check sales-warning-cycle-context.js
 "$NODE_BIN" --check scripts/release_gate_all_surfaces.js
@@ -38,6 +41,7 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_sales_warning_cycle_context.js
 "$NODE_BIN" tests/test_marketing_cycle_context.js
 "$NODE_BIN" tests/test_nsr_map.js
+"$NODE_BIN" tests/test_legacy_product_evaluation.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
 "$NODE_BIN" tests/test_group_dashboard_ui.js
 "$NODE_BIN" tests/test_social_competitor_picker.js
@@ -48,7 +52,7 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 "$NODE_BIN" tests/test_ensure_local_mmn.js
 "$NODE_BIN" tests/test_public_vendor_names.js
-python3 -m py_compile server.py group_dashboard.py product_whitepaper.py bf_factory/*.py
+python3 -m py_compile server.py group_dashboard.py product_whitepaper.py attribution_reasoning.py selling_point_advisory.py strategy_report_package.py vehicle_decision.py bf_factory/*.py
 python3 -m unittest \
   tests.test_product_whitepaper \
   tests.test_product_summary_import \

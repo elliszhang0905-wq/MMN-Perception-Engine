@@ -64,6 +64,28 @@ from opportunity_pipeline import (
     heat_scores,
 )
 from cockpit_decision_loop import derive_execution_recommendations
+from vehicle_decision import (
+    SURFACES,
+    adjudicate_conflict as adjudicate_vehicle_decision_conflict,
+    create_action as create_vehicle_decision_action,
+    create_snapshot as create_vehicle_decision_snapshot,
+    generate_knowhow_candidate as generate_vehicle_knowhow_candidate,
+    generate_learning_candidate as generate_vehicle_learning_candidate,
+    generate_report as generate_vehicle_decision_report,
+    get_flow_state as vehicle_decision_flow_state,
+    get_report as get_vehicle_decision_report,
+    get_snapshot as get_vehicle_decision_snapshot,
+    init_vehicle_decision_schema,
+    list_report_versions as list_vehicle_decision_report_versions,
+    list_snapshots as list_vehicle_decision_snapshots,
+    publish_report as publish_vehicle_decision_report,
+    record_result as record_vehicle_action_result,
+    render_report_markdown as render_vehicle_decision_markdown,
+    render_report_pptx as render_vehicle_decision_pptx,
+    review_knowhow_candidate as review_vehicle_knowhow_candidate,
+    review_learning_candidate as review_vehicle_learning_candidate,
+    update_action_status as update_vehicle_decision_action_status,
+)
 from group_dashboard import build_group_dashboard_payload, build_sales_warning_demo, merge_sales_payloads, parse_cpca_ice_market
 from weekly_market_refresh import load_weekly_market_snapshot, refresh_weekly_market_snapshot
 from mmn_model_governance import (
@@ -71,6 +93,20 @@ from mmn_model_governance import (
     TASK_ROUTER_POLICIES,
     cockpit_governance_snapshot,
     public_model_governance_contract,
+)
+from selling_point_advisory import (
+    REVIEW_ROLES as SELLING_POINT_REVIEW_ROLES,
+    init_schema as init_selling_point_advisory_schema,
+    latest_run as latest_selling_point_advisory,
+    record_manual_review as record_selling_point_manual_review,
+    run_advisory as run_selling_point_advisory,
+)
+from strategy_report_package import (
+    INTERNAL_ROLES as STRATEGY_REPORT_ROLES,
+    create_or_reuse_snapshot as create_strategy_report_snapshot,
+    get_package_bytes as get_strategy_report_package_bytes,
+    init_schema as init_strategy_report_schema,
+    run_package as run_strategy_report_package,
 )
 from bf_factory.repository import (
     BFConflictError,
@@ -157,6 +193,15 @@ from policy_intelligence import (
     seed_policy_mvp,
     seed_policy_sources,
 )
+from attribution_reasoning import (
+    PROVIDERS as ATTRIBUTION_PROVIDERS,
+    arbitrate as arbitrate_attribution_reasoning,
+    build_evidence_packet as build_attribution_evidence_packet,
+    init_schema as init_attribution_reasoning_schema,
+    load_run as load_attribution_reasoning_run,
+    save_run as save_attribution_reasoning_run,
+    validate_customer_language as validate_attribution_customer_language,
+)
 try:
     from creator_distillation.tasks import (
         celery_app as creator_celery_app,
@@ -176,8 +221,8 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260721-douyin-content-defense-1"
-APP_RELEASE_DATE = "2026-07-21"
+APP_VERSION_CODE = "beta-1.03-20260722-decision-closure-1"
+APP_RELEASE_DATE = "2026-07-22"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -224,6 +269,8 @@ EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
 EXECUTIVE_BRIEF_REVIEW_TASKS = {}
 SALES_WARNING_REVIEW_LOCK = Lock()
 SALES_WARNING_REVIEW_TASKS = {}
+ATTRIBUTION_REVIEW_LOCK = Lock()
+ATTRIBUTION_REVIEW_TASKS = {}
 DOUYIN_COLLECTOR_LOCK = Lock()
 DOUYIN_COLLECTOR_TASKS = {}
 DOUYIN_COLLECTOR_LAST_JOB = {}
@@ -304,6 +351,7 @@ def active_local_job_summary():
         ("routerReview", ROUTER_REVIEW_LOCK, ROUTER_REVIEW_TASKS),
         ("executiveBriefReview", EXECUTIVE_BRIEF_REVIEW_LOCK, EXECUTIVE_BRIEF_REVIEW_TASKS),
         ("salesWarningReview", SALES_WARNING_REVIEW_LOCK, SALES_WARNING_REVIEW_TASKS),
+        ("attributionReview", ATTRIBUTION_REVIEW_LOCK, ATTRIBUTION_REVIEW_TASKS),
     )
     by_type = {}
     for label, lock, tasks in task_maps:
@@ -907,6 +955,10 @@ def init_db():
         );
         """)
         init_policy_schema(conn)
+        init_attribution_reasoning_schema(conn)
+        init_vehicle_decision_schema(conn)
+        init_selling_point_advisory_schema(conn)
+        init_strategy_report_schema(conn)
         seed_policy_sources(conn)
         seed_policy_mvp(conn, org_id="local", edition="china")
         migrate_vertical_scope_schema(conn)
@@ -3244,6 +3296,7 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/opportunity-map/review",
     "/api/opportunity-map/manual-reviews",
     "/api/group-dashboard/cycle-review",
+    "/api/attribution-reasoning/run",
     "/api/cockpit/execution-cycles",
     "/api/cockpit/execution-cycles/monitoring",
     "/api/douyin-hot/recognize",
@@ -3989,6 +4042,70 @@ def call_provider(provider, messages, task_type, mode="fast", reviewer=False):
     raise ValueError(f"不支持的模型路由：{provider}")
 
 
+def run_selling_point_advisory_request(conn, body, org_id="local", user_id="local", provider_runner=None):
+    """Run three blind advisory channels; provider identity stays server-internal."""
+    provider_by_role = dict(zip(SELLING_POINT_REVIEW_ROLES, ("qwen", "deepseek", "kimi")))
+
+    def role_runner(role, messages):
+        provider = provider_by_role[role]
+        if provider_runner:
+            return provider_runner(provider, messages)
+        return call_provider(provider, messages, "strategy_reasoning", mode="deep")
+
+    return run_selling_point_advisory(
+        conn,
+        body,
+        org_id=org_id,
+        user_id=user_id,
+        role_runner=role_runner,
+        force=bool((body or {}).get("force")),
+    )
+
+
+def run_strategy_report_package_request(conn, body, org_id="local", user_id="local", provider_runner=None):
+    """Freeze the current cockpit scope, then run three blind neutral channels."""
+    body = dict(body or {})
+    scope = dict(body.get("scope") or {})
+    edition = edition_from(scope.get("edition") or body.get("edition") or "china")
+    model = str(scope.get("model") or "").strip()
+    if not model:
+        raise ValueError("缺少当前车型，不能生成策略汇报资料包")
+    surface_inputs = vehicle_decision_surface_inputs(model, org_id, edition)
+    flow = vehicle_decision_flow_state(conn, org_id=org_id, edition=edition, model=model)
+    existing_snapshots = list_vehicle_decision_snapshots(
+        conn, org_id=org_id, edition=edition, model=model, limit=5,
+    )
+    server_data = {
+        "vehicleDecisionSurfaceInputs": surface_inputs,
+        "actionResultLearningKnowhow": flow,
+        "vehicleDecisionSnapshots": existing_snapshots,
+        "readOnlyAdapter": True,
+    }
+    snapshot = create_strategy_report_snapshot(
+        conn, body, org_id=org_id, user_id=user_id, edition=edition,
+        mmn_version=APP_VERSION_CODE, server_data=server_data,
+    )
+    provider_by_role = dict(zip(STRATEGY_REPORT_ROLES, ("deepseek", "qwen", "kimi")))
+
+    def role_runner(role, messages):
+        provider = provider_by_role[role]
+        raw = provider_runner(provider, messages) if provider_runner else call_provider(
+            provider, messages, "complex_strategy", mode="deep",
+        )
+        return raw if isinstance(raw, dict) else parse_json_object(raw)
+
+    package = run_strategy_report_package(
+        conn, snapshot["snapshotId"], org_id=org_id, user_id=user_id,
+        role_runner=role_runner, force=bool(body.get("force")),
+    )
+    return {"snapshot": {
+        "snapshotId": snapshot["snapshotId"],
+        "evidenceFingerprint": snapshot["evidenceFingerprint"],
+        "reused": snapshot.get("reused", False),
+        "generatedAt": snapshot["generatedAt"],
+    }, "package": package}
+
+
 def policy_strategy_messages(dashboard_result):
     impact = dict((dashboard_result or {}).get("vehicleImpact") or {})
     packet = {
@@ -4064,6 +4181,102 @@ def run_policy_strategy_validation(dashboard_result, provider_runner=None):
         "kimi": kimi_config("deep")["model"],
     }
     return validated
+
+
+def current_attribution_dashboard_payload(org_id="local", edition="china"):
+    """Build the same deterministic evidence base used by the live group dashboard."""
+    candidates = [
+        ROOT.parent / "mmn-dcd-sales-crawler" / "data" / "processed" / "latest.json",
+        DATA_DIR / "dongchedi_sales" / "latest.json",
+        DATA_DIR / "dongchedi_sales" / "latest_mmn_perception_feed.json",
+    ]
+    sales_payloads = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            sales_payloads.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    sales_payload = merge_sales_payloads(sales_payloads)
+    fuel_snapshot = cpca_fuel_market_payload()
+    fuel_market = parse_cpca_ice_market(fuel_snapshot.get("payload")) if fuel_snapshot else None
+    if fuel_market:
+        fuel_market["sourceFetchedAt"] = fuel_snapshot.get("fetchedAt")
+        fuel_market["sourceStale"] = fuel_snapshot.get("stale") is True
+    with db() as conn:
+        return build_group_dashboard_payload(conn, sales_payload, org_id, edition, fuel_market=fuel_market)
+
+
+def attribution_reasoning_messages(packet):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN跨域归因独立复核角色。只能使用用户消息中的锁定证据，不得补写平台、内容、线索ID、销售跟进、价格金融、库存交付或真实转化率。"
+                "请沿细分市场容量→细分市场销量→声量→线索→订单达成率论证，主动提出反证与替代解释。三路复核彼此独立，不得假设其他角色结论。"
+                "除固定枚举值、evidenceIds、P0/P1/P2和必要业务缩写外，所有客户可见自然语言字段必须使用简体中文，不得输出整句英文。"
+                "不要在输出中写技术供应商或模型名称。只输出一个合法JSON对象，字段必须完整："
+                "verdict(market_demand_gap|awareness_gap|downstream_funnel_break|mixed|insufficient)、"
+                "primaryBreak(market_capacity|segment_sales|voice|lead|order|unknown)、conclusion、counterEvidence、"
+                "alternativeExplanations(string数组，最多4项)、nextActions(对象数组，最多3项，每项含priority/action/metric/stopCondition)、"
+                "stopCondition、causalBoundary、evidenceIds、confidence(0-1)。"
+                "evidenceIds必须完整复制输入evidenceIds；声量不等于需求，订单达成率不等于同批线索转化率，三路一致也不构成因果证明。"
+            ),
+        },
+        {"role": "user", "content": json.dumps(packet, ensure_ascii=False)},
+    ]
+
+
+def run_attribution_reasoning(group_payload, model="奥迪E7X", provider_runner=None):
+    packet = build_attribution_evidence_packet(group_payload, model)
+    if packet.get("status") != "ready":
+        return packet, {}, {}, {
+            "status": "insufficient_evidence",
+            "providers": {},
+            "providerErrors": {},
+            "reasons": ["跨域证据链未完整，未调用三路复核"],
+            "commonEvidenceIds": [],
+            "finalConclusion": None,
+        }
+    messages = attribution_reasoning_messages(packet)
+
+    def run_one(provider):
+        started = time.perf_counter()
+        timeout = max(MMN_CRITIC_TIMEOUT, int(env_value("MMN_ATTRIBUTION_MODEL_TIMEOUT", "140")))
+        retry_messages = list(messages)
+        last_error = None
+        for attempt in range(2):
+            try:
+                if provider_runner:
+                    raw = provider_runner(provider, retry_messages)
+                elif provider == "qwen":
+                    raw = call_qwen(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, enable_thinking=False)
+                elif provider == "deepseek":
+                    raw = call_deepseek(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, response_format={"type": "json_object"})
+                else:
+                    raw = call_kimi(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600)
+                parsed = parse_json_object(raw)
+                if not isinstance(parsed, dict):
+                    raise ValueError("未返回JSON研判对象")
+                validate_attribution_customer_language(parsed)
+                parsed["_latencyMs"] = round((time.perf_counter() - started) * 1000)
+                parsed["_attempt"] = attempt + 1
+                return parsed
+            except Exception as exc:
+                last_error = exc
+                retry_messages = messages + [{"role": "system", "content": "上一次响应未通过客户输出校验。请把所有自然语言字段改为简体中文，保留必要业务缩写；缩短文字，只返回一个完整合法JSON对象，不要Markdown。"}]
+        raise last_error or ValueError("三路复核调用失败")
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(run_one, provider) for provider in ATTRIBUTION_PROVIDERS}
+        for provider, future in futures.items():
+            try:
+                outputs[provider] = future.result()
+            except Exception as exc:
+                errors[provider] = str(exc)
+    return packet, outputs, errors, arbitrate_attribution_reasoning(outputs, packet["evidenceIds"], errors)
 
 def normalize_vehicle_config_review(value):
     item = value if isinstance(value, dict) else parse_json_object(value)
@@ -8148,6 +8361,29 @@ def clean_mmn_consulting_text(text):
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
+
+def vertical_learning_fingerprint(context):
+    locked = {
+        "model": context.get("model") or "",
+        "platform": context.get("platform") or "",
+        "period": context.get("period") or "",
+        "source": context.get("source") or "",
+        "rows": [
+            {
+                "competitor": item.get("competitor"),
+                "positiveRank": item.get("positiveRank"),
+                "negativeRank": item.get("negativeRank"),
+                "share": item.get("share"),
+                "status": item.get("status"),
+            }
+            for item in (context.get("rows") or [])[:30]
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(locked, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
 def local_vertical_learning_draft(context):
     model = context.get("model") or "当前车型"
     platform = context.get("platform") or "垂媒"
@@ -8170,21 +8406,124 @@ def local_vertical_learning_draft(context):
         f"标题：{model}在{platform}{period}的正反向竞争格局学习\n标签：#正反向排名 #竞品关系 #垂媒竞争格局\n一句话结论：{model}要先处理{top_neg}带来的反向牵引，再放大与{top_pos}的正向对比。"
     ])
 
-def fuse_vertical_learning(context, qwen_text=None, deepseek_text=None, rule_text=None):
-    qwen_clean = clean_mmn_consulting_text(qwen_text or "")
-    deepseek_clean = clean_mmn_consulting_text(deepseek_text or "")
-    rule_clean = clean_mmn_consulting_text(rule_text or local_vertical_learning_draft(context))
-    base = qwen_clean or rule_clean
-    if "### MMN交叉验证结论" not in base:
-        checks = []
-        if qwen_clean:
-            checks.append("MMN主控：已生成竞争格局主判断和打法。")
-        if deepseek_clean:
-            checks.append("MMN质检：已复核事实边界和过度承诺风险。")
-        if not checks:
-            checks.append("MMN本地规则：已按正反向排名生成兜底策略。")
-        base = f"{base}\n\n### MMN交叉验证结论\n" + "\n".join(checks)
-    return clean_mmn_consulting_text(base)
+def vertical_learning_synthesis_prompt(context, analyses, fingerprint):
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是MMN正反向竞争格局的融合裁决角色。三份独立分析只是内部输入，绝不能并列输出三份结论。"
+                "你必须回到同一个锁定事实包，识别三路共识、处理分歧、剔除越过事实边界的推断，融合成唯一一份策略结论。"
+                "不得新增销量、声量、评论、搜索、点击、转化或用户动机事实；模型一致本身也不是证据。"
+                "只输出一份Markdown，不得出现‘分析一/二/三’、模型或供应商名称，也不得罗列三路原结论。"
+                "固定输出5段：### 一句话判断、### 为什么会这样、### 关键竞品关系、### 下一步打法、### RAG入库卡片。"
+                "一句话判断必须是唯一主结论；下一步打法最多3条，每条写动作和验证指标。"
+                + MMN_OUTPUT_STYLE
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "任务": "把三路独立分析融合为唯一的MMN模型输出策略",
+                    "证据指纹": fingerprint,
+                    "锁定事实": {
+                        "model": context.get("model"),
+                        "platform": context.get("platform"),
+                        "period": context.get("period"),
+                        "source": context.get("source"),
+                        "rows": (context.get("rows") or [])[:30],
+                    },
+                    "内部分析输入": analyses,
+                    "发布规则": "只发布融合后的一个结论；共同点用于提高稳定性，分歧必须裁决或降为待验证项。",
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+
+
+def validate_vertical_learning_synthesis(text):
+    cleaned = clean_mmn_consulting_text(text)
+    required = ("一句话判断", "为什么会这样", "关键竞品关系", "下一步打法", "RAG入库卡片")
+    if not cleaned or any(f"### {heading}" not in cleaned for heading in required):
+        raise ValueError("融合结果结构不完整")
+    forbidden = ("独立判断1", "独立判断2", "独立判断3", "分析一：", "分析二：", "分析三：")
+    if any(token in cleaned for token in forbidden):
+        raise ValueError("融合结果仍包含并列结论")
+    return cleaned
+
+
+def run_vertical_rank_learning(context, provider_runner=None, synthesis_runner=None):
+    prompt = vertical_learning_prompt(context)
+    fingerprint = vertical_learning_fingerprint(context)
+
+    def run_one(provider):
+        if provider_runner:
+            raw = provider_runner(provider, prompt)
+        elif provider == "qwen":
+            raw = call_qwen(prompt, temperature=.18, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1800, enable_thinking=False)
+        elif provider == "deepseek":
+            raw = call_deepseek(
+                prompt, temperature=.18, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                max_tokens=1800,
+            )
+        else:
+            raw = call_kimi(prompt, temperature=.18, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1800)
+        cleaned = clean_mmn_consulting_text(raw)
+        if not cleaned:
+            raise ValueError("分析通道未返回有效内容")
+        return cleaned
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(run_one, provider) for provider in ("qwen", "deepseek", "kimi")}
+        for provider, future in futures.items():
+            try:
+                outputs[provider] = future.result()
+            except Exception:
+                errors[provider] = "当前独立分析通道未完成"
+    synthesis = ""
+    if len(outputs) == 3:
+        try:
+            synthesis_prompt = vertical_learning_synthesis_prompt(
+                context,
+                {"analysisA": outputs["qwen"], "analysisB": outputs["deepseek"], "analysisC": outputs["kimi"]},
+                fingerprint,
+            )
+            if synthesis_runner:
+                raw_synthesis = synthesis_runner(synthesis_prompt)
+            elif provider_runner:
+                raw_synthesis = provider_runner("fusion", synthesis_prompt)
+            else:
+                raw_synthesis = call_qwen(
+                    synthesis_prompt, temperature=.08, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=2000, enable_thinking=False,
+                )
+            synthesis = validate_vertical_learning_synthesis(raw_synthesis)
+        except Exception:
+            errors["fusion"] = "三路分析已完成，但融合裁决未完成"
+    verified = len(outputs) == 3 and bool(synthesis)
+    public_errors = {
+        {"qwen": "flagshipA", "deepseek": "flagshipB", "kimi": "flagshipC", "fusion": "fusion"}[provider]: message
+        for provider, message in errors.items()
+    }
+    return {
+        "status": "verified" if verified else "degraded",
+        "statusLabel": "三路分析已融合为一个结论" if verified else (
+            "三路分析已完成，但融合结论未形成，未写入RAG" if len(outputs) == 3
+            else f"三路分析仅完成{len(outputs)}/3，未写入RAG"
+        ),
+        "evidenceFingerprint": fingerprint,
+        "text": synthesis or local_vertical_learning_draft(context),
+        "analysisChecks": {
+            "analysisA": "completed" if "qwen" in outputs else "unavailable",
+            "analysisB": "completed" if "deepseek" in outputs else "unavailable",
+            "analysisC": "completed" if "kimi" in outputs else "unavailable",
+            "fusion": "completed" if synthesis else "unavailable",
+        },
+        "errors": public_errors,
+        "canPersist": verified,
+    }
 
 def rag_strategy_prompt(question, project, references):
     compact_refs = []
@@ -9622,20 +9961,20 @@ def save_vertical_ai_learning(context, summary_text, org_id="local", edition="ch
         "type": "MMN智能体学习",
         "title": f"{model}｜正反向竞争格局AI学习｜{period}",
         "body": summary_text[:1600],
-        "keywords": [model, platform, period, "正反向排名", "千问学习", "竞品策略"],
+        "keywords": [model, platform, period, "正反向排名", "MMN模型输出策略", "竞品策略"],
         "tags": [platform, "MMN学习", "垂媒竞争格局", "车型数据资产"],
         "targets": ["MMN策略", "RAG知识库管理", "垂媒竞争格局", "决策驾驶舱"],
-        "source": source_file or "qwen_vertical_learning",
+        "source": source_file or "mmn_vertical_learning",
         "createdAt": now(),
         "metadata": {
             "doc_id": stable_id("vertical-ai-learning-doc", platform, model, period),
             "domain": "车型数据资产",
-            "module": "千问正反向排名学习",
+            "module": "MMN三路正反向排名学习",
             "topic": f"{model}正反向竞争格局",
             "entity": model,
             "period": period,
             "platform": platform,
-            "model_provider": "qwen"
+            "analysis_gate": "three_flagships_fused"
         }
     }
     with db() as conn:
@@ -12593,6 +12932,149 @@ def make_pptx(payload):
     prs.save(out)
     return out.getvalue()
 
+
+def vehicle_decision_surface_inputs(model, org_id="local", edition="china"):
+    """Adapt existing persisted cockpit outputs without modifying upstream data."""
+    model = str(model or "").strip()
+    if not model:
+        raise ValueError("请选择车型后再创建决策快照")
+    aliases = list(dict.fromkeys(filter(None, [
+        model,
+        re.sub(r"^AUDI\s*", "奥迪", model, flags=re.I),
+        re.sub(r"^奥迪\s*", "AUDI ", model),
+        re.sub(r"\s+", "", model),
+    ])))
+    alias_marks = ",".join("?" for _ in aliases)
+    generated_at = now()
+    inputs = {key: [] for key, _label in SURFACES}
+    with db() as conn:
+        run = conn.execute(
+            f"""select * from agent_runs where org_id=? and edition=? and model in ({alias_marks})
+               order by updated_at desc limit 1""", (org_id, edition, *aliases),
+        ).fetchone()
+        if run:
+            final_output = json.loads(run["final_output_json"] or "{}")
+            conclusion = str(final_output.get("executiveConclusion") or final_output.get("summary") or final_output.get("text") or "").strip()
+            if not conclusion:
+                opportunities = final_output.get("opportunities") or []
+                conclusion = str((opportunities[0] if opportunities else {}).get("conclusion") or (opportunities[0] if opportunities else {}).get("label") or "").strip()
+            if conclusion:
+                conclusion = re.sub(r"\s+", " ", conclusion).strip()[:320]
+                inputs["executive_summary"].append({
+                    "conclusion": conclusion, "claimType": "inference", "evidenceIds": [f"DB:agent_runs:{run['id']}"],
+                    "timeWindow": json.loads(run["time_window_json"] or "{}") or run["updated_at"],
+                    "businessImpact": 5, "confidence": .72 if run["status"] == "completed" else .45,
+                    "evidenceStatus": "aligned" if run["status"] == "completed" else "limited",
+                    "uncertainty": "综合结论来自现有策略运行，仍受各表面证据门禁约束。",
+                    "sourceVersion": f"agent-run:{run['id']}",
+                })
+
+        policy = conn.execute(
+            f"""select * from policy_analysis_results where org_id=? and edition=? and model in ({alias_marks})
+               order by updated_at desc limit 1""", (org_id, edition, *aliases),
+        ).fetchone()
+        if policy:
+            result = json.loads(policy["result_json"] or "{}")
+            summary = result.get("summary") or result.get("vehicleImpact") or {}
+            conclusion = summary if isinstance(summary, str) else summary.get("conclusion") or summary.get("summary") or summary.get("impact")
+            inputs["policy_environment"].append({
+                "conclusion": str(conclusion or "已有车型政策分析，但当前摘要字段不足"),
+                "claimType": "inference" if conclusion else "unknown", "evidenceIds": [f"DB:policy_analysis_results:{policy['id']}"],
+                "timeWindow": policy["updated_at"], "businessImpact": 3, "confidence": .75 if policy["review_status"] in {"approved", "verified"} else .45,
+                "evidenceStatus": "aligned" if policy["review_status"] in {"approved", "verified"} else "manual_required",
+                "uncertainty": "政策适配必须同时核对车型版本、地区、价格与场景。", "sourceVersion": f"policy:{policy['final_version']}",
+            })
+
+        social = conn.execute(
+            """select * from social_trend_snapshots where org_id=? and edition=? and
+               (keyword=? or keyword like ?) order by created_at desc limit 1""",
+            (org_id, edition, model, f"%{model}%"),
+        ).fetchone()
+        if social:
+            result = json.loads(social["result_json"] or "{}")
+            items = result.get("items") or result.get("records") or []
+            content_count = result.get("contentCount") if result.get("contentCount") is not None else len(items)
+            inputs["communication_momentum"].append({
+                "conclusion": f"当前留存公开社媒样本 {content_count} 条，仅表示已采集传播样本，不代表全网声量。",
+                "claimType": "fact", "evidenceIds": [f"DB:social_trend_snapshots:{social['id']}"], "timeWindow": social["created_at"],
+                "businessImpact": 3, "confidence": .7, "evidenceStatus": "aligned" if content_count else "limited",
+                "uncertainty": "公开可检索样本存在平台覆盖边界。", "sourceVersion": social["source_mode"],
+            })
+
+        vertical = conn.execute(
+            f"""select * from vertical_rank_assets where org_id=? and edition=? and own_model in ({alias_marks})
+               order by period desc, updated_at desc limit 12""", (org_id, edition, *aliases),
+        ).fetchall()
+        if vertical:
+            latest_period = vertical[0]["period"]
+            latest = [row for row in vertical if row["period"] == latest_period]
+            strongest = sorted(latest, key=lambda row: float(row["compare_share"] or 0), reverse=True)[0]
+            evidence = [f"DB:vertical_rank_assets:{row['id']}" for row in latest]
+            inputs["platform_position"].append({
+                "conclusion": f"{latest_period}垂媒对比关系中，{strongest['competitor_model']}与本品的对比占比最高。",
+                "claimType": "fact", "evidenceIds": evidence, "timeWindow": latest_period,
+                "businessImpact": 4, "confidence": .82, "evidenceStatus": "aligned",
+                "metricDefinition": "车型对比次数占比，不代表偏好、口碑或销量。", "sourceVersion": strongest["file_hash"],
+            })
+            inputs["product_voice"].append({
+                "conclusion": f"用户将本品与{strongest['competitor_model']}放入同一比较集合，具体购买理由仍需属性NSR与原始评论补证。",
+                "claimType": "inference", "evidenceIds": evidence, "timeWindow": latest_period,
+                "businessImpact": 4, "confidence": .62, "evidenceStatus": "limited",
+                "uncertainty": "对比关系不能直接解释购买偏好。", "sourceVersion": strongest["file_hash"],
+            })
+
+        project = conn.execute(
+            f"""select * from project_snapshots where org_id=? and edition=? and model in ({alias_marks})
+               order by created_at desc limit 1""", (org_id, edition, *aliases),
+        ).fetchone()
+        if project and not inputs["product_voice"]:
+            payload = json.loads(project["payload_json"] or "{}")
+            rows = ((payload.get("state") or {}).get("rows") or [])
+            inputs["product_voice"].append({
+                "conclusion": f"当前项目快照保存了 {len(rows)} 条车型传播与认知记录；属性级结论需在报告中逐条追溯。",
+                "claimType": "fact", "evidenceIds": [f"DB:project_snapshots:{project['id']}"],
+                "timeWindow": project["data_version"] or project["created_at"], "businessImpact": 3,
+                "confidence": .66 if rows else .3, "evidenceStatus": "aligned" if rows else "limited",
+                "sourceVersion": project["data_version"] or project["id"],
+            })
+
+    warning_path = DATA_DIR / "dongchedi_sales" / "sales_warning_latest.json"
+    warning = {}
+    if warning_path.exists():
+        try:
+            warning = json.loads(warning_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            warning = {}
+    vehicles = warning.get("saic_vehicles") or []
+    model_key = re.sub(r"\s+", "", model).lower()
+    matched = next((item for item in vehicles if re.sub(r"\s+", "", str(item.get("model") or item.get("series_name") or "")).lower() in model_key or model_key in re.sub(r"\s+", "", str(item.get("model") or item.get("series_name") or "")).lower()), None)
+    if matched:
+        sales = matched.get("sales") if matched.get("sales") is not None else matched.get("sales_volume")
+        risk = matched.get("warning_level") or matched.get("level") or "待解释"
+        inputs["sales_warning"].append({
+            "conclusion": f"{warning.get('period') or '当前周期'}车型销量为 {sales if sales is not None else '缺失'}，预警状态为{risk}。",
+            "claimType": "fact", "evidenceIds": [f"FILE:{warning_path.name}:{warning.get('generated_at') or warning.get('captured_at')}"],
+            "timeWindow": warning.get("period") or "unknown", "businessImpact": 5, "confidence": .9 if warning.get("complete") else .6,
+            "evidenceStatus": "aligned" if warning.get("complete") else "limited", "metricDefinition": "懂车帝车型月销量口径",
+            "sourceVersion": warning.get("schema_version") or "sales-warning",
+        })
+        inputs["group_impact"].append({
+            "conclusion": f"本品处于上汽车型销量预警池，需结合集团同赛道结构判断资源优先级。",
+            "claimType": "inference", "evidenceIds": [f"FILE:{warning_path.name}:{warning.get('generated_at') or warning.get('captured_at')}"],
+            "timeWindow": warning.get("period") or "unknown", "businessImpact": 4, "confidence": .72,
+            "evidenceStatus": "aligned", "uncertainty": "车型销量不能单独代表集团营销影响。",
+            "sourceVersion": warning.get("schema_version") or "sales-warning",
+        })
+        inputs["track_environment"].append({
+            "conclusion": f"车型所在细分市场为{matched.get('segment_label') or matched.get('market_key') or '待核对'}，竞争强度需按同级别、同能源口径比较。",
+            "claimType": "fact" if matched.get("segment_label") or matched.get("market_key") else "unknown",
+            "evidenceIds": [f"FILE:{warning_path.name}:{warning.get('generated_at') or warning.get('captured_at')}"],
+            "timeWindow": warning.get("period") or "unknown", "businessImpact": 4, "confidence": .7,
+            "evidenceStatus": "aligned" if matched.get("segment_label") or matched.get("market_key") else "limited",
+            "sourceVersion": warning.get("schema_version") or "sales-warning",
+        })
+    return inputs
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -12871,6 +13353,121 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 org_id=auth.get("org_id", "local"),
             ))
             return
+        strategy_package_download_match = re.fullmatch(r"/api/strategy-report-packages/([^/]+)/download", parsed.path)
+        if strategy_package_download_match:
+            try:
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    package_file = get_strategy_report_package_bytes(
+                        conn, strategy_package_download_match.group(1), org_id=auth.get("org_id", "local")
+                    )
+                if not package_file:
+                    raise ValueError("当前组织中不存在该策略汇报资料包")
+                filename, payload = package_file
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(filename)}")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            return
+        if parsed.path == "/api/vehicle-decisions/snapshots":
+            try:
+                query = parse_qs(parsed.query); auth = self.current_auth() or {}
+                with db() as conn:
+                    items = list_vehicle_decision_snapshots(
+                        conn, org_id=auth.get("org_id", "local"),
+                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        model=str(query.get("model", [""])[0] or "").strip(),
+                        limit=query.get("limit", [50])[0],
+                    )
+                self.send_json({"ok": True, "snapshots": items})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_snapshot_match = re.fullmatch(r"/api/vehicle-decisions/snapshots/([^/]+)", parsed.path)
+        if vehicle_snapshot_match:
+            try:
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    item = get_vehicle_decision_snapshot(conn, vehicle_snapshot_match.group(1), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "snapshot": item})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            return
+        vehicle_report_versions_match = re.fullmatch(r"/api/vehicle-decisions/snapshots/([^/]+)/reports", parsed.path)
+        if vehicle_report_versions_match:
+            try:
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    items = list_vehicle_decision_report_versions(conn, vehicle_report_versions_match.group(1), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "reports": items})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_report_export_match = re.fullmatch(r"/api/vehicle-decisions/reports/([^/]+)/export\.(md|pptx)", parsed.path)
+        if vehicle_report_export_match:
+            try:
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    report = get_vehicle_decision_report(conn, vehicle_report_export_match.group(1), org_id=auth.get("org_id", "local"))
+                file_type = vehicle_report_export_match.group(2)
+                if file_type == "md":
+                    payload = render_vehicle_decision_markdown(report).encode("utf-8")
+                    content_type, suffix = "text/markdown; charset=utf-8", "md"
+                else:
+                    payload = render_vehicle_decision_pptx(report)
+                    content_type, suffix = "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"
+                filename = quote(f"{report['model']}-车型综合决策报告-v{report['version']}.{suffix}")
+                self.send_response(200); self.send_header("Content-Type", content_type)
+                self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{filename}")
+                self.send_header("Content-Length", str(len(payload))); self.end_headers(); self.wfile.write(payload)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_report_match = re.fullmatch(r"/api/vehicle-decisions/reports/([^/]+)", parsed.path)
+        if vehicle_report_match:
+            try:
+                auth = self.current_auth() or {}
+                with db() as conn:
+                    item = get_vehicle_decision_report(conn, vehicle_report_match.group(1), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "report": item})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            return
+        if parsed.path == "/api/vehicle-decisions/flow":
+            try:
+                query = parse_qs(parsed.query); auth = self.current_auth() or {}
+                with db() as conn:
+                    flow = vehicle_decision_flow_state(conn, org_id=auth.get("org_id", "local"), edition=edition_from(query.get("edition", ["china"])[0]), model=str(query.get("model", [""])[0] or "").strip())
+                self.send_json({"ok": True, **flow})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/selling-point-advisory/latest":
+            try:
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                request_context = {
+                    "edition": query.get("edition", ["china"])[0],
+                    "brand": query.get("brand", [""])[0],
+                    "model": query.get("model", [""])[0],
+                    "competitor": query.get("competitor", [""])[0],
+                    "label": query.get("label", [""])[0],
+                    "tCycle": {
+                        "phase": query.get("phase", [""])[0],
+                        "display": query.get("tDisplay", [""])[0],
+                    },
+                    "evidenceFingerprint": query.get("evidenceFingerprint", [""])[0],
+                }
+                with db() as conn:
+                    result = latest_selling_point_advisory(conn, request_context, auth.get("org_id", "local"))
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/opportunity-map/own-document/latest":
             query = parse_qs(parsed.query)
             auth = self.current_auth() or {}
@@ -13032,6 +13629,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(dongchedi_sales_payload())
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc), "items": []}, 500)
+            return
+        if parsed.path == "/api/attribution-reasoning":
+            q = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            model = str(q.get("model", ["奥迪E7X"])[0] or "奥迪E7X").strip()
+            edition = edition_from(q.get("edition", ["china"])[0])
+            with db() as conn:
+                run = load_attribution_reasoning_run(
+                    conn,
+                    org_id=auth.get("org_id", "local"),
+                    edition=edition,
+                    model=model,
+                )
+            self.send_json({"ok": True, "run": run})
             return
         if parsed.path == "/api/group-dashboard-demo":
             try:
@@ -13556,6 +14167,52 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             roles = cloud_post_required_roles(parsed.path)
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/strategy-report-packages":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = auth.get("org_id", "local")
+                user_id = auth.get("user_id") or auth.get("username") or "local"
+                with db() as conn:
+                    result = run_strategy_report_package_request(
+                        conn, body, org_id=org_id, user_id=user_id,
+                    )
+                result["package"]["downloadUrl"] = f"/api/strategy-report-packages/{result['package']['packageId']}/download"
+                self.send_json({"ok": True, **result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/selling-point-advisory/run":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = auth.get("org_id", "local")
+                user_id = auth.get("user_id") or auth.get("username") or "local"
+                with db() as conn:
+                    result = run_selling_point_advisory_request(conn, body, org_id=org_id, user_id=user_id)
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/selling-point-advisory/manual-review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                org_id = auth.get("org_id", "local")
+                user_id = auth.get("user_id") or auth.get("username") or "local"
+                with db() as conn:
+                    result = record_selling_point_manual_review(
+                        conn,
+                        body.get("runId"),
+                        org_id=org_id,
+                        user_id=user_id,
+                        reason=body.get("reason"),
+                        decision=body.get("decision"),
+                    )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/content-capability-kb/script-jobs":
             try:
                 body = self.read_json()
@@ -13723,6 +14380,41 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": True, "policy": policy})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/attribution-reasoning/run":
+            task_id = ""
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                model = str(body.get("model") or "奥迪E7X").strip()
+                edition = edition_from(body.get("edition") or "china")
+                task_id = str(uuid.uuid4())
+                with ATTRIBUTION_REVIEW_LOCK:
+                    ATTRIBUTION_REVIEW_TASKS[task_id] = {"status": "running", "model": model, "startedAt": now()}
+                dashboard_payload = current_attribution_dashboard_payload(
+                    auth.get("org_id", "local"), edition
+                )
+                packet, outputs, errors, arbitration = run_attribution_reasoning(
+                    dashboard_payload, model
+                )
+                with db() as conn:
+                    run = save_attribution_reasoning_run(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                        model=model,
+                        packet=packet,
+                        provider_outputs=outputs,
+                        provider_errors=errors,
+                        arbitration=arbitration,
+                    )
+                self.send_json({"ok": True, "run": run}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": "三路归因复核未完成：%s" % str(exc)}, 400)
+            finally:
+                if task_id:
+                    with ATTRIBUTION_REVIEW_LOCK:
+                        ATTRIBUTION_REVIEW_TASKS[task_id] = {"status": "done", "finishedAt": now()}
             return
         if parsed.path == "/api/policy-intelligence/analyze":
             try:
@@ -14045,6 +14737,113 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     user_id=auth.get("username", "local"),
                 )
                 self.send_json({"ok": True, "cycle": cycle}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vehicle-decisions/snapshots":
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                edition = edition_from(body.get("edition") or "china")
+                body["surfaceInputs"] = vehicle_decision_surface_inputs(body.get("model"), org_id, edition)
+                with db() as conn:
+                    snapshot = create_vehicle_decision_snapshot(conn, body, org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local", edition=edition)
+                self.send_json({"ok": True, "snapshot": snapshot}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vehicle-decisions/reports":
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    report = generate_vehicle_decision_report(conn, str(body.get("snapshotId") or ""), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "report": report}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_publish_match = re.fullmatch(r"/api/vehicle-decisions/reports/([^/]+)/publish", parsed.path)
+        if vehicle_publish_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    report = publish_vehicle_decision_report(conn, vehicle_publish_match.group(1), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local", approval_note=body.get("approvalNote"))
+                self.send_json({"ok": True, "report": report})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_conflict_match = re.fullmatch(r"/api/vehicle-decisions/conflicts/([^/]+)/adjudicate", parsed.path)
+        if vehicle_conflict_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    report = adjudicate_vehicle_decision_conflict(conn, vehicle_conflict_match.group(1), body.get("decision"), body.get("reason"), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "report": report})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vehicle-decisions/actions":
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    action = create_vehicle_decision_action(conn, body, org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local", edition=edition_from(body.get("edition") or "china"))
+                self.send_json({"ok": True, "action": action}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_action_status_match = re.fullmatch(r"/api/vehicle-decisions/actions/([^/]+)/status", parsed.path)
+        if vehicle_action_status_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    action = update_vehicle_decision_action_status(conn, vehicle_action_status_match.group(1), body.get("status"), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "action": action})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_action_result_match = re.fullmatch(r"/api/vehicle-decisions/actions/([^/]+)/results", parsed.path)
+        if vehicle_action_result_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    result = record_vehicle_action_result(conn, vehicle_action_result_match.group(1), body, org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "result": result}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vehicle-decisions/learning-candidates":
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    learning = generate_vehicle_learning_candidate(conn, str(body.get("actionId") or ""), body, org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local", as_of=body.get("asOf"))
+                self.send_json({"ok": True, "learningCandidate": learning}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_learning_review_match = re.fullmatch(r"/api/vehicle-decisions/learning-candidates/([^/]+)/review", parsed.path)
+        if vehicle_learning_review_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    learning = review_vehicle_learning_candidate(conn, vehicle_learning_review_match.group(1), body.get("decision"), body.get("reason"), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "learningCandidate": learning})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vehicle-decisions/knowhow-candidates":
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    knowhow = generate_vehicle_knowhow_candidate(conn, body, org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "knowhowCandidate": knowhow}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        vehicle_knowhow_review_match = re.fullmatch(r"/api/vehicle-decisions/knowhow-candidates/([^/]+)/review", parsed.path)
+        if vehicle_knowhow_review_match:
+            try:
+                body = self.read_json(); auth = self.current_auth() or {}; org_id = self.request_org_id(body.get("orgId"))
+                with db() as conn:
+                    knowhow = review_vehicle_knowhow_candidate(conn, vehicle_knowhow_review_match.group(1), body.get("decision"), body.get("reason"), org_id=org_id, user_id=auth.get("user_id") or auth.get("username") or "local")
+                self.send_json({"ok": True, "knowhowCandidate": knowhow})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -14645,29 +15444,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 context = body.get("context", {})
-                qwen_text = deepseek_text = None
-                errors = {}
-                rule_text = local_vertical_learning_draft(context)
-                try:
-                    qwen_text = clean_mmn_consulting_text(call_qwen(vertical_learning_prompt(context), temperature=.25))
-                except Exception as exc:
-                    errors["qwen"] = str(exc)
-                if deepseek_config()["configured"]:
-                    try:
-                        deepseek_text = clean_mmn_consulting_text(call_deepseek(vertical_learning_prompt(context), temperature=.18, profile="fast", timeout=90, max_tokens=900))
-                    except Exception as exc:
-                        errors["deepseek"] = str(exc)
-                text = fuse_vertical_learning(context, qwen_text=qwen_text, deepseek_text=deepseek_text, rule_text=rule_text)
+                if not (context.get("rows") or []):
+                    raise ValueError("当前车型没有可分析的正反向关系数据")
+                result = run_vertical_rank_learning(context)
                 auth = self.current_auth() or {}
-                knowledge = save_vertical_ai_learning(context, text, auth.get("org_id", "local"), body.get("edition", "china"))
+                knowledge = None
+                if result["canPersist"]:
+                    knowledge = save_vertical_ai_learning(
+                        context, result["text"], auth.get("org_id", "local"), body.get("edition", "china")
+                    )
                 self.send_json({
                     "ok": True,
-                    "text": text,
+                    **result,
                     "knowledgeItem": knowledge,
-                    "parts": {"qwen": qwen_text, "deepseek": deepseek_text, "rules": rule_text},
-                    "errors": errors,
-                    "qwen": qwen_config(),
-                    "deepseek": deepseek_config()
                 })
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)

@@ -71,8 +71,8 @@ async function main() {
     }));
     add("data-first map removes official verification controls", !initial.legacyControls, JSON.stringify(initial));
     add("data-first map declares imported NSR as its only basis", /导入的 .*属性 NSR/.test(initial.summary) && /蓝色仅提示数据缺口/.test(initial.summary) && !/官网|双模型|人工确认/.test(initial.summary), initial.summary);
-    add("top competitors follow the imported comparison models", initial.topCompetitors === "小米YU7 / 奥迪Q6L e-tron", initial.topCompetitors);
-    add("map renders one own-model bubble per attribute with benchmark semantics", initial.statuses.some(value => value.includes("asset")) && initial.statuses.some(value => value.includes("risk")) && initial.statuses.some(value => value.includes("pending")) && new Set(initial.labels).size === initial.labels.length && initial.benchmarkLabels.some(value => /本品领先|对标/.test(value)), JSON.stringify(initial));
+    add("top competitors follow the imported comparison models", initial.models.length > 0 && initial.topCompetitors === initial.models.join(" / "), initial.topCompetitors);
+    add("map renders one own-model bubble per attribute with benchmark semantics", initial.statuses.length > 0 && initial.statuses.every(value => /\bbubble\b/.test(value) && /\b(asset|chance|risk|pending)\b/.test(value)) && new Set(initial.labels).size === initial.labels.length && initial.labels.length === initial.mapBubbles && initial.benchmarkLabels.length === initial.mapBubbles && initial.benchmarkLabels.every(value => /本品领先|对标|待补竞品/.test(value)), JSON.stringify(initial));
 
     await page.getByRole("button", { name: "奥迪Q6L e-tron", exact: true }).click();
     const toggled = await page.evaluate(() => ({
