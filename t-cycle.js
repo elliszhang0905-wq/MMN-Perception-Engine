@@ -16,8 +16,8 @@
  function parseIsoDate(value){
   const match=String(value||"").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if(!match)return null;
-  const date=new Date(Date.UTC(Number(match[1]),Number(match[2])-1,Number(match[3])));
-  return Number.isNaN(date.getTime())?null:date;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),date=new Date(Date.UTC(year,month-1,day));
+  return Number.isNaN(date.getTime())||date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day?null:date;
  }
  function formatIsoDate(date){return date instanceof Date&&!Number.isNaN(date.getTime())?date.toISOString().slice(0,10):""}
  function addDays(value,days){const date=parseIsoDate(value);if(!date)return"";date.setUTCDate(date.getUTCDate()+Number(days||0));return formatIsoDate(date)}

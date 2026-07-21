@@ -20,5 +20,16 @@ assert.deepEqual(cycle.phaseDates(t0, cycle.phaseForOffset(48)), {
 assert.equal(cycle.tLabel(-21), "T-21");
 assert.equal(cycle.tLabel(0), "T0");
 assert.equal(cycle.tLabel(48), "T+48");
+assert.equal(cycle.parseIsoDate("2026-02-30"), null);
+
+const boundaryExpectations = new Map([
+  [-46, "preheat"], [-45, "preheat"], [-44, "preheat"], [-23, "preheat"], [-22, "preheat"],
+  [-21, "presale"], [-20, "presale"], [-2, "presale"], [-1, "presale"],
+  [0, "launch"], [1, "amplify"], [2, "amplify"], [29, "amplify"], [30, "amplify"],
+  [31, "conversion"], [32, "conversion"], [89, "conversion"], [90, "conversion"],
+  [91, "validation"], [92, "validation"], [119, "validation"], [120, "validation"],
+  [121, "alwayson"], [122, "alwayson"],
+]);
+for (const [offset, phaseKey] of boundaryExpectations) assert.equal(cycle.phaseForOffset(offset).key, phaseKey, `offset ${offset}`);
 
 console.log("t cycle: ok");

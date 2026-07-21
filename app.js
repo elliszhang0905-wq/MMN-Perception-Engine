@@ -1160,11 +1160,12 @@ function applyModelSelection(model){
   restoreOpportunityContext();
  }
 }
-function selectDashboardVehicleContext(model,{source="dashboard",notify=true}={}){
+function selectDashboardVehicleContext(model,{source="dashboard",notify=true,cycleContext=null}={}){
  const models=modelOptions();
  if(!models.includes(model)&&!productEvaluationCatalogHas(model))return false;
  const changed=state.config.model!==model;
  applyModelSelection(model);
+ if(cycleContext)syncMarketingModelCycleContext(cycleContext,model);
  dashBrandOpen=brandForDisplay(model);
  dashboardTopicPlanState={loading:false,result:null,error:""};
  save();
@@ -1178,6 +1179,18 @@ window.MMNVehicleContext={
  select:(model,options={})=>selectDashboardVehicleContext(model,options),
  registerProductEvaluation:(evaluation,options={})=>registerProductEvaluation(evaluation,options)
 };
+window.addEventListener("mmn:sales-warning-model-selected",event=>{
+ const cycleContext=event.detail?.cycleContext,model=event.detail?.model;
+ if(!cycleContext||!model)return;
+ syncMarketingModelCycleContext(cycleContext,model);
+ if(model===state.config.model){renderTCyclePanel();renderSellingPointDecisionWorkbench()}
+});
+window.addEventListener("mmn:sales-warning-cycle-refresh-failed",()=>{
+ const model=state.config.model,current=rawMarketingModelContext(model),cycleContext=current.salesWarningCycle;
+ if(!cycleContext||cycleContext.status!=="verified")return;
+ syncMarketingModelCycleContext({...cycleContext,refreshStatus:"stale"},model);
+ renderTCyclePanel();renderSellingPointDecisionWorkbench();
+});
 function isSummaryImport(){return state.importQuality?.kind==="PRODUCT_EVALUATION_SUMMARY"}
 function isUnavailableProductEvaluation(){return state.importQuality?.kind==="PRODUCT_EVALUATION_UNAVAILABLE"}
 function isBlockedImport(){return state.importQuality?.kind==="INVALID_LEGACY_SUMMARY_IMPORT"}
@@ -1505,43 +1518,59 @@ function syncDashboardModelFromControls(){
 }
 function localIsoDate(){const now=new Date(),offset=now.getTimezoneOffset()*60000;return new Date(now-offset).toISOString().slice(0,10)}
 function defaultMarketingModelContext(model=state.config.model){
- const isE7X=/\bE7X\b/i.test(String(model||""));
- return{firstDate:isE7X?"2026-05-08":"",t0Date:isE7X?"2026-05-29":"",assessmentDate:localIsoDate(),selectedPhase:"auto",claims:[],competitors:{},productEvidence:null};
+ return{firstDate:"",t0Date:"",assessmentDate:localIsoDate(),selectedPhase:"auto",claims:[],competitors:{},productEvidence:null,salesWarningCycle:null};
 }
 function marketingModelContextKey(model=state.config.model){
  const context=opportunityCacheContext(),selected=String(model||"unselected").trim()||"unselected";
  return[context.orgId,context.edition,selected].map(value=>encodeURIComponent(value)).join(":");
 }
-function loadMarketingModelContext(model=state.config.model){
+function rawMarketingModelContext(model=state.config.model){
  const defaults=defaultMarketingModelContext(model);
  try{const parsed=JSON.parse(opportunityStorageValue("mmnMarketingModelContext",marketingModelContextKey(model))||"null");return parsed&&typeof parsed==="object"?{...defaults,...parsed,claims:Array.isArray(parsed.claims)?parsed.claims:[],competitors:parsed.competitors&&typeof parsed.competitors==="object"?parsed.competitors:{}}:defaults}catch(_){return defaults}
 }
-function saveMarketingModelContext(value,model=state.config.model){
- const next={...defaultMarketingModelContext(model),...(value||{}),claims:Array.isArray(value?.claims)?value.claims:[],competitors:value?.competitors&&typeof value.competitors==="object"?value.competitors:{}};
+function loadMarketingModelContext(model=state.config.model){
+ const stored=rawMarketingModelContext(model),cycleContext=stored.salesWarningCycle;
+ if(cycleContext?.status==="verified")return{...stored,t0Date:cycleContext.launchDate,assessmentDate:cycleContext.assessmentDate,cycleSource:cycleContext.source,cycleStatus:cycleContext.status,phaseKey:cycleContext.phaseKey,phaseLabel:cycleContext.phaseLabel,phaseRange:cycleContext.phaseRange};
+ if(cycleContext?.status)return{...stored,t0Date:"",selectedPhase:"auto",cycleSource:cycleContext.source,cycleStatus:cycleContext.status,phaseKey:"",phaseLabel:cycleContext.phaseLabel||"",phaseRange:""};
+ return stored;
+}
+function saveMarketingModelContext(value,model=state.config.model,{authoritativeSync=false}={}){
+ const stored=rawMarketingModelContext(model),protectedCycle=stored.salesWarningCycle?.status==="verified",next={...defaultMarketingModelContext(model),...(value||{}),claims:Array.isArray(value?.claims)?value.claims:[],competitors:value?.competitors&&typeof value.competitors==="object"?value.competitors:{}};
+ if(protectedCycle&&!authoritativeSync){next.firstDate=stored.firstDate;next.t0Date=stored.t0Date;next.assessmentDate=stored.assessmentDate;next.salesWarningCycle=stored.salesWarningCycle}
  try{localStorage.setItem(opportunityScopedStorageKey("mmnMarketingModelContext",marketingModelContextKey(model)),JSON.stringify(next))}catch(_){}
+ return next;
+}
+function syncMarketingModelCycleContext(cycleContext,model=state.config.model){
+ if(!cycleContext||String(cycleContext.model||model)!==String(model))return rawMarketingModelContext(model);
+ const stored=rawMarketingModelContext(model),normalized={...cycleContext,model,seriesId:String(cycleContext.seriesId||""),source:String(cycleContext.source||"sales-warning")};
+ const next=saveMarketingModelContext({...stored,selectedPhase:"auto",salesWarningCycle:normalized},model,{authoritativeSync:true});
+ const rail=document.querySelector("#t-cycle-rail");if(rail&&model===state.config.model)delete rail.dataset.positioned;
  return next;
 }
 function marketingModelPhase(context=loadMarketingModelContext()){
  const offset=globalThis.MmnTCycle?.dayOffset(context.t0Date,context.assessmentDate),current=globalThis.MmnTCycle?.phaseForOffset(offset),selected=context.selectedPhase&&context.selectedPhase!=="auto"?globalThis.MmnTCycle?.phases.find(item=>item.key===context.selectedPhase):current;
- return{offset,current,selected:selected||current||globalThis.MmnTCycle?.phases?.[0]||null};
+ return{offset,current,selected:selected||current||null};
 }
 function tCycleTopicStage(phase){return phase?`${phase.label}（${phase.range}）`:"周期待设置"}
 function renderTCyclePanel(){
  const rail=document.querySelector("#t-cycle-rail"),currentLabel=document.querySelector("#t-cycle-current"),contextBox=document.querySelector("#t-cycle-context");if(!rail||!currentLabel||!contextBox||!globalThis.MmnTCycle)return;
  if(rail.dataset.model!==state.config.model){rail.dataset.model=state.config.model;delete rail.dataset.positioned}
- const context=loadMarketingModelContext(),phaseState=marketingModelPhase(context),actual=phaseState.current,selected=phaseState.selected,offset=phaseState.offset,tLabel=globalThis.MmnTCycle.tLabel(offset);
+ const context=loadMarketingModelContext(),cycleContext=context.salesWarningCycle,managed=Boolean(cycleContext?.status),verified=cycleContext?.status==="verified",phaseState=marketingModelPhase(context),actual=phaseState.current,selected=phaseState.selected,offset=phaseState.offset,tLabel=globalThis.MmnTCycle.tLabel(offset),displayPhase=verified?cycleContext.phaseLabel:actual?.label;
  const firstInput=document.querySelector("#t-cycle-first-date"),t0Input=document.querySelector("#t-cycle-t0-date"),assessmentInput=document.querySelector("#t-cycle-assessment-date");
  if(firstInput)firstInput.value=context.firstDate||"";if(t0Input)t0Input.value=context.t0Date||"";if(assessmentInput)assessmentInput.value=context.assessmentDate||localIsoDate();
- currentLabel.textContent=context.t0Date&&actual?`${tLabel} · ${actual.label}`:"待设置T0";
+ const saveButton=document.querySelector("#t-cycle-save");[firstInput,t0Input,assessmentInput,saveButton].forEach(control=>{if(control)control.disabled=managed});
+ if(t0Input)t0Input.title=managed?"正式上市日由管理层销量预警维护":"";if(saveButton)saveButton.title=managed?"请回到销量预警维护正式上市日期":"";
+ currentLabel.textContent=verified&&actual?`${tLabel} · ${displayPhase}`:cycleContext?.status==="pending_review"?"上市日期待复核":cycleContext?.status==="missing"?"尚未设置正式上市日期":"待设置T0";
  const selectedDates=globalThis.MmnTCycle.phaseDates(context.t0Date,selected),total=selected?.end===null?null:selected?selected.end-selected.start+1:null,covered=selected&&Number.isFinite(offset)?Math.max(0,Math.min(total??Math.max(1,offset-selected.start+1),offset-selected.start+1)):0;
- contextBox.innerHTML=`<div><span>分析车型</span><b>${escapeHtml(state.config.model)}</b></div><div><span>当前阶段</span><b>${escapeHtml(actual?`${tLabel} ${actual.label}`:"待设置")}</b></div><div><span>正在查看</span><b>${escapeHtml(selected?.label||"待设置")}</b></div><div><span>实际日期</span><b>${escapeHtml(selectedDates.start?`${selectedDates.start}${selectedDates.end?` — ${selectedDates.end}`:" 起"}`:"等待T0")}</b></div><div><span>数据进度</span><b>${context.t0Date&&selected?`${covered}${total?`/${total}`:""}天`:"待接入"}</b></div>`;
+ const sourceLabel=verified?(cycleContext.refreshStatus==="stale"?"由销量预警同步 · 数据暂未刷新":cycleContext.source==="sales-warning-cache"?"由销量预警同步 · 上次成功缓存":"由销量预警同步"):cycleContext?.status==="pending_review"?"上市日期待复核":cycleContext?.status==="missing"?"请在销量预警补录":"手工周期";
+ contextBox.innerHTML=`<div><span>分析车型</span><b>${escapeHtml(state.config.model)}</b></div><div><span>当前阶段</span><b>${escapeHtml(actual?`${tLabel} ${displayPhase}`:"待设置")}</b></div><div><span>正在查看</span><b>${escapeHtml(selected?.label||"待设置")}</b></div><div><span>实际日期</span><b>${escapeHtml(selectedDates.start?`${selectedDates.start}${selectedDates.end?` — ${selectedDates.end}`:" 起"}`:"等待T0")}</b></div><div><span>数据进度</span><b>${context.t0Date&&selected?`${covered}${total?`/${total}`:""}天`:"待接入"}</b></div><div><span>周期来源</span><b>${escapeHtml(sourceLabel)}</b></div>`;
  rail.innerHTML=globalThis.MmnTCycle.phases.map(phase=>{const dates=globalThis.MmnTCycle.phaseDates(context.t0Date,phase),isActual=actual?.key===phase.key,isSelected=selected?.key===phase.key,status=!Number.isFinite(offset)?"waiting":isActual?"current":phase.end!==null&&offset>phase.end?"completed":offset<phase.start?"upcoming":"current";return`<button type="button" class="t-cycle-card ${status} ${isSelected?"selected":""}" data-t-cycle-phase="${escapeAttr(phase.key)}" aria-pressed="${isSelected?"true":"false"}"><span>${escapeHtml(phase.label)}</span><b>${escapeHtml(phase.range)}</b><small>${escapeHtml(dates.start?`${dates.start.slice(5)}${dates.end?`—${dates.end.slice(5)}`:"起"}`:"日期待设置")}</small><em>${status==="current"?"当前阶段":status==="completed"?"已完成":status==="upcoming"?"未开始":"待设置"}</em></button>`}).join("");
  const topicStage=document.querySelector("#dashboard-topic-stage");if(topicStage&&selected)topicStage.value=tCycleTopicStage(selected);
  rail.querySelectorAll("[data-t-cycle-phase]").forEach(button=>button.onclick=()=>{const next=loadMarketingModelContext();next.selectedPhase=button.dataset.tCyclePhase;saveMarketingModelContext(next);renderTCyclePanel();renderSellingPointDecisionWorkbench();const topic=document.querySelector("#dashboard-topic-stage"),chosen=globalThis.MmnTCycle.phases.find(item=>item.key===next.selectedPhase);if(topic)topic.value=tCycleTopicStage(chosen)});
  const activeCard=rail.querySelector(".t-cycle-card.selected");if(activeCard&&!rail.dataset.positioned){rail.dataset.positioned="true";requestAnimationFrame(()=>activeCard.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}))}
 }
 function bindTCyclePanel(){
- const saveButton=document.querySelector("#t-cycle-save");if(saveButton)saveButton.onclick=()=>{const context=loadMarketingModelContext();context.firstDate=document.querySelector("#t-cycle-first-date")?.value||"";context.t0Date=document.querySelector("#t-cycle-t0-date")?.value||"";context.assessmentDate=document.querySelector("#t-cycle-assessment-date")?.value||localIsoDate();context.selectedPhase="auto";saveMarketingModelContext(context);const rail=document.querySelector("#t-cycle-rail");if(rail)delete rail.dataset.positioned;renderTCyclePanel();renderSellingPointDecisionWorkbench();toast("T周期已更新")};
+ const saveButton=document.querySelector("#t-cycle-save");if(saveButton)saveButton.onclick=()=>{const context=loadMarketingModelContext();if(context.salesWarningCycle?.status){toast("该车型周期由销量预警维护，请回到上方日期入口修改");return}context.firstDate=document.querySelector("#t-cycle-first-date")?.value||"";context.t0Date=document.querySelector("#t-cycle-t0-date")?.value||"";context.assessmentDate=document.querySelector("#t-cycle-assessment-date")?.value||localIsoDate();context.selectedPhase="auto";saveMarketingModelContext(context);const rail=document.querySelector("#t-cycle-rail");if(rail)delete rail.dataset.positioned;renderTCyclePanel();renderSellingPointDecisionWorkbench();toast("T周期已更新")};
  document.querySelectorAll("[data-t-cycle-scroll]").forEach(button=>button.onclick=()=>document.querySelector("#t-cycle-rail")?.scrollBy({left:Number(button.dataset.tCycleScroll)*320,behavior:"smooth"}));
 }
 const SELLING_POINT_LAUNCH_MODELS=["奥迪E7X","奥迪E5 Sportback","智己LS8","MG4","荣威i6","别克至境E7","ID.ERA 9X","尚界Z7"];

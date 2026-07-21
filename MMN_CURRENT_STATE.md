@@ -58,6 +58,7 @@
 | 本地业务存储 | 以 SQLite 与 JSON/JSONL/导入文件为主；浏览器还保存按组织与版本隔离的本地状态 | `server.py`、`mmn_data.py`、`data/`、`app.js` |
 | 异步任务 | 进程内线程任务；达人蒸馏在 Redis 可用时可由 Celery worker 执行，本地可回退为本地队列 | `server.py`、`creator_distillation/tasks.py`、`docker-compose.yml` |
 | 文档/报告 | Python 文档解析与导出；Node/PptxGenJS、Marp、Mermaid 负责 PPT 生成/校验链路 | `bf_factory/`、`creator_script_generation.py`、`src/ppt-agent/`、`package.json` |
+| 销量预警—T周期适配 | 将已核验的销量预警正式上市日、考核日、T+X与阶段原子同步到驾驶舱T周期；服务端优先、本地仅作可靠缓存 | `sales-warning-cycle-context.js`、`group-dashboard.js`、`app.js`、`t-cycle.js` |
 | 测试与验收 | Python `unittest`、Node 脚本测试、Playwright 全表面发布门禁 | `tests/`、`scripts/release_gate.sh`、`scripts/release_gate_all_surfaces.js` |
 
 ### 2.2 启动方式
@@ -131,6 +132,7 @@
 | 抖音热点实体 | 榜单/采集器 → 规则与模型识别 → 人工复核 → 排名快照 | 车型实体、关系、证据类型、fingerprint、双路审计、复核状态；不完整识别进入人工队列 | `douyin_hot_entities.py`、`douyin-hot-demo.js`、`server.py` |
 | 抖音逐视频洞察/内容防线 | 用户单条点击 → 原页验证与多模态证据包 → 三路独立分析 → MMN 交叉校验 → 持久化洞察/降级/人工复核 | 仅用户手动点击触发；跨24小时/7天/30天按内容指纹幂等复用；播放量变化不触发重分析；无可读视频时明确 `limited_analysis`/失败，不声称已读完整视频 | `douyin_video_insights.py`、`douyin_browser_evidence.py`、`content_defense.py`、`creator_distillation/media_processing.py`、`server.py`、`douyin-hot-demo.js` |
 | 销量预警 | 懂车帝销量文件、CPCA/已导入市场数据 → 月度历史与预警计算 → 驾驶舱 | 细分市场、车型、上市时间、月销量、市场容量、阈值与观察周期；当前规则和数据源以 `group_dashboard.py`、`sales_warning_*` 文件为准 | `group_dashboard.py`、`data/dongchedi_sales/`、`server.py` |
+| 销量预警—T周期联动 | `/api/group-dashboard-demo.salesWarningCycles` 已核验记录 → 周期上下文适配 → 车型选择事件 → 下方T周期/卖点决策/传播阶段 | 依次使用服务端已核验记录、本地已核验缓存、具有完整日期证据的数据库记录；仅有阶段文字不生成日期；权威T0禁止在下方覆盖 | `sales-warning-cycle-context.js`、`group-dashboard.js`、`app.js`、`t-cycle.js` |
 | 决策执行周期 | 驾驶舱输入/策略 → `/api/cockpit/execution-cycles` → 项目周期与监测状态 | T0、阶段、建议、状态、监测窗口；用于策略执行与复盘，不扩展为线索/到店/成交归因 | `cockpit_decision_loop.py`、`server.py`、`app.js`、`t-cycle.js` |
 | 政策情报 | 官方/公开政策来源 → 抽取与多路交叉验证 → SQLite 记录/人工复核 | 来源、地区、适用车型、价格/场景、共同证据 ID、评估状态；证据不足必须 `manual_required` | `policy_intelligence.py`、`policy-intelligence.js`、`server.py` |
 | BF 工厂 | Word/PPT/PDF/图片/表格/文本 → 解析分段 → A–F 结构/策略/复核 → 编辑/Word 导出 | 项目/客户隔离、来源页码/段落、样本状态、章节意图、人工修订、风险复核；模型不可用时只生成明确降级稿 | `bf_factory/`、`bf-factory.js`、`server.py` |
@@ -182,12 +184,14 @@
 
 - 2026-07-20：建立长期系统状态包机制：在 `AGENTS.md` 增加永久维护规则，创建本文件，新增 `scripts/check_mmn_state.mjs`，并在 `package.json` 增加 `npm run check:mmn-state`。
 - 2026-07-21：大版本升级为 `beta 1.03`，在现有抖音六榜与品牌车型雷达后增加手动逐条视频洞察和热点内容防线；建立证据包、三路独立分析、交叉校验、分歧/降级、缓存幂等、刷新恢复与服务器端公开原页浏览器取证链路。
+- 2026-07-21：修复管理层销量预警与下方T周期的上下文断链；八台重点车型从已核验周期记录继承T0、考核日、T+X、阶段与七段日期，服务端记录优先且本地仅作失败缓存，移除E7X硬编码默认日期，并保护权威T0不被下方普通保存覆盖；仅本地验证，未部署。
 
 ## 9. 验证状态
 
 - 状态包事实来源：本轮已审查 `README.md`、`README_DEPLOY.md`、`AGENTS.md`、`package.json`、`Dockerfile`、`docker-compose.yml`、`index.html`、`app.js`、`server.py`、`mmn_data.py`、模块 repository/schema、路由知识图谱与目录结构。
 - 状态检查命令：`npm run check:mmn-state`。检查业务源码、页面/组件、接口、schema、依赖与部署配置；测试、普通文档、锁文件及 `data/`、`output/`、`tmp/`、`backups/`、`logs/` 运行数据/产物不触发状态同步要求。
 - 2026-07-21 beta 1.03 新鲜验证：完整 Python 回归 `467/467` 通过，逐视频洞察与媒体专项 `48/48` 通过，内容防线、启动器和状态包脚本测试通过；本地与生产健康接口均返回 `beta-1.03-20260721-douyin-content-defense-1`。生产全表面桌面/390px 检查无失败、运行时错误或失败响应；真实点击视频任务 `afecda8b179142a19cd96638f8717818` 形成 full 证据、三路独立完成并达到 `verified`，刷新后两端均显示“洞察已完成”，无页面溢出、控制台错误、失败请求、内部错误文案或证据哈希串。服务器另对第二条 117.5 秒视频取得 6 个时间点关键帧，证明取证不依赖固定样本。
+- 2026-07-21 销量预警—T周期联动新鲜验证：Python 全量 `486/486` 通过；新增/相关 Node 周期、适配、持久化与UI契约通过；`127.0.0.1:8765` 真实浏览器验证 MG4 `T+84`、奥迪E7X `T+49`、红色预警奥迪E5 Sportback `T+304`，三车均为上下同车、同考核日、七张真实日期卡和自动当前阶段；刷新、快速三车切换、强制接口失败缓存与无重选恢复通过；1440px 与 390px 均通过，390px 页面横向溢出为 false，正常业务流控制台错误、失败请求和 4xx/5xx 响应均为 0。`scripts/release_gate.sh` 的本工单语法/周期专项/150项后端子集均通过，但全门禁仍被既有 NSR 地图标签重叠检查拦截（530px 图面检测到 7 处重叠，`runtimeErrors=[]`），未在本工单越界修改。
 - 仓库没有独立 lint 命令；前端/Python 语法检查已由 `scripts/release_gate.sh` 执行。PPT 生成命令会生成交付产物，不属于本次状态机制影响面，未额外执行。
 
 ## 10. 后续每次任务的固定汇报格式
