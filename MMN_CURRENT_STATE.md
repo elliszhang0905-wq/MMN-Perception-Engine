@@ -2,21 +2,15 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.1`
-- 最后核验时间：`2026-07-22 00:41:00 +0800`（Asia/Shanghai）
-- Git commit：短 hash `7aa0526`；完整 hash `7aa05262112c4c7c98bca2e6ca32886f07ee1658`
+- 状态包版本：`v2.2`
+- 最后核验时间：`2026-07-22 00:26:27 +0800`（Asia/Shanghai）
+- Git commit：短 hash `030c76e`；完整 hash `030c76efc918aadd3ac6e6aad4e514049cfdcb27`
 - 当前分支：`main`
 - 生成时工作树状态：`dirty`
-- 基线说明：`7aa0526` 是当前 GitHub `main` 基线；隔离发布工作树仅包含本轮竞争趋势图可读性修复、专项测试、缓存版本与研发档案，尚未提交、推送或部署。
+- 基线说明：`030c76e` 是本轮竞争趋势图可读性修复的候选发布提交；隔离发布工作树中的业务代码、专项测试、缓存版本与研发档案已提交，当前只更新本状态包以记录候选发布证据，尚未推送或部署。
 - 未提交修改路径（按 `git status --short`，未展开未跟踪目录内的文件内容）：
   - `MMN_CURRENT_STATE.md`
-  - `app.js`
-  - `index.html`
-  - `knowhow.css`
-  - `server.py`
-  - `tests/test_all_surfaces_release_gate.py`
-  - `tests/test_vertical_trend_label_layout.js`
-  - `docs/研发档案/2026-07-22_beta-1.03_竞争趋势图稀疏周期可读性修复.md`
+  - `output/mmn-eval-seed-report.json`（发布门禁生成的临时评测产物，不进入提交）
 - 维护要求：以后每次更新本状态包时，必须同步刷新状态包版本、最后核验时间、短/完整 commit hash、当前分支、工作树状态和未提交修改路径。
 
 > 应用版本常量：`beta 1.03`
