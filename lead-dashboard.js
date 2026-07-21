@@ -54,6 +54,7 @@
 	 };
 
 	 async function loadAttributionRun(force=false){
+	  if(!window.mmnAuthReady)return;
 	  if(!activeModel||(!force&&attributionLoadedModel===activeModel))return;
 	  attributionLoadedModel=activeModel;attributionError="";
 	  try{const response=await fetch(`/api/attribution-reasoning?model=${encodeURIComponent(activeModel)}&edition=china`,{headers:typeof authHeaders==="function"?authHeaders():{}}),payload=await response.json();if(!response.ok||payload.ok===false)throw new Error(payload.error||"读取复核记录失败");attributionRun=payload.run||null}
@@ -100,6 +101,7 @@
 	 root.addEventListener("click",event=>{if(event.target.closest?.(".lead-attribution-trigger"))setAttributionBubble(!attributionBubbleOpen);if(event.target.closest?.(".lead-attribution-run"))runAttributionReview()});
 	 document.addEventListener("click",event=>{if(!attributionBubbleOpen)return;const card=root.querySelector(".lead-attribution-card");if(card&&!card.contains(event.target))setAttributionBubble(false)});
 	 document.addEventListener("keydown",event=>{if(event.key==="Escape"&&attributionBubbleOpen){setAttributionBubble(false);root.querySelector(".lead-attribution-trigger")?.focus()}});
+	 window.addEventListener("mmn:auth-ready",()=>loadAttributionRun(true));
 
  window.addEventListener("mmn:sales-warning-model-selected",event=>{
   const detail=event.detail||{};

@@ -26,6 +26,8 @@ assert.match(ui, /三旗舰一致也不构成因果证据/);
 assert.match(ui, /\/api\/attribution-reasoning\?model=/);
 assert.match(ui, /\/api\/attribution-reasoning\/run/);
 assert.match(ui, /typeof authHeaders==="function"\?authHeaders\(\):\{\}/);
+assert.match(ui, /if\(!window\.mmnAuthReady\)return/);
+assert.match(ui, /mmn:auth-ready/);
 assert.match(ui, /开始三路复核/);
 assert.match(ui, /三路独立复核已完成 · 裁决一致/);
 assert.match(ui, /存在分歧或未全部完成，本轮不发布模型最终结论/);
