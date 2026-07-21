@@ -1,7 +1,7 @@
 (function(){
  const root=document.querySelector("#group-dashboard-root");
  if(!root)return;
- let loading=false,refreshingWeekly=false,loadedEdition="",attributionWarningEvidence=null,attributionProductEvaluation=null,attributionSalesPeriod="";
+ let loading=false,refreshingWeekly=false,loadedEdition="",cachedDashboardData=null,attributionWarningEvidence=null,attributionProductEvaluation=null,attributionSalesPeriod="";
  const uiState={viewKey:"brief",brand:"",vehicleId:"",marketDimension:"",warningModel:"奥迪E5 Sportback",warningSeriesId:"",policyCompareModel:"",policyRegion:"上海"};
  uiState.policyModel="奥迪E7X";
  const POLICY_REGIONS=[{value:"北京",label:"北京市"},{value:"上海",label:"上海市"},{value:"广东",label:"广东省"},{value:"浙江",label:"浙江省"},{value:"四川",label:"四川省"},{value:"湖北",label:"湖北省"},{value:"江苏",label:"江苏省"}];
@@ -404,14 +404,18 @@ function renderFullSegmentWarnings(warning){
    root.innerHTML='<div class="group-dashboard-error" role="status"><span>国内版专属看板</span><b>上汽集团营销看板 Demo 仅使用国内版数据，已与出海版数据隔离。</b></div>';
    return;
   }
-  if(loading||(!force&&!reviewPoll&&loadedEdition===currentEdition))return;
+  if(loading)return;
+  if(!force&&!reviewPoll&&loadedEdition===currentEdition){
+   if(cachedDashboardData)render(cachedDashboardData);
+   return cachedDashboardData;
+  }
   loading=true;if(!reviewPoll)skeleton();
   try{
    const response=await fetch(`/api/group-dashboard-demo?edition=${encodeURIComponent(currentEdition)}&refresh_review=${force&&!reviewPoll&&!suppressReview?"1":"0"}&policy_region=${encodeURIComponent(uiState.policyRegion)}&policy_model=${encodeURIComponent(uiState.policyModel)}`,{credentials:"same-origin",headers:typeof authHeaders==="function"?authHeaders():{}});
    const data=await response.json();
    if(!response.ok||!data.ok)throw new Error(data.error||`HTTP ${response.status}`);
    persistedSalesWarningCycles=data.salesWarningCycles&&typeof data.salesWarningCycles==="object"&&!Array.isArray(data.salesWarningCycles)?data.salesWarningCycles:{};
-   loadedEdition=currentEdition;render(data);return data;
+   cachedDashboardData=data;loadedEdition=currentEdition;render(data);return data;
   }catch(error){renderError(error);window.dispatchEvent(new CustomEvent("mmn:sales-warning-cycle-refresh-failed",{detail:{message:error?.message||"数据接口不可用"}}));return null}finally{loading=false}
  }
 

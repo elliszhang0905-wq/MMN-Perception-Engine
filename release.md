@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-22｜beta 1.03 决策闭环与旧版 NSR 兼容发布
+
+- 发布版本码：`beta-1.03-20260722-decision-closure-1`；应用合并提交 `619859582066f68afb074107948f68459a336c9f` 已推送 GitHub `main` 并部署 ECS。
+- 智己 L6 的 656 行旧版正负聚合数据通过只读兼容层获得显式属性 NSR；原数组、版本和 E7X 显式数据均未改写。上下层看板现在使用同一数据合同，其他符合已登记旧格式的车型可自动读取，未知格式保持缺数。
+- 同批发布车型综合决策、卖点证据与三路建议、正反向融合、归因复核、策略资料包，以及标准/管理层车型上下文隔离；管理层缓存复用会重新发布销量预警车型而不重复请求或改写数据。
+- 本地验证：Python `512/512`、标准发布门禁、150 项后端专项及全表面桌面/390px 门禁通过；覆盖 19 个客户入口、8 个管理视图，`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。L6 页面为 13 个属性气泡、5 个竞品、气泡重叠 0。
+- ECS 发布前备份：源码 `backups/mmn_source_pre_decision_20260722_020622.tar.gz`（SHA-256 `f13fef9790ac9f014e5ec6c08df0f8bdaee3079083e5f411bb12aa6c4789ccb7`），环境 `backups/mmn_env_pre_decision_20260722_020622.env`（SHA-256 `69d834bd972b3c32f04ac32c52221a21ffa661a1e75aa84618f19a09c1d22208`），数据 `backups/mmn_backup_20260722_020649.tar.gz`（SHA-256 `8c441c72f08184102bc087cbc6d5694ee421ea88b4129494faea3ae565ab001f`）。
+- ECS 数据保护：迁移前 61 张表、迁移后 75 张表；`organizations=6`、`users=6`、`project_snapshots=210`、`vertical_rank_assets=4642`、`social_trend_snapshots=9`、抖音榜单快照 6、视频洞察任务 1、归因运行 2 均保持不变；新增决策报告、卖点建议和资料包表均为 0 条。
+- ECS 运行：六个服务正常，核心服务健康；健康接口返回本版本码，部署窗口应用与代理未发现 Traceback、ERROR 或 HTTP 5xx。
+- 依赖审计边界：仓库没有 npm lockfile，`npm audit` 返回 `ENOLOCK`；未临时生成未经评审的锁文件。
+
 ## 2026-07-21｜beta 1.03 抖音热点内容攻防大版本
 
 - 发布版本码：`beta-1.03-20260721-douyin-content-defense-1`。
