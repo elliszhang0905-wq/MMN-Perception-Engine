@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 import uuid
 
 
@@ -19,6 +20,9 @@ REQUIRED_EVIDENCE_IDS = (
     "lead_achievement",
     "order_achievement",
 )
+
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
 
 
 E7X_LEAD_EVIDENCE = {
@@ -129,6 +133,25 @@ def build_evidence_packet(group_payload, model="奥迪E7X"):
     return packet
 
 
+def validate_customer_language(payload):
+    """Reject customer-visible reviews that are not predominantly Chinese."""
+    if not isinstance(payload, dict):
+        raise ValueError("未返回结构化研判")
+    texts = [str(payload.get(key) or "").strip() for key in (
+        "conclusion", "counterEvidence", "stopCondition", "causalBoundary"
+    )]
+    texts.extend(str(item).strip() for item in payload.get("alternativeExplanations") or [])
+    for item in payload.get("nextActions") or []:
+        if isinstance(item, dict):
+            texts.extend(str(item.get(key) or "").strip() for key in ("action", "metric", "stopCondition"))
+    for value in (item for item in texts if item):
+        chinese_count = len(_CJK_RE.findall(value))
+        latin_count = len(_LATIN_RE.findall(value))
+        if chinese_count < 2 or (latin_count and chinese_count < latin_count * 0.5):
+            raise ValueError("客户可见研判必须使用简体中文")
+    return payload
+
+
 def normalize_provider_output(provider, payload, allowed_evidence_ids):
     if not isinstance(payload, dict):
         raise ValueError("未返回结构化研判")
@@ -160,7 +183,7 @@ def normalize_provider_output(provider, payload, allowed_evidence_ids):
             actions.append(row)
     if not alternatives or not actions:
         raise ValueError("缺少替代解释或验证动作")
-    return {
+    normalized = {
         "provider": provider,
         "verdict": verdict,
         "primaryBreak": breakpoint,
@@ -170,6 +193,8 @@ def normalize_provider_output(provider, payload, allowed_evidence_ids):
         "evidenceIds": evidence_ids,
         "confidence": round(confidence, 4),
     }
+    validate_customer_language(normalized)
+    return normalized
 
 
 def arbitrate(provider_outputs, allowed_evidence_ids, provider_errors=None):
@@ -248,6 +273,12 @@ def public_run(run):
     for provider in PROVIDERS:
         detail = provider_details.get(provider)
         error = (run.get("providerErrors") or {}).get(provider)
+        if detail:
+            try:
+                validate_customer_language(detail)
+            except ValueError:
+                detail = None
+                error = "客户可见研判语言校验未通过"
         public_providers.append({
             "role": PUBLIC_ROLES[provider],
             "status": "completed" if detail else ("failed" if error else "pending"),

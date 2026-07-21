@@ -7,6 +7,7 @@ from attribution_reasoning import (
     build_evidence_packet,
     init_schema,
     load_run,
+    normalize_provider_output,
     save_run,
 )
 
@@ -66,6 +67,31 @@ class AttributionReasoningTest(unittest.TestCase):
         conflict = arbitrate({"qwen": review("qwen"), "deepseek": review("deepseek", primary="voice"), "kimi": review("kimi")}, REQUIRED_EVIDENCE_IDS)
         self.assertEqual(conflict["status"], "manual_required")
         self.assertIsNone(conflict["finalConclusion"])
+
+    def test_english_customer_review_is_rejected(self):
+        english = review("deepseek")
+        english.update({
+            "conclusion": "The main break is between leads and orders.",
+            "counterEvidence": "Awareness is strong, so exposure is not the only cause.",
+            "alternativeExplanations": ["Sales follow-up varies", "Pricing changed"],
+            "nextActions": [{"priority": "P0", "action": "Connect lead and order IDs", "metric": "Qualified lead order rate", "stopCondition": "Stop after two weeks"}],
+            "stopCondition": "Stop if there is no improvement",
+        })
+        with self.assertRaisesRegex(ValueError, "简体中文"):
+            normalize_provider_output("deepseek", english, REQUIRED_EVIDENCE_IDS)
+
+    def test_historical_english_review_is_hidden_from_public_output(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        packet = build_evidence_packet(dashboard_payload())
+        outputs = {provider: review(provider) for provider in ("qwen", "deepseek", "kimi")}
+        result = arbitrate(outputs, packet["evidenceIds"])
+        result["providers"]["deepseek"]["conclusion"] = "The main break is after leads."
+        saved = save_run(conn, org_id="local", edition="china", model="奥迪E7X", packet=packet, provider_outputs=outputs, provider_errors={}, arbitration=result)
+        reviewer_b = next(item for item in saved["providers"] if item["role"] == "独立复核B")
+        self.assertEqual(reviewer_b["status"], "failed")
+        self.assertIsNone(reviewer_b["review"])
+        self.assertNotIn("The main break", str(saved))
 
     def test_persistence_survives_new_connection_and_hides_provider_names(self):
         conn = sqlite3.connect(":memory:")

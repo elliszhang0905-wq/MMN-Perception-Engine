@@ -164,6 +164,7 @@ from attribution_reasoning import (
     init_schema as init_attribution_reasoning_schema,
     load_run as load_attribution_reasoning_run,
     save_run as save_attribution_reasoning_run,
+    validate_customer_language as validate_attribution_customer_language,
 )
 try:
     from creator_distillation.tasks import (
@@ -184,7 +185,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260721-attribution-reasoning-1"
+APP_VERSION_CODE = "beta-1.03-20260721-attribution-reasoning-2"
 APP_RELEASE_DATE = "2026-07-21"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -4111,6 +4112,7 @@ def attribution_reasoning_messages(packet):
             "content": (
                 "你是MMN跨域归因独立复核角色。只能使用用户消息中的锁定证据，不得补写平台、内容、线索ID、销售跟进、价格金融、库存交付或真实转化率。"
                 "请沿细分市场容量→细分市场销量→声量→线索→订单达成率论证，主动提出反证与替代解释。三路复核彼此独立，不得假设其他角色结论。"
+                "除固定枚举值、evidenceIds、P0/P1/P2和必要业务缩写外，所有客户可见自然语言字段必须使用简体中文，不得输出整句英文。"
                 "不要在输出中写技术供应商或模型名称。只输出一个合法JSON对象，字段必须完整："
                 "verdict(market_demand_gap|awareness_gap|downstream_funnel_break|mixed|insufficient)、"
                 "primaryBreak(market_capacity|segment_sales|voice|lead|order|unknown)、conclusion、counterEvidence、"
@@ -4138,19 +4140,14 @@ def run_attribution_reasoning(group_payload, model="奥迪E7X", provider_runner=
 
     def run_one(provider):
         started = time.perf_counter()
-        if provider_runner:
-            raw = provider_runner(provider, messages)
-            parsed = parse_json_object(raw)
-            if not isinstance(parsed, dict):
-                raise ValueError("未返回JSON研判对象")
-            parsed["_latencyMs"] = round((time.perf_counter() - started) * 1000)
-            return parsed
         timeout = max(MMN_CRITIC_TIMEOUT, int(env_value("MMN_ATTRIBUTION_MODEL_TIMEOUT", "140")))
         retry_messages = list(messages)
         last_error = None
         for attempt in range(2):
             try:
-                if provider == "qwen":
+                if provider_runner:
+                    raw = provider_runner(provider, retry_messages)
+                elif provider == "qwen":
                     raw = call_qwen(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, enable_thinking=False)
                 elif provider == "deepseek":
                     raw = call_deepseek(retry_messages, temperature=.05, profile="deep", timeout=timeout, max_tokens=2600, response_format={"type": "json_object"})
@@ -4159,12 +4156,13 @@ def run_attribution_reasoning(group_payload, model="奥迪E7X", provider_runner=
                 parsed = parse_json_object(raw)
                 if not isinstance(parsed, dict):
                     raise ValueError("未返回JSON研判对象")
+                validate_attribution_customer_language(parsed)
                 parsed["_latencyMs"] = round((time.perf_counter() - started) * 1000)
                 parsed["_attempt"] = attempt + 1
                 return parsed
             except Exception as exc:
                 last_error = exc
-                retry_messages = messages + [{"role": "system", "content": "上一次响应未通过结构校验。请缩短文字，只返回一个完整合法JSON对象，不要Markdown。"}]
+                retry_messages = messages + [{"role": "system", "content": "上一次响应未通过客户输出校验。请把所有自然语言字段改为简体中文，保留必要业务缩写；缩短文字，只返回一个完整合法JSON对象，不要Markdown。"}]
         raise last_error or ValueError("三路复核调用失败")
 
     outputs, errors = {}, {}

@@ -49,6 +49,42 @@ class AttributionReasoningApiTest(unittest.TestCase):
         self.assertEqual(set(outputs), {"qwen", "deepseek", "kimi"})
         self.assertEqual(packet["fingerprint"], calls[0][1])
 
+    def test_english_review_is_retried_with_chinese_correction(self):
+        calls = []
+
+        def provider_runner(provider, messages):
+            calls.append((provider, len(messages)))
+            if provider == "deepseek" and len([item for item in calls if item[0] == provider]) == 1:
+                return json.dumps({
+                    "verdict": "downstream_funnel_break", "primaryBreak": "order",
+                    "conclusion": "The main break is between leads and orders.",
+                    "counterEvidence": "Awareness is not the only explanation.",
+                    "alternativeExplanations": ["Sales follow-up"],
+                    "nextActions": [{"priority": "P0", "action": "Connect IDs", "metric": "Order rate", "stopCondition": "Stop in two weeks"}],
+                    "stopCondition": "Stop if unchanged", "causalBoundary": "相关性不等于因果",
+                    "evidenceIds": list(REQUIRED_EVIDENCE_IDS), "confidence": .8,
+                })
+            return json.dumps({
+                "verdict": "downstream_funnel_break", "primaryBreak": "order",
+                "conclusion": "线索进入后、订单形成前是当前主要断点",
+                "counterEvidence": "声量认知较好，曝光不足不是唯一解释",
+                "alternativeExplanations": ["销售承接差异"],
+                "nextActions": [{"priority": "P0", "action": "打通线索与订单标识", "metric": "有效线索订单率", "stopCondition": "两周无改善则停止"}],
+                "stopCondition": "连续两周无改善", "causalBoundary": "相关性不等于因果",
+                "evidenceIds": list(REQUIRED_EVIDENCE_IDS), "confidence": .8,
+            }, ensure_ascii=False)
+
+        payload = {
+            "salesWarnings": {"source": {"period": "2026-06"}, "saicModels": [{"model": "奥迪E7X", "segmentLabel": "中大型SUV · 新能源", "marketSales": 87746, "sales": 4017, "rank": 5, "marketShare": .0458, "benchmark": 15165, "performanceRate": .2649}]},
+            "productEvaluation": {"source": {"period": "2026.06.01—2026.06.30"}, "models": [{"model": "奥迪E7X", "voice": 235579, "voiceRank": 4, "overallNsr": .7513, "overallNsrRank": 2}]},
+        }
+        _, outputs, errors, arbitration = server.run_attribution_reasoning(payload, provider_runner=provider_runner)
+        self.assertEqual(len([item for item in calls if item[0] == "deepseek"]), 2)
+        self.assertEqual(len([item for item in calls if item[0] != "deepseek"]), 2)
+        self.assertIn("线索", outputs["deepseek"]["conclusion"])
+        self.assertEqual(arbitration["status"], "aligned")
+        self.assertFalse(errors)
+
 
 if __name__ == "__main__":
     unittest.main()
