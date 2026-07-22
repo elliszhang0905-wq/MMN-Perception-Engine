@@ -52,6 +52,11 @@ from product_whitepaper import (
     review_prompt as product_whitepaper_review_prompt,
     select_product_pages,
 )
+from product_evaluation_catalog import (
+    init_schema as init_product_evaluation_catalog_schema,
+    list_datasets as list_product_evaluation_datasets,
+    save_dataset as save_product_evaluation_dataset,
+)
 from opportunity_pipeline import (
     UNIFIED_LABELS,
     build_competitor_product_summaries,
@@ -221,7 +226,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260722-decision-closure-1"
+APP_VERSION_CODE = "beta-1.03-20260722-product-evaluation-catalog-1"
 APP_RELEASE_DATE = "2026-07-22"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -959,6 +964,7 @@ def init_db():
         init_vehicle_decision_schema(conn)
         init_selling_point_advisory_schema(conn)
         init_strategy_report_schema(conn)
+        init_product_evaluation_catalog_schema(conn)
         seed_policy_sources(conn)
         seed_policy_mvp(conn, org_id="local", edition="china")
         migrate_vertical_scope_schema(conn)
@@ -13207,6 +13213,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/product-evaluation-catalog":
+            try:
+                auth = self.require_cloud_auth()
+                if not auth:
+                    return
+                query = parse_qs(parsed.query)
+                edition = edition_from(query.get("edition", ["china"])[0])
+                with db() as conn:
+                    items = list_product_evaluation_datasets(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                    )
+                self.send_json({"ok": True, "datasets": items})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/auth/config":
             auth_payload = self.current_auth()
             self.send_json({
@@ -14167,6 +14190,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             roles = cloud_post_required_roles(parsed.path)
             if not self.require_cloud_auth(roles):
                 return
+        if parsed.path == "/api/product-evaluation-catalog":
+            try:
+                if int(self.headers.get("Content-Length", "0") or 0) > 4 * 1024 * 1024 + 65536:
+                    self.send_json({"ok": False, "error": "产品评价数据包超出上传限制。"}, 413)
+                    return
+                body = self.read_json()
+                auth = self.current_auth() or {"org_id": "local", "user_id": "local"}
+                edition = edition_from(body.get("edition", "china"))
+                with db() as conn:
+                    item = save_product_evaluation_dataset(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                        dataset=body.get("dataset"),
+                        user_id=auth.get("user_id") or auth.get("username") or "local",
+                    )
+                self.send_json({"ok": True, "item": item}, 201)
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            except Exception:
+                self.send_json({"ok": False, "error": "产品评价数据保存失败，请稍后重试。"}, 500)
+            return
         if parsed.path == "/api/strategy-report-packages":
             try:
                 body = self.read_json()

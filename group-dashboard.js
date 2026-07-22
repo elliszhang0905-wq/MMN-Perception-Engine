@@ -2,6 +2,7 @@
  const root=document.querySelector("#group-dashboard-root");
  if(!root)return;
  let loading=false,refreshingWeekly=false,loadedEdition="",cachedDashboardData=null,attributionWarningEvidence=null,attributionProductEvaluation=null,attributionSalesPeriod="";
+ const PRODUCT_EVALUATION_BOOTSTRAP_MODELS=new Set(["奥迪E7X"]);
  const uiState={viewKey:"brief",brand:"",vehicleId:"",marketDimension:"",warningModel:"奥迪E5 Sportback",warningSeriesId:"",policyCompareModel:"",policyRegion:"上海"};
  uiState.policyModel="奥迪E7X";
  const POLICY_REGIONS=[{value:"北京",label:"北京市"},{value:"上海",label:"上海市"},{value:"广东",label:"广东省"},{value:"浙江",label:"浙江省"},{value:"四川",label:"四川省"},{value:"湖北",label:"湖北省"},{value:"江苏",label:"江苏省"}];
@@ -420,4 +421,15 @@ function renderFullSegmentWarnings(warning){
  }
 
  window.loadGroupDashboardDemo=load;
+ const ensureSelectedProductEvaluation=()=>{
+  if(!window.mmnAuthReady)return;
+  const model=window.MMNVehicleContext?.getModel?.()||"";
+  if(!PRODUCT_EVALUATION_BOOTSTRAP_MODELS.has(model))return;
+  load(false,false,true);
+ };
+ window.addEventListener("mmn:vehicle-context-updated",event=>{
+  if(PRODUCT_EVALUATION_BOOTSTRAP_MODELS.has(event.detail?.model))ensureSelectedProductEvaluation();
+ });
+ window.addEventListener("mmn:auth-ready",ensureSelectedProductEvaluation);
+ if(window.mmnAuthReady)queueMicrotask(ensureSelectedProductEvaluation);
 })();

@@ -1049,6 +1049,10 @@ function syncDashboardCompetitors(){
  return comps;
 }
 const productEvaluationCatalog=new Map();
+const PRODUCT_EVALUATION_CATALOG_STORAGE_BASE="mmnProductEvaluationCatalog";
+const PRODUCT_EVALUATION_CATALOG_LIMIT=8;
+const productEvaluationCatalogHydratedScopes=new Set();
+const productEvaluationServerSyncAttempts=new Set();
 function productEvaluationCatalogKey(model){return`${browserStorageScope(edition).identityKey}::${String(model||"").trim()}`}
 function productEvaluationCatalogGet(model){return productEvaluationCatalog.get(productEvaluationCatalogKey(model))}
 function productEvaluationCatalogHas(model){return productEvaluationCatalog.has(productEvaluationCatalogKey(model))}
@@ -1068,17 +1072,59 @@ function productEvaluationDatasetSnapshot(dataset=state){
  snapshot.productEvaluationSourceModel=snapshot.productEvaluationSourceModel||(ownRows.length===1?ownRows[0]:snapshot.models.includes(snapshot.config.model)?snapshot.config.model:"");
  return snapshot.models.length?snapshot:null;
 }
-function registerProductEvaluationDataset(dataset,{replaceSource=true}={}){
+function productEvaluationCatalogStorageKey(){return storageKey(PRODUCT_EVALUATION_CATALOG_STORAGE_BASE,activeEdition())}
+function productEvaluationPersistenceId(dataset={}){return String(dataset.productEvaluationSourceModel||dataset.config?.model||dataset.datasetVersion||"").trim()}
+function loadPersistedProductEvaluationDatasets(){
+ try{const value=JSON.parse(localStorage.getItem(productEvaluationCatalogStorageKey())||"[]");return Array.isArray(value)?value:[]}
+ catch(_){return[]}
+}
+function persistProductEvaluationDataset(dataset){
+ const snapshot=productEvaluationDatasetSnapshot(dataset),id=productEvaluationPersistenceId(snapshot||{});if(!snapshot||!id)return false;
+ const retained=loadPersistedProductEvaluationDatasets().filter(item=>productEvaluationPersistenceId(item)!==id);
+ try{localStorage.setItem(productEvaluationCatalogStorageKey(),JSON.stringify([snapshot,...retained].slice(0,PRODUCT_EVALUATION_CATALOG_LIMIT)));return true}catch(_){return false}
+}
+function registerProductEvaluationDataset(dataset,{replaceSource=true,persist=true}={}){
  const snapshot=productEvaluationDatasetSnapshot(dataset);if(!snapshot)return false;
  snapshot.models.forEach(model=>{const key=productEvaluationCatalogKey(model);if(!productEvaluationCatalog.has(key)||(replaceSource&&model===snapshot.productEvaluationSourceModel))productEvaluationCatalog.set(key,snapshot)});
+ if(persist)persistProductEvaluationDataset(snapshot);
  return true;
 }
-function rememberCurrentProductEvaluationDataset(){return registerProductEvaluationDataset(state,{replaceSource:false})}
+function hydrateProductEvaluationCatalog(){
+ const scope=browserStorageScope(activeEdition()).identityKey;if(productEvaluationCatalogHydratedScopes.has(scope))return;
+ productEvaluationCatalogHydratedScopes.add(scope);
+ loadPersistedProductEvaluationDatasets().forEach(dataset=>registerProductEvaluationDataset(dataset,{persist:false}));
+}
+function seedBundledProductEvaluationDatasets(){
+ if(activeEdition()==="china"&&importedDataset)registerProductEvaluationDataset(importedDataset,{replaceSource:false,persist:false});
+}
+function prepareProductEvaluationCatalog(){hydrateProductEvaluationCatalog();seedBundledProductEvaluationDatasets()}
+function rememberCurrentProductEvaluationDataset(){return registerProductEvaluationDataset(state)}
+function productEvaluationServerContextKey(){return`${browserStorageScope(activeEdition()).identityKey}::${activeEdition()}`}
+async function syncProductEvaluationDatasetToServer(dataset){
+ const snapshot=productEvaluationDatasetSnapshot(dataset);if(!snapshot)return false;
+ const attemptKey=`${productEvaluationServerContextKey()}::${productEvaluationDatasetSignature(snapshot)}`;if(productEvaluationServerSyncAttempts.has(attemptKey))return true;
+ productEvaluationServerSyncAttempts.add(attemptKey);
+ try{await api("/api/product-evaluation-catalog",{method:"POST",body:JSON.stringify({edition:activeEdition(),dataset:snapshot})});return true}
+ catch(_){return false}
+}
+async function restoreProductEvaluationCatalogFromServer(){
+ const contextKey=productEvaluationServerContextKey(),localCandidate=productEvaluationDatasetSnapshot(state);
+ try{
+  const data=await api(`/api/product-evaluation-catalog?edition=${encodeURIComponent(activeEdition())}`);if(contextKey!==productEvaluationServerContextKey())return false;
+  const items=Array.isArray(data.datasets)?data.datasets:[],serverSources=new Set();
+  items.forEach(item=>{if(!item?.dataset)return;serverSources.add(String(item.sourceModel||item.dataset.productEvaluationSourceModel||""));registerProductEvaluationDataset(item.dataset,{persist:true})});
+  const model=state.config?.model,registered=productEvaluationCatalogGet(model);
+  if(registered&&productEvaluationDatasetNeedsUpgrade(registered,model)){installProductEvaluationDataset(registered,model);save();render()}
+  const localSource=productEvaluationPersistenceId(localCandidate||{});if(localCandidate&&localSource&&!serverSources.has(localSource))syncProductEvaluationDatasetToServer(localCandidate);
+  return true;
+ }catch(_){return false}
+}
 function unavailableProductEvaluationDataset(model){
  return{datasetVersion:`product_evaluation_unavailable_${model}`,sourceNote:`${model} 暂无已绑定的产品评价数据；当前已清除上一车型数据，等待导入该车型数据。`,config:{model,brand:brandForModel(model),project:`${model}认知诊断`,competitor:""},platforms:{...state.platforms},rows:[],models:[model],summaryHeat:{},summaryPlatformNsr:{},summaryMetrics:{},summaryAttributeBenchmark:{},importQuality:{kind:"PRODUCT_EVALUATION_UNAVAILABLE",timeRange:"",metricCoverage:{nsr:false,ips:false,intent:false,risk:false},attributeVolumeAvailable:false,platformVolumeAvailable:false,platformNsrAvailable:false,platformNsrSources:[],attributeNsrSources:[],message:`${model} 暂无产品评价数据，未沿用其他车型数据。`},sourceRowCount:0,aggregatedRowCount:0,replace:true,productEvaluationSourceModel:""};
 }
 function reconcileProductEvaluationBinding(){
  const model=state.config?.model;if(!model)return false;
+ prepareProductEvaluationCatalog();
  rememberCurrentProductEvaluationDataset();
  const registered=productEvaluationCatalogGet(model);
  if(registered&&!productEvaluationDatasetNeedsUpgrade(registered,model))return true;
@@ -1149,6 +1195,7 @@ function installProductEvaluationDataset(dataset,model){
 function registerProductEvaluation(evaluation,{activateCurrent=true}={}){
  const dataset=productEvaluationSummaryDataset(evaluation);if(!dataset)return false;
  registerProductEvaluationDataset(dataset);
+ syncProductEvaluationDatasetToServer(dataset);
  const currentModel=state.config.model,registered=productEvaluationCatalogGet(currentModel);
  if(activateCurrent&&registered&&productEvaluationDatasetNeedsUpgrade(registered,currentModel)){
   installProductEvaluationDataset(registered,currentModel);save();queueMicrotask(()=>render());
@@ -1156,6 +1203,7 @@ function registerProductEvaluation(evaluation,{activateCurrent=true}={}){
  return true;
 }
 function applyModelSelection(model){
+ prepareProductEvaluationCatalog();
  const models=modelOptions();
  if(!models.includes(model)&&!productEvaluationCatalogHas(model))return;
  const changed=state.config.model!==model;
@@ -5191,8 +5239,9 @@ async function importDataFile(file,{merge=false}={}){
   return;
  }
  state=dataset;
- state.productEvaluationSourceModel=state.productEvaluationSourceModel||state.config?.model||"";state.productEvaluationBoundModel=state.config?.model||"";
- registerProductEvaluationDataset(state);
+	 state.productEvaluationSourceModel=state.productEvaluationSourceModel||state.config?.model||"";state.productEvaluationBoundModel=state.config?.model||"";
+	 registerProductEvaluationDataset(state);
+	 syncProductEvaluationDatasetToServer(state);
  // 替换导入必须同步重置工作台上下文，避免旧项目的品牌下拉框覆盖新导入车型。
  dashBrandOpen=brandForDisplay(state.config?.model);
  dashboardPlatformFilter="all";
@@ -5247,6 +5296,7 @@ const strategyReportDownload=document.querySelector("#strategy-report-export-dow
 const strategyReportRegenerate=document.querySelector("#strategy-report-export-regenerate");if(strategyReportRegenerate)strategyReportRegenerate.onclick=()=>runStrategyReportExport(true);
 function startAppDataLoads(){
  restoreOpportunityContext();
+ restoreProductEvaluationCatalogFromServer();
  loadAiStatus();
 	 loadServerAssetLibrary();
 	 loadSalesMarquee();
