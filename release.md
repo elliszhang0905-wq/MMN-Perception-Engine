@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-23｜beta 1.03 三中心中型系统迭代
+
+- 发布版本码：`beta-1.03-20260723-cockpit-social-brand-1`；应用提交 `889b63167604b06792829eddebabb4bc01f5e6f7` 已同步 GitHub `codex/social-evidence-v2`、`main` 和同名版本标签，并部署本地 8765 与 ECS。
+- 社媒趋势中心修复 V2 关闭时初始空白、历史时间窗/竞品/平台范围未恢复、无快照缺少可操作空态，以及晚到恢复请求覆盖新分析或导入结果的竞态；前端版本与内嵌品牌页缓存令牌同步升级。
+- 品牌穿透中心新增同一冻结证据上的三路独立复核、逐品牌确定性结论和“本品 × 每个竞品”判断；任一路失败、越界引用、结构不完整或方向不一致均逐项失败关闭，客户侧不显示供应商或原始错误。
+- 决策驾驶舱、社媒趋势和品牌穿透完成全入口、数据切换、刷新恢复、下钻及桌面/390px回归；全量 Python `586/586`、全部 Node 合同、161 项发布门禁、19 个客户入口和 8 个管理视图通过，`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。
+- 生产真实管理员验收：社媒趋势奥迪E7X恢复 7 天范围、4 项指标、3 个竞品和 5 条证据；品牌穿透显示 6 张逐品牌卡、5 张逐竞品卡和 24 个事件，点击奔驰对照后下钻到 4 个奔驰事件。桌面与移动端横向溢出均为 0。
+- 数据保护：发布代码部署本身保持 76 张表逐表一致；随后只新增 1 条真实品牌快照（ID `2f7912474cdcb62de6e76bcc`，194 条证据、6 个品牌结论、5 个逐竞品结论）。验收副作用 3 条项目快照和 9 条车型身份字段刷新已按发布前主键精确回滚，最终只有 `social_trend_snapshots` 从 9 增至 10，其余表与发布前一致，`quick_check=ok`。
+- ECS 回滚点：`backups/releases/cockpit_social_brand_20260723_032724/source_before.tar.gz`（SHA-256 `3efe86c399a729373cad4feff4c7bbc42bfc4006f69583d59da42afd73da8d95`）、同目录 `env_before`（SHA-256 `69d834bd972b3c32f04ac32c52221a21ffa661a1e75aa84618f19a09c1d22208`）、数据 `backups/mmn_backup_20260723_032725.tar.gz`（SHA-256 `e902898d5b753064c1c8de3208cc6d51dd8c86a003e636f02f5f109de4168f13`）。
+- 运行边界：公开社媒证据 V2 与独立 Worker 继续关闭。`mmnsh.com` 公网边界仍为 HTTP 403、HTTPS 握手失败，属于既有 ICP/TLS 外部阻断；本轮未改动域名路由。
+
 ## 2026-07-23｜beta 1.03 社媒智能综合发布
 
 - 发布版本码：`beta-1.03-20260723-social-intelligence-1`；应用运行提交 `b4e75cf2a2d64cdf98f9e8f627639d346fdd6fe9` 已同步 GitHub `codex/social-evidence-v2` 与 `main`，并部署本地 8765 与 ECS。
