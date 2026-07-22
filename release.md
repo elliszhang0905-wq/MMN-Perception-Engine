@@ -1,5 +1,18 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-23｜beta 1.03 社媒智能综合发布
+
+- 发布版本码：`beta-1.03-20260723-social-intelligence-1`；应用运行提交 `b4e75cf2a2d64cdf98f9e8f627639d346fdd6fe9` 已同步 GitHub `codex/social-evidence-v2` 与 `main`，并部署本地 8765 与 ECS。
+- 社媒趋势修复本品重复作为竞品、竞品重复和证据表默认只剩本品；本品固定为 Benchmark，全部已选竞品默认进入车型卡、图表和原始证据下钻。
+- 采集按车型规范名/别名和所选时间窗持续分页，保留标题、描述、话题与命中字段，并跨查询词按平台内容 ID 去重。“全量”限定为公开搜索接口可访问范围，不宣称平台全库。
+- 内容量、正文正向率和风险改按无热门门槛的相关池计算；热门门槛只影响排行榜。删除不透明“置信度”，改为采集完整性和分析覆盖率；风险 0 会区分完整范围内未发现与证据不足。
+- 三路独立审阅读取同一冻结证据，只在 KPI 后、本竞品明细前发布一处中性统一洞察；采集部分或审阅不完整时条件发布/暂缓，不显示供应商名或平行意见。
+- 同批交付 7/30 天公开社媒证据 V2、NSR 公开讨论验证、周度市场刷新、集团看板和车型决策链路更新。V2 代码随包发布，但生产开关与独立 Worker 保持关闭。
+- 本地验证：Python `576/576`、46 项新增 V2/NSR/全表面专项、状态门禁和完整 `npm run release:gate` 通过；覆盖 19 个客户入口、8 个管理视图、桌面/390px，`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。
+- 生产验证：实际 `mmn-app` 镜像通过内部 Nginx 和真实管理员鉴权复跑同一浏览器门禁；六个服务运行，五个核心服务健康，健康接口返回本版本码、`releaseDate=2026-07-23`、持久化检查 `ok`，近 10 分钟日志无 Traceback、Exception、Fatal 或 Panic。
+- 数据保护：验收产生的 7 条项目快照、2 条政策缓存、18 条车型身份复核写入和 1 条目录时间更新均按明确 ID/主键回滚。最终 76/76 张表按主键排序逐表一致，无新增、缺失或逻辑内容变化，`project_snapshots=210`，发布前后 `quick_check=ok`。
+- ECS 回滚点：`backups/releases/social_intelligence_20260723_014820/source_before.tar.gz`（SHA-256 `686a35b54d2f32fc81d9a1b6c39671a46f8657679e4e087cbf3686ae0aa457a0`）、同目录 `env_before`（SHA-256 `69d834bd972b3c32f04ac32c52221a21ffa661a1e75aa84618f19a09c1d22208`）、最终验收前数据 `backups/mmn_backup_20260723_015828.tar.gz`。完整交接见 `docs/HANDOFF_MMN_RELEASE_2026-07-23.md`。
+
 ## 2026-07-22｜beta 1.03 产品评价部分汇总分层导入
 
 - 发布版本码：`beta-1.03-20260722-product-evaluation-partial-1`；提交 `df8f220` 已推送 GitHub `main` 并部署 ECS。
