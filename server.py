@@ -226,7 +226,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260722-product-evaluation-catalog-2"
+APP_VERSION_CODE = "beta-1.03-20260722-product-evaluation-partial-1"
 APP_RELEASE_DATE = "2026-07-22"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -6919,10 +6919,11 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
         raise ValueError("未识别到完整的全网NSR区块，已拒绝导入。")
 
     attribute_blocks = summary_attribute_blocks(rows, models)
-    if not attribute_blocks:
-        raise ValueError("未识别到属性NSR区块，已拒绝导入。")
     attribute_nsr_sources = list(dict.fromkeys(block["source"] for block in attribute_blocks))
+    attribute_nsr_available = bool(attribute_blocks)
     platform_nsr = summary_platform_nsr(rows, models)
+    if not platform_nsr:
+        platform_nsr = {model: {"全网": score} for model, score in overall_nsr.items()}
 
     file_model = infer_model(Path(filename or "").stem)
     own_model = file_model if file_model in models else next((model for model in models if "启境" in model or "智己" in model), models[0])
@@ -6954,20 +6955,31 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
                     nsr,
                 ])
     labels = {row[4] for row in out_rows}
-    if len(labels) < 3:
+    if attribute_nsr_available and len(labels) < 3:
         raise ValueError("属性NSR标签少于3项，已拒绝导入。")
 
     metadata = summary_workbook_metadata(sheets)
     time_range = metadata.get("timeRange") or "源表未提供时间范围"
-    platforms = {source: growth.get(source, 1.0) for source in attribute_nsr_sources}
+    visible_sources = attribute_nsr_sources or [platform for _, platform in platform_cols]
+    platforms = {source: growth.get(source, 1.0) for source in visible_sources}
     platform_nsr_sources = []
     for scores in platform_nsr.values():
         for source in scores:
             if source not in platform_nsr_sources:
                 platform_nsr_sources.append(source)
+    attribute_note = (
+        f"属性NSR覆盖来源：{'、'.join(attribute_nsr_sources)}"
+        if attribute_nsr_available
+        else "源表未提供属性NSR，属性机会地图保持数据缺口"
+    )
+    quality_message = (
+        "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。"
+        if attribute_nsr_available
+        else "已导入整体声量、互动量与全网NSR；源表未提供属性NSR，属性机会地图不计算、不推断。"
+    )
     return {
         "datasetVersion": "summary_xlsx_" + re.sub(r"[^0-9A-Za-z一-龥]+", "_", filename)[:32],
-        "sourceNote": f"已从《{filename}》导入产品评价汇总表；数据周期：{time_range}；识别车型：{'、'.join(models)}；属性NSR覆盖来源：{'、'.join(block['source'] for block in attribute_blocks)}。",
+        "sourceNote": f"已从《{filename}》导入产品评价汇总表；数据周期：{time_range}；识别车型：{'、'.join(models)}；{attribute_note}。",
         "config": {"project": f"{own_model}认知诊断｜产品评价导入", "brand": infer_brand_from_model(own_model), "model": own_model, "competitor": " / ".join([model for model in models if model != own_model]), "targetIdentity": "", "budget": 800, "priorityThreshold": 60, "riskThreshold": 500},
         "platforms": platforms,
         "rows": out_rows,
@@ -6980,11 +6992,12 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             "timeRange": time_range,
             "metricCoverage": {"nsr": True, "ips": False, "intent": False, "risk": False},
             "attributeVolumeAvailable": False,
+            "attributeNsrAvailable": attribute_nsr_available,
             "platformVolumeAvailable": True,
             "platformNsrAvailable": bool(platform_nsr),
             "platformNsrSources": platform_nsr_sources,
             "attributeNsrSources": attribute_nsr_sources,
-            "message": "源表提供全网NSR与属性NSR评分；未提供目标人群、购买意向、标签声量和风险量级，相关指标不展示。",
+            "message": quality_message,
         },
         "sourceRowCount": len(model_rows),
         "aggregatedRowCount": len(out_rows),

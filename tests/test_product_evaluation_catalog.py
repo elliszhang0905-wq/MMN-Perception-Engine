@@ -49,6 +49,26 @@ class ProductEvaluationCatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "源车型不在"):
             validate_dataset(invalid)
 
+    def test_partial_summary_without_attribute_rows_is_persisted(self):
+        partial = dataset(model="启境GT7", version="gt7-summary-v1")
+        partial["models"] = ["理想L8", "启境GT7", "极氪8X"]
+        partial["rows"] = []
+        partial["summaryHeat"] = {"启境GT7": {"volume": 189910, "interaction": 2474543}}
+        partial["summaryMetrics"] = {"启境GT7": {"overallNsr": 0.84}}
+        partial["importQuality"] = {
+            "kind": "PRODUCT_EVALUATION_SUMMARY",
+            "attributeNsrAvailable": False,
+            "attributeNsrSources": [],
+        }
+
+        save_dataset(self.conn, org_id="org-a", edition="china", dataset=partial, user_id="u1")
+        restored = list_datasets(self.conn, org_id="org-a", edition="china")[0]["dataset"]
+
+        self.assertEqual(restored["config"]["model"], "启境GT7")
+        self.assertEqual(restored["rows"], [])
+        self.assertEqual(restored["summaryMetrics"]["启境GT7"]["overallNsr"], 0.84)
+        self.assertFalse(restored["importQuality"]["attributeNsrAvailable"])
+
     def test_fingerprint_is_deterministic(self):
         first = save_dataset(self.conn, org_id="org-a", edition="china", dataset=dataset())
         second = save_dataset(self.conn, org_id="org-a", edition="china", dataset=dataset())

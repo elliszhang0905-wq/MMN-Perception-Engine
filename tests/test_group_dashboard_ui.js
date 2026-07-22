@@ -303,6 +303,9 @@ assert.match(app, /method:"POST",body:JSON\.stringify\(\{edition:activeEdition\(
 assert.match(app, /restoreProductEvaluationCatalogFromServer\(\)/);
 assert.match(app, /serverSources\.has\(localSource\)/);
 assert.match(app, /productEvaluationServerContextKey\(\)/);
+assert.match(app, /attributeNsrAvailable===false/);
+assert.match(app, /源表没有属性 NSR，机会地图不计算、不推断/);
+assert.match(app, /整体声量、互动量与全网 NSR 已保留/);
 assert.match(app, /selectDashboardVehicleContext\(nextModel,\{source:"product-evaluation"\}\)/);
 assert.match(ui, /registerProductEvaluation/);
 assert.match(ui, /PRODUCT_EVALUATION_BOOTSTRAP_MODELS=new Set\(\["奥迪E7X"\]\)/);

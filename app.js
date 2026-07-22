@@ -2652,8 +2652,9 @@ function renderDataFirstNsrMap(){
  if(!controls||!legend||!surface||!summary)return;
  const rows=nsrMapInputRows(),selection=nsrMapSelection(rows);
  if(!rows.length||!selection.own||typeof MmnNsrMap==="undefined"||typeof MmnNsrMap.buildDataFirstNsrMap!=="function"){
-  controls.innerHTML=`<span class="nsr-map-empty-controls">请先导入包含属性 NSR 的产品评价数据。</span>`;
-  legend.innerHTML="";surface.style.height="";surface.innerHTML='<div class="map-empty">当前数据没有可计算的属性 NSR 地图。</div>';summary.textContent="机会地图只依据导入数据中的属性 NSR 计算，不调用官网、双模型或人工确认链路。";document.querySelector("#nsr-map-insights").innerHTML="";return;
+  const partialSummary=isSummaryImport()&&state.importQuality?.attributeNsrAvailable===false;
+  controls.innerHTML=`<span class="nsr-map-empty-controls">${partialSummary?"当前汇总表已导入整体指标，但未提供属性 NSR。":"请先导入包含属性 NSR 的产品评价数据。"}</span>`;
+  legend.innerHTML="";surface.style.height="";surface.innerHTML=`<div class="map-empty">${partialSummary?"源表没有属性 NSR，机会地图不计算、不推断。":"当前数据没有可计算的属性 NSR 地图。"}</div>`;summary.textContent=partialSummary?"整体声量、互动量与全网 NSR 已保留；补充属性 NSR 后，本图会自动生成。":"机会地图只依据导入数据中的属性 NSR 计算，不调用官网、双模型或人工确认链路。";document.querySelector("#nsr-map-insights").innerHTML="";return;
  }
  const expectedSources=state.importQuality?.attributeNsrSources?.length?state.importQuality.attributeNsrSources:[...new Set(rows.map(row=>row.source))];
  const result=MmnNsrMap.buildDataFirstNsrMap({rows,ownModel:selection.own,selectedModels:selection.selected,expectedSources});

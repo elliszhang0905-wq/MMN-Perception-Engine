@@ -6,7 +6,7 @@ from server import build_dataset_from_summary_workbook
 MODELS = ["小米YU7", "Model Y", "问界M7", "奥迪E7X", "奥迪Q6L e-tron"]
 
 
-def product_summary_cells(include_attributes=True):
+def product_summary_cells(include_attributes=True, include_platform_nsr=True):
     cells = {
         (9, 1): "数据时间段：",
         (9, 2): "2026.6.1 - 2026.6.30",
@@ -56,14 +56,15 @@ def product_summary_cells(include_attributes=True):
                 for offset in range(len(MODELS)):
                     cells[(row, 23 + offset)] = 0.8 - label_offset * 0.35 + offset * 0.01
 
-    platform_nsr_headers = ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "bilibili", "视频号"]
-    for offset, platform in enumerate(platform_nsr_headers):
-        cells[(70, 13 + offset)] = platform
-    for model_offset, model in enumerate(MODELS):
-        row = 71 + model_offset
-        cells[(row, 12)] = model
-        for platform_offset in range(len(platform_nsr_headers)):
-            cells[(row, 13 + platform_offset)] = 0.3 + model_offset * 0.1 + platform_offset * 0.01
+    if include_platform_nsr:
+        platform_nsr_headers = ["全网", "垂媒车主口碑", "抖音", "小红书", "微博", "bilibili", "视频号"]
+        for offset, platform in enumerate(platform_nsr_headers):
+            cells[(70, 13 + offset)] = platform
+        for model_offset, model in enumerate(MODELS):
+            row = 71 + model_offset
+            cells[(row, 12)] = model
+            for platform_offset in range(len(platform_nsr_headers)):
+                cells[(row, 13 + platform_offset)] = 0.3 + model_offset * 0.1 + platform_offset * 0.01
     return cells
 
 
@@ -204,9 +205,23 @@ class ProductSummaryImportTest(unittest.TestCase):
 
         self.assertEqual(dataset["summaryMetrics"]["小米YU7"]["overallNsr"], 0)
 
-    def test_summary_import_rejects_when_attribute_blocks_are_missing(self):
-        with self.assertRaisesRegex(ValueError, "属性NSR区块"):
-            build_dataset_from_summary_workbook(product_summary_cells(include_attributes=False), "AUDI E7X.xlsx")
+    def test_summary_import_accepts_overall_metrics_when_attribute_blocks_are_missing(self):
+        dataset = build_dataset_from_summary_workbook(
+            product_summary_cells(include_attributes=False, include_platform_nsr=False),
+            "AUDI E7X.xlsx",
+        )
+
+        self.assertEqual(dataset["config"]["model"], "奥迪E7X")
+        self.assertEqual(dataset["rows"], [])
+        self.assertEqual(dataset["aggregatedRowCount"], 0)
+        self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
+        self.assertEqual(dataset["summaryPlatformNsr"]["奥迪E7X"], {"全网": 0.69})
+        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"]["volume"], 402)
+        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"]["interaction"], 4000)
+        self.assertFalse(dataset["importQuality"]["attributeNsrAvailable"])
+        self.assertEqual(dataset["importQuality"]["attributeNsrSources"], [])
+        self.assertIn("源表未提供属性NSR", dataset["importQuality"]["message"])
+        self.assertIn("属性机会地图保持数据缺口", dataset["sourceNote"])
 
 
 if __name__ == "__main__":
