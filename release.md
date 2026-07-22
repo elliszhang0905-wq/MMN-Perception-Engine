@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-22｜beta 1.03 车型产品评价目录发布
+
+- 发布版本码：`beta-1.03-20260722-product-evaluation-catalog-2`；功能提交 `806f103`、递归保护修复提交 `0e0f505` 已推送 GitHub `main` 并部署 ECS。
+- 产品评价数据改为按 `org_id + edition + source_model` 持久化。车型库选择车型时只恢复该车型所属数据包；空状态拒绝入库，不能覆盖其他车型；同车型新包幂等替换，企业空间和国内/出海版本隔离。
+- 当前正式目录包含智己L6 `656` 行/`13` 个属性机会点和奥迪E7X `207` 行/`15` 个属性机会点；奥迪E5 Sportback等无产品评价数据车型保持0行和明确缺口，切回已登记车型可立即恢复。
+- 首轮生产验收发现管理看板缓存重绘会反复广播同车型并触发递归；`catalog-2` 增加车型实际变化门禁并强制前端缓存更新。修复后本地完整发布门禁通过，生产桌面/390px共82项检查通过，`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。
+- 本地验证：Python全量 `519/519`、27个Node测试文件、150项发布后端专项、状态包检查、状态包测试和完整发布门禁均通过。隔离双浏览器验证服务器目录恢复、刷新保持、同车型替换、组织/版本隔离及空状态422拒绝。
+- ECS发布前回滚点：`backups/product_catalog_20260722_221601/source_before.tar.gz`（SHA-256 `f269b7067791a3241bcdc32fdbff554b4ca25488006478f4a27098e311491c0c`）、同目录 `env_before`（SHA-256 `69d834bd972b3c32f04ac32c52221a21ffa661a1e75aa84618f19a09c1d22208`）、`backups/mmn_backup_20260722_221701.tar.gz`（SHA-256 `8d5c2f9c2059028c4b8df954249d81dca83324fa7eb2a51d51ffccfb683c5667`）；二次发布另有 `backups/mmn_backup_20260722_222711.tar.gz`。
+- ECS数据保护：SQLite迁移前75张、迁移后76张表；`organizations=6`、`users=6`、`project_snapshots=210`、`vertical_rank_assets=4642`、`social_trend_snapshots=9`保持基线不变。真实验收产生的18条临时项目快照已按明确ID清理，新增目录表保留L6/E7X两条正式数据，`pragma quick_check=ok`。
+- ECS运行：应用、任务、数据库、缓存、调度和代理六个服务运行，核心服务健康；健康接口返回本版本码，发布提交与GitHub一致。回滚时恢复上述源码、环境和数据归档，再执行标准部署脚本。
+
 ## 2026-07-22｜beta 1.03 决策闭环与旧版 NSR 兼容发布
 
 - 发布版本码：`beta-1.03-20260722-decision-closure-1`；应用合并提交 `619859582066f68afb074107948f68459a336c9f` 已推送 GitHub `main` 并部署 ECS。
