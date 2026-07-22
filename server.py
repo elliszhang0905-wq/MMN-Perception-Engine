@@ -236,7 +236,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
 APP_VERSION_CODE = "beta-1.03-20260723-social-intelligence-1"
-APP_RELEASE_DATE = "2026-07-22"
+APP_RELEASE_DATE = "2026-07-23"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")

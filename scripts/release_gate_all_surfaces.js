@@ -1,4 +1,10 @@
-const { chromium } = require("playwright");
+let chromium;
+try {
+  ({ chromium } = require("playwright"));
+} catch (error) {
+  if (error?.code !== "MODULE_NOT_FOUND") throw error;
+  ({ chromium } = require("playwright-core"));
+}
 
 const baseUrl = process.env.MMN_URL || "http://localhost:8765/";
 const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
