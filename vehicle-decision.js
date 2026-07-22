@@ -3,7 +3,7 @@
 const surfaces={executive_summary:"高管摘要",group_impact:"集团影响",sales_warning:"销量预警",track_environment:"赛道环境",policy_environment:"政策环境",communication_momentum:"传播势能",platform_position:"平台阵地",product_voice:"产品用户之声"};
 const claimLabels={fact:"事实",inference:"推断",hypothesis:"假设",unknown:"未知"};
 const statusLabels={aligned:"证据对齐",limited:"证据有限",conflict:"证据冲突",manual_required:"待人工裁决",missing:"数据缺失",stale:"数据过期",draft:"草稿",published:"已发布"};
-const store={snapshots:[],snapshot:null,reports:[],report:null,flow:{actions:[],results:[],learningCandidates:[],knowhowCandidates:[]},busy:false,error:"",open:false};
+const store={snapshots:[],snapshot:null,reports:[],report:null,flow:{actions:[],results:[],learningCandidates:[],knowhowCandidates:[]},busy:false,error:"",open:false,nsr:{context:null,plan:null,mart:null,adjudications:[],selectedTargetIds:[],windowDays:7,customStart:"",customEnd:"",loading:false,error:"",progress:""}};
 const esc=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const attr=esc;
 const model=()=>String(window.MMNVehicleContext?.getModel?.()||window.MMNAttributionContext?.model||state?.config?.model||"").trim();
@@ -25,12 +25,28 @@ function renderCoverage(){
 function renderDecisions(){
  const report=store.report,items=report?.content?.topDecisions||[];
  if(!report)return `<div class="vehicle-empty"><b>尚未生成车型综合报告</b><p>先冻结八类驾驶舱快照，再生成不可变报告版本。</p></div>`;
- return `<div class="vehicle-decision-list">${items.map((item,index)=>`<article><span>${index+1}</span><div><header><b>${esc(surfaces[item.surface]||item.surface)}</b><em class="claim ${attr(item.claimType)}">${esc(claimLabels[item.claimType]||item.claimType)}</em></header><h4>${esc(item.conclusion)}</h4><p>周期 ${esc(typeof item.timeWindow==="string"?item.timeWindow:JSON.stringify(item.timeWindow))}；证据 ${esc((item.evidenceIds||[]).join("、")||"缺失")}</p></div></article>`).join("")||`<div class="vehicle-empty"><b>证据不足</b><p>当前八类表面没有可排序的有效信号。</p></div>`}</div>`;
+ return `<div class="vehicle-decision-list">${items.map((item,index)=>`<article><span>${index+1}</span><div><header><b>${esc(surfaces[item.surface]||item.surface)}</b><em class="claim ${attr(item.claimType)}">${esc(claimLabels[item.claimType]||item.claimType)}</em></header><h4>${esc(item.conclusion)}</h4><p>周期 ${esc(typeof item.timeWindow==="string"?item.timeWindow:JSON.stringify(item.timeWindow))}；${(item.evidenceIds||[]).length?`已锁定 ${(item.evidenceIds||[]).length} 项证据，可在对应模块下钻原文与裁决记录。`:"当前证据缺失。"}</p></div></article>`).join("")||`<div class="vehicle-empty"><b>证据不足</b><p>当前八类表面没有可排序的有效信号。</p></div>`}</div>`;
 }
 function renderConflicts(){
  const conflicts=store.report?.conflicts||[];
  if(!conflicts.length)return `<p class="vehicle-inline-ok">当前版本没有关键冲突；缺失表面仍按缺口展示。</p>`;
  return `<div class="vehicle-conflict-list">${conflicts.map(item=>`<article class="${attr(item.severity)}"><header><b>${esc(item.description)}</b><span>${item.status==="resolved"?"已裁决":item.severity==="critical"?"关键冲突":"口径提示"}</span></header>${item.status!=="resolved"&&item.severity==="critical"?`<div><label>裁决理由<input data-conflict-reason="${attr(item.id)}" value="明确口径并保留证据边界"></label><button type="button" class="ghost" data-adjudicate="${attr(item.id)}">提交人工裁决</button></div>`:`<small>${esc(item.resolution||"报告已保留该项，不自动消除。")}</small>`}</article>`).join("")}</div>`;
+}
+function nsrProjectId(){return `nsr_validation:${edition()}:${model()}`}
+function nsrVerdictLabel(value){return({pending_adjudication:"待人工裁决",insufficient_evidence:"证据不足",supported:"支持",challenged:"挑战",mixed:"正反并存"})[value]||value||"待确认"}
+function nsrStopLabel(value){return({source_exhausted:"来源已返回完毕",candidate_limit:"达到候选上限",partial_page_limit:"达到页数上限，窗口仅部分覆盖",platform_unavailable:"平台暂不可用",not_started:"尚未开始"})[value]||value||"待确认"}
+function renderNsrValidation(){
+ const nsr=store.nsr,context=nsr.context,mart=nsr.mart,targets=context?.validationTargets||[];
+ if(nsr.error&&!context)return `<section class="vehicle-nsr-validation limited"><header><div><span>公开讨论验证</span><h3>NSR 标签联动</h3></div><em>数据待补</em></header><p>${esc(nsr.error)}</p><small>缺少同车型真实属性 NSR 时不会借用竞品或其他车型数据。</small></section>`;
+ const adjudications=new Map((nsr.adjudications||[]).map(item=>[item.targetId,item]));
+ return `<section class="vehicle-nsr-validation"><header><div><span>PUBLIC DISCUSSION VALIDATION</span><h3>NSR 真实标签公开讨论验证</h3><p>${esc(model()||"当前车型")} 的 NSR 只作为冻结基线；社媒结果不会回写或重算 NSR。</p></div><em>${mart?esc(nsrVerdictLabel(mart.status)):context?"可启动":"读取中"}</em></header>
+ ${context?`<div class="vehicle-nsr-source"><div><span>车型上下文</span><b>${esc(context.vehicleContext.model)}</b><small>快照 ${esc(context.vehicleContext.contextVersion)}</small></div><div><span>NSR 数据版本</span><b>${esc(context.nsrSource.datasetVersion)}</b><small>已由服务端校验同车同版本</small></div><label>采集时间窗<select id="vehicle-nsr-window"><option value="7" ${nsr.windowDays===7?"selected":""}>最近 7 天</option><option value="30" ${nsr.windowDays===30?"selected":""}>最近 30 天</option><option value="custom" ${nsr.windowDays==="custom"?"selected":""}>自定义日期</option></select></label><div class="vehicle-nsr-actions"><button type="button" class="ghost" id="vehicle-nsr-preview" ${nsr.loading||!nsr.selectedTargetIds.length?"disabled":""}>预览计划</button><button type="button" class="primary" id="vehicle-nsr-start" ${nsr.loading||!nsr.selectedTargetIds.length?"disabled":""}>${nsr.loading?"采集中":"确认开始"}</button></div></div>${nsr.windowDays==="custom"?`<div class="vehicle-nsr-custom"><label>开始日期<input type="date" id="vehicle-nsr-custom-start" value="${attr(nsr.customStart)}"></label><label>结束日期<input type="date" id="vehicle-nsr-custom-end" value="${attr(nsr.customEnd)}"></label><small>起止日均包含；最长 90 天，页数、候选与预算会在预览中冻结。</small></div>`:""}
+ <fieldset class="vehicle-nsr-targets"><legend>选择验证标签（最多 5 个）</legend>${targets.map(target=>`<label><input type="checkbox" data-nsr-target="${attr(target.targetId)}" ${nsr.selectedTargetIds.includes(target.targetId)?"checked":""}><span><b>${esc(target.label)}</b><small>NSR ${(Number(target.baselineNsr)*100).toFixed(1)}%</small></span></label>`).join("")}</fieldset>`:`<div class="vehicle-nsr-empty">正在读取当前车型的真实 NSR 标签…</div>`}
+ ${nsr.plan?`<div class="vehicle-nsr-plan"><div><span>冻结日期</span><b>${esc(nsr.plan.dateWindow.start)} 至 ${esc(nsr.plan.dateWindow.end)}</b></div><div><span>查询分片</span><b>${nsr.plan.queryShards?.length||nsr.plan.queries?.length||0}</b></div><div><span>请求上限</span><b>${(nsr.plan.platforms?.length||0)*(nsr.plan.queries?.length||0)*(nsr.plan.sampling?.maxPages||0)} / ${nsr.plan.budget?.maxRequests||0}</b></div><div><span>候选上限</span><b>每平台 ${nsr.plan.sampling?.maxCandidatesPerPlatform||0}</b></div></div>`:""}
+ ${nsr.progress?`<div class="vehicle-nsr-progress" aria-live="polite">${esc(nsr.progress)}</div>`:""}
+ ${mart?.collectionCoverage?`<div class="vehicle-nsr-coverage">${mart.collectionCoverage.map(row=>`<article><header><b>${esc(row.platform)}</b><span>${esc(nsrStopLabel(row.stopReason))}</span></header><p>访问 ${row.pagesVisited||0} 页 · 候选 ${row.rawCandidateCount||0} · 入选 ${row.effectiveCount||0}</p><small>${row.earliestPublishedAt?`${esc(row.earliestPublishedAt.slice(0,10))} 至 ${esc(row.latestPublishedAt.slice(0,10))}`:"未形成有效日期范围"}</small></article>`).join("")}</div>`:""}
+ ${mart?`<div class="vehicle-nsr-results">${(mart.targetValidations||[]).map(target=>{const adjudication=adjudications.get(target.targetId);return`<article><header><div><b>${esc(target.label)}</b><small>冻结 NSR ${(Number(target.baselineNsr)*100).toFixed(1)}% · ${target.evidenceCount} 条入选证据</small></div><span>${esc(nsrVerdictLabel(adjudication?.decision||target.verdict))}</span></header><div class="vehicle-nsr-stances"><span>支持 ${target.stanceCounts?.supporting||0}</span><span>挑战 ${target.stanceCounts?.challenging||0}</span><span>混合 ${target.stanceCounts?.mixed||0}</span><span>中性 ${target.stanceCounts?.neutral||0}</span></div><details><summary>查看证据与原文</summary>${(target.evidence||[]).map(item=>`<p>${esc(item.text)}<small>${esc(item.platform)} · ${esc(nsrVerdictLabel(item.stance))}</small>${item.sourceUrl?`<a href="${attr(item.sourceUrl)}" target="_blank" rel="noopener">查看原文 ↗</a>`:""}</p>`).join("")||"<p>当前没有通过车型、标签、时间和公开链接准入的证据。</p>"}</details>${adjudication?`<div class="vehicle-nsr-adjudicated"><b>已裁决：${esc(nsrVerdictLabel(adjudication.decision))}</b><small>${esc(adjudication.reason)}</small></div>`:`<div class="vehicle-nsr-review"><select data-nsr-decision="${attr(target.targetId)}"><option value="supported">公开讨论支持</option><option value="challenged">公开讨论挑战</option><option value="mixed">正反证据并存</option><option value="insufficient_evidence">证据不足</option></select><input data-nsr-reason="${attr(target.targetId)}" placeholder="填写裁决理由" value="人工核对车型、标签、立场与原文证据"><button type="button" class="ghost" data-nsr-adjudicate="${attr(target.targetId)}">提交裁决</button></div>`}</article>`}).join("")}</div>`:""}
+ <footer>线性关系：当前车型 → 同车型 NSR 版本 → 冻结标签 → 时间窗采集 → 车型/标签/立场准入 → 人工裁决 → 决策证据链接。传播关联不等于市场需求或销售因果。</footer></section>`;
 }
 function renderKnowledge(){
  const flow=store.flow||{},actions=flow.actions||[],results=flow.results||[],learnings=flow.learningCandidates||[],knowhows=flow.knowhowCandidates||[];
@@ -60,6 +76,7 @@ function render(){
  <div class="vehicle-decision-body" ${store.open?"":"hidden"}><div id="vehicle-decision-status" class="vehicle-decision-status ${store.error?'error':'info'}" aria-live="polite">${esc(store.error||"新快照和新报告只会追加保存，不会覆盖原始看板或旧版本。")}</div>
  <section class="vehicle-freeze"><div><b>本次冻结范围</b><p>车型、竞品、目标、截止时间、八类表面、证据ID与数据指纹。</p></div><form id="vehicle-snapshot-form"><label>车型阶段<input name="vehicleStage" value="上市期" required></label><label>业务问题<input name="businessQuestion" value="识别当前最重要问题并形成可验证行动" required></label><label>数据截止<input type="datetime-local" name="dataCutoffAt" required value="${new Date().toISOString().slice(0,16)}"></label><button class="primary" type="submit" ${store.busy||!currentModel?'disabled':''}>创建决策快照</button></form></section>
  ${renderCoverage()}
+ ${renderNsrValidation()}
  <section class="vehicle-report-controls"><label>快照<select id="vehicle-snapshot-select"><option value="">选择历史快照</option>${store.snapshots.map(item=>`<option value="${attr(item.id)}" ${snapshot?.id===item.id?'selected':''}>${esc(item.createdAt)}｜${esc(item.model)}</option>`).join("")}</select></label><button class="primary" id="vehicle-generate-report" ${!snapshot||store.busy?'disabled':''}>生成新报告版本</button><label>报告版本<select id="vehicle-report-select"><option value="">选择版本</option>${store.reports.map(item=>`<option value="${attr(item.id)}" ${report?.id===item.id?'selected':''}>v${item.version}｜${esc(statusLabels[item.status]||item.status)}</option>`).join("")}</select></label>${report?`<button class="ghost" data-export="pptx">导出PPTX</button><button class="ghost" data-export="md">导出Markdown</button>${report.status==="draft"?`<button class="primary" id="vehicle-publish-report">人工批准并发布</button>`:""}`:""}</section>
  <section class="vehicle-report-summary"><div><span>高管结论</span><h3>${esc(report?.content?.executiveConclusion||"等待车型决策快照")}</h3><small>${snapshot?`指纹 ${esc(snapshot.dataFingerprint.slice(0,16))}…｜截止 ${esc(snapshot.dataCutoffAt)}`:"尚未冻结数据范围"}</small></div><aside><b>${report?`v${report.version}`:"-"}</b><span>${esc(statusLabels[report?.status]||report?.status||"未生成")}</span></aside></section>
  <section><h3 class="vehicle-section-title">三项重要判断</h3>${renderDecisions()}</section>
@@ -70,6 +87,57 @@ function render(){
 }
 function metricObject(text){const [key,value]=String(text||"").split("=");if(!key.trim()||value===undefined||Number.isNaN(Number(value)))throw new Error("基线和目标值请使用 指标=数字 格式");return{[key.trim()]:Number(value)}}
 function formObject(form){return Object.fromEntries(new FormData(form).entries())}
+async function loadNsrAdjudications(){
+ if(!store.nsr.mart)return;const data=await request(`/api/social-evidence/marts/${encodeURIComponent(store.nsr.mart.martId)}/adjudications`);store.nsr.adjudications=data.adjudications||[];
+}
+async function loadNsrContext(){
+ const currentModel=model(),targetStore=store.nsr;if(!currentModel)return;
+ try{
+  const data=await request(`/api/social-evidence/nsr-context?edition=${encodeURIComponent(edition())}&model=${encodeURIComponent(currentModel)}`),context=data.context;
+  if(model()!==currentModel||store.nsr!==targetStore)return;
+  store.nsr.context=context;store.nsr.error="";
+  const available=new Set((context.validationTargets||[]).map(item=>item.targetId));
+  store.nsr.selectedTargetIds=store.nsr.selectedTargetIds.filter(id=>available.has(id));
+  if(!store.nsr.selectedTargetIds.length)store.nsr.selectedTargetIds=(context.validationTargets||[]).map(item=>item.targetId);
+  const latest=await request(`/api/social-evidence/marts/latest?projectId=${encodeURIComponent(nsrProjectId())}&martType=nsr_validation&edition=${encodeURIComponent(edition())}`);if(model()!==currentModel||store.nsr!==targetStore)return;
+  store.nsr.mart=latest.mart||null;if(store.nsr.mart)await loadNsrAdjudications();
+  const latestJob=(await request(`/api/social-evidence/jobs/latest?projectId=${encodeURIComponent(nsrProjectId())}&centerType=nsr_validation&edition=${encodeURIComponent(edition())}`)).job;
+  if(latestJob&&!['ready','degraded','manual_required','failed'].includes(latestJob.status)){targetStore.loading=true;targetStore.progress="已恢复正在运行的验证任务";render();await pollNsrJob(latestJob,currentModel,targetStore)}
+ }catch(error){if(model()===currentModel&&store.nsr===targetStore)store.nsr.error=error.message||String(error)}finally{targetStore.loading=false;if(store.nsr===targetStore)render()}
+}
+function nsrDateWindow(days){if(days==="custom"){if(!store.nsr.customStart||!store.nsr.customEnd)throw new Error("请选择自定义开始和结束日期");const start=new Date(`${store.nsr.customStart}T00:00:00+08:00`),end=new Date(`${store.nsr.customEnd}T00:00:00+08:00`),span=Math.floor((end-start)/86400000)+1;if(!Number.isFinite(span)||span<1)throw new Error("开始日期不能晚于结束日期");if(span>90)throw new Error("自定义时间窗最长为90天");return{start:store.nsr.customStart,end:store.nsr.customEnd}}const end=new Date(),start=new Date(end);start.setDate(end.getDate()-days+1);const date=value=>{const local=new Date(value.getTime()-value.getTimezoneOffset()*60000);return local.toISOString().slice(0,10)};return{start:date(start),end:date(end)}}
+function nsrValidationPayload(){
+ const nsr=store.nsr;if(!nsr.context)throw new Error(nsr.error||"当前车型NSR标签不可用");
+ const targets=nsr.context.validationTargets.filter(item=>nsr.selectedTargetIds.includes(item.targetId)),days=nsr.windowDays,window=nsrDateWindow(days),competitors=(state?.config?.competitors||[]).filter(item=>String(item||"").trim()&&String(item).trim()!==model()).slice(0,1),span=Math.floor((new Date(`${window.end}T00:00:00+08:00`)-new Date(`${window.start}T00:00:00+08:00`))/86400000)+1;
+ const sampling=span<=7?{maxPages:3,pageSize:20,maxCandidatesPerPlatform:60,maxEvidencePerTargetPerPlatform:20}:span<=30?{maxPages:5,pageSize:20,maxCandidatesPerPlatform:100,maxEvidencePerTargetPerPlatform:30}:{maxPages:10,pageSize:20,maxCandidatesPerPlatform:200,maxEvidencePerTargetPerPlatform:50};
+ return{projectId:nsrProjectId(),centerType:"nsr_validation",subject:nsr.context.subject,vehicleContext:nsr.context.vehicleContext,nsrSource:nsr.context.nsrSource,validationTargets:targets,competitors,platforms:["douyin","xiaohongshu","weibo"],dateWindow:window,sampling,budget:{maxRequests:span<=7?60:span<=30?100:200,maxEstimatedCost:span<=7?60:span<=30?100:200},exclusionTerms:[],edition:edition()};
+}
+async function previewNsrValidation(){
+ if(!store.nsr.context)await loadNsrContext();const requestedModel=model(),targetStore=store.nsr,payload=nsrValidationPayload(),data=await request("/api/social-evidence/query-plans/preview",{method:"POST",body:JSON.stringify(payload)});if(model()!==requestedModel||store.nsr!==targetStore)return null;store.nsr.plan=data.plan;store.nsr.progress="计划已冻结预览，确认后启动持久化任务";render();return data.plan;
+}
+async function pollNsrJob(job,requestedModel,targetStore){
+ const nsr=targetStore,deadline=Date.now()+15*60*1000;
+ while(job&&!['ready','degraded','manual_required','failed'].includes(job.status)&&Date.now()<deadline){if(model()!==requestedModel||store.nsr!==targetStore)return null;nsr.progress=`${job.message||"正在采集"} · ${job.progress||0}%`;render();await new Promise(resolve=>setTimeout(resolve,700));job=(await request(`/api/social-evidence/jobs/${encodeURIComponent(job.jobId)}`)).job}
+ if(model()!==requestedModel||store.nsr!==targetStore)return null;
+ nsr.progress=job?.message||"任务已结束";
+ const latest=await request(`/api/social-evidence/marts/latest?projectId=${encodeURIComponent(nsrProjectId())}&martType=nsr_validation&edition=${encodeURIComponent(edition())}`);nsr.mart=latest.mart||null;
+ if(nsr.mart)await loadNsrAdjudications();else if(job?.status!=="ready")throw new Error(job?.message||"本轮没有形成可用验证证据集");
+ return job;
+}
+async function startNsrValidation(){
+ const nsr=store.nsr,requestedModel=model(),targetStore=nsr;if(!nsr.context)await loadNsrContext();if(!nsr.context)throw new Error(nsr.error||"当前车型NSR标签不可用");
+ const payload=nsrValidationPayload();if(!nsr.plan)await previewNsrValidation();
+ nsr.loading=true;nsr.error="";nsr.progress="正在冻结车型、NSR版本、查询与预算";render();
+ try{
+  let job=(await request("/api/social-evidence/jobs",{method:"POST",body:JSON.stringify(payload)})).job;
+  await pollNsrJob(job,requestedModel,targetStore);
+ }finally{nsr.loading=false;if(store.nsr===targetStore)render()}
+}
+async function adjudicateNsrTarget(targetId){
+ const target=store.nsr.mart?.targetValidations?.find(item=>item.targetId===targetId);if(!target)throw new Error("NSR验证标签不存在");
+ const decision=document.querySelector(`[data-nsr-decision="${CSS.escape(targetId)}"]`)?.value,reason=document.querySelector(`[data-nsr-reason="${CSS.escape(targetId)}"]`)?.value;
+ await request(`/api/social-evidence/marts/${encodeURIComponent(store.nsr.mart.martId)}/adjudications`,{method:"POST",body:JSON.stringify({targetId,decision,reason,evidenceIds:(target.evidence||[]).map(item=>item.evidenceId)})});await loadNsrAdjudications();
+}
 async function refresh(){
  const currentModel=model();if(!currentModel)return render();
  try{store.busy=true;const data=await request(`/api/vehicle-decisions/snapshots?edition=${encodeURIComponent(edition())}&model=${encodeURIComponent(currentModel)}`);store.snapshots=data.snapshots||[];if(!store.snapshot&&store.snapshots[0])await selectSnapshot(store.snapshots[0].id)}catch(error){store.error=error.message||String(error)}finally{store.busy=false;render()}
@@ -82,7 +150,13 @@ async function download(type){
 }
 async function run(task,message){try{store.busy=true;store.error="";await task();notice(message,"success")}catch(error){store.error=error.message||String(error);notice(store.error,"error")}finally{store.busy=false;render()}}
 function bind(){
- const toggle=document.querySelector("#vehicle-decision-toggle");if(toggle)toggle.onclick=()=>{store.open=!store.open;render();if(store.open&&!store.snapshots.length)refresh()};
+ const toggle=document.querySelector("#vehicle-decision-toggle");if(toggle)toggle.onclick=()=>{store.open=!store.open;render();if(store.open){if(!store.snapshots.length)refresh();if(!store.nsr.context)loadNsrContext()}};
+ const nsrWindow=document.querySelector("#vehicle-nsr-window");if(nsrWindow)nsrWindow.onchange=()=>{store.nsr.windowDays=nsrWindow.value==="custom"?"custom":Number(nsrWindow.value)||7;if(store.nsr.windowDays==="custom"&&(!store.nsr.customStart||!store.nsr.customEnd)){const initial=nsrDateWindow(30);store.nsr.customStart=initial.start;store.nsr.customEnd=initial.end}store.nsr.plan=null;render()};
+ const customStart=document.querySelector("#vehicle-nsr-custom-start"),customEnd=document.querySelector("#vehicle-nsr-custom-end");if(customStart)customStart.onchange=()=>{store.nsr.customStart=customStart.value;store.nsr.plan=null};if(customEnd)customEnd.onchange=()=>{store.nsr.customEnd=customEnd.value;store.nsr.plan=null};
+ document.querySelectorAll("[data-nsr-target]").forEach(input=>input.onchange=()=>{store.nsr.selectedTargetIds=input.checked?[...new Set([...store.nsr.selectedTargetIds,input.dataset.nsrTarget])]:store.nsr.selectedTargetIds.filter(id=>id!==input.dataset.nsrTarget);store.nsr.plan=null;render()});
+ const nsrPreview=document.querySelector("#vehicle-nsr-preview");if(nsrPreview)nsrPreview.onclick=()=>run(previewNsrValidation,"NSR验证计划已预览");
+ const nsrStart=document.querySelector("#vehicle-nsr-start");if(nsrStart)nsrStart.onclick=()=>run(startNsrValidation,"NSR公开讨论验证已完成");
+ document.querySelectorAll("[data-nsr-adjudicate]").forEach(button=>button.onclick=()=>run(()=>adjudicateNsrTarget(button.dataset.nsrAdjudicate),"NSR验证人工裁决已记录"));
  const snapshotForm=document.querySelector("#vehicle-snapshot-form");if(snapshotForm)snapshotForm.onsubmit=event=>{event.preventDefault();run(async()=>{const values=formObject(snapshotForm),payload={edition:edition(),brand:state?.config?.brand||"",model:model(),project:state?.config?.project||"",coreCompetitors:state?.config?.competitors||[],vehicleStage:values.vehicleStage,businessQuestion:values.businessQuestion,dataCutoffAt:new Date(values.dataCutoffAt).toISOString()};const data=await request("/api/vehicle-decisions/snapshots",{method:"POST",body:JSON.stringify(payload)});store.snapshot=data.snapshot;store.snapshots.unshift(data.snapshot);store.reports=[];store.report=null;await refreshFlow()},"车型决策快照已追加保存")};
  const snapshotSelect=document.querySelector("#vehicle-snapshot-select");if(snapshotSelect)snapshotSelect.onchange=()=>snapshotSelect.value&&run(()=>selectSnapshot(snapshotSelect.value),"已加载历史快照");
  const generate=document.querySelector("#vehicle-generate-report");if(generate)generate.onclick=()=>run(async()=>{const data=await request("/api/vehicle-decisions/reports",{method:"POST",body:JSON.stringify({snapshotId:store.snapshot.id})});store.report=data.report;store.reports.unshift(data.report)},"已生成新的不可变报告版本");
@@ -98,7 +172,7 @@ function bind(){
  document.querySelectorAll("[data-knowhow-review]").forEach(button=>button.onclick=()=>run(async()=>{const reason=document.querySelector(`[data-knowhow-reason="${CSS.escape(button.dataset.knowhowReview)}"]`)?.value;await request(`/api/vehicle-decisions/knowhow-candidates/${encodeURIComponent(button.dataset.knowhowReview)}/review`,{method:"POST",body:JSON.stringify({decision:button.dataset.decision,reason})});await refreshFlow()},"Know-how人工裁决已记录"));
 }
 document.addEventListener("keydown",event=>{if(event.key==="Escape"&&store.open){store.open=false;render()}});
-window.addEventListener("mmn:vehicle-context-updated",()=>{store.snapshots=[];store.snapshot=null;store.reports=[];store.report=null;store.flow={actions:[],results:[],learningCandidates:[],knowhowCandidates:[]};if(store.open)refresh();else render()});
+window.addEventListener("mmn:vehicle-context-updated",()=>{store.snapshots=[];store.snapshot=null;store.reports=[];store.report=null;store.flow={actions:[],results:[],learningCandidates:[],knowhowCandidates:[]};store.nsr={context:null,plan:null,mart:null,adjudications:[],selectedTargetIds:[],windowDays:7,customStart:"",customEnd:"",loading:false,error:"",progress:""};if(store.open){refresh();loadNsrContext()}else render()});
 window.addEventListener("mmn:sales-warning-model-selected",()=>setTimeout(()=>window.dispatchEvent(new Event("mmn:vehicle-context-updated")),0));
 window.MMNVehicleDecision={mount,refresh,state:store};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",mount);else mount();

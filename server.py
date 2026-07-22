@@ -72,6 +72,7 @@ from cockpit_decision_loop import derive_execution_recommendations
 from vehicle_decision import (
     SURFACES,
     adjudicate_conflict as adjudicate_vehicle_decision_conflict,
+    adjudicate_nsr_validation,
     create_action as create_vehicle_decision_action,
     create_snapshot as create_vehicle_decision_snapshot,
     generate_knowhow_candidate as generate_vehicle_knowhow_candidate,
@@ -82,6 +83,7 @@ from vehicle_decision import (
     get_snapshot as get_vehicle_decision_snapshot,
     init_vehicle_decision_schema,
     list_report_versions as list_vehicle_decision_report_versions,
+    list_nsr_validation_adjudications,
     list_snapshots as list_vehicle_decision_snapshots,
     publish_report as publish_vehicle_decision_report,
     record_result as record_vehicle_action_result,
@@ -173,7 +175,14 @@ from douyin_hot_entities import (
     recognize_items as recognize_douyin_hot_entities,
     save_rank_snapshot as save_douyin_hot_rank_snapshot,
 )
-from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, save_snapshot as save_social_trend_snapshot
+from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, normalized_vehicle_label, sanitize_competitor_models, save_snapshot as save_social_trend_snapshot, vehicle_identity_key
+from social_evidence import (
+    BudgetExceeded as SocialEvidenceBudgetExceeded,
+    SocialEvidenceRepository,
+    SocialEvidenceService,
+    TikHubEvidenceAdapter,
+    build_query_plan as build_social_evidence_query_plan,
+)
 from mmn_eval.dashboard import (
     load_dashboard_payload as load_mmn_eval_dashboard,
     run_seed_dashboard as run_mmn_eval_dashboard,
@@ -226,7 +235,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260722-product-evaluation-partial-1"
+APP_VERSION_CODE = "beta-1.03-20260723-social-intelligence-1"
 APP_RELEASE_DATE = "2026-07-22"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -270,8 +279,11 @@ SOCIAL_TREND_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_TASKS = {}
 SOCIAL_TREND_JOB_LIMIT = 100
 SOCIAL_TREND_JOB_TTL = timedelta(days=1)
+SOCIAL_EVIDENCE_REPOSITORY_LOCK = Lock()
+SOCIAL_EVIDENCE_REPOSITORY = None
 EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
 EXECUTIVE_BRIEF_REVIEW_TASKS = {}
+EXECUTIVE_BRIEF_REVIEW_PROVIDERS = ("qwen", "deepseek", "kimi")
 SALES_WARNING_REVIEW_LOCK = Lock()
 SALES_WARNING_REVIEW_TASKS = {}
 ATTRIBUTION_REVIEW_LOCK = Lock()
@@ -346,6 +358,277 @@ def db():
     return conn
 
 
+def _enabled_env(name, default="false"):
+    return str(os.getenv(name, default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def social_evidence_v2_enabled():
+    return _enabled_env("MMN_SOCIAL_EVIDENCE_V2_ENABLED")
+
+
+def social_evidence_worker_enabled():
+    return social_evidence_worker_mode() == "thread"
+
+
+def social_evidence_worker_mode():
+    mode = str(os.getenv("MMN_SOCIAL_EVIDENCE_WORKER_MODE", "")).strip().lower()
+    if not mode:
+        mode = "thread" if _enabled_env("MMN_SOCIAL_EVIDENCE_WORKER_ENABLED") else "off"
+    return mode if mode in {"off", "thread", "external"} else "off"
+
+
+def social_evidence_capabilities():
+    enabled = social_evidence_v2_enabled()
+    shadow_mode = _enabled_env("MMN_SOCIAL_EVIDENCE_SHADOW_MODE")
+    return {
+        "enabled": enabled,
+        "clientEnabled": enabled and not shadow_mode,
+        "shadowMode": shadow_mode,
+        "workerMode": social_evidence_worker_mode(),
+        "supportedCenters": ["brand_penetration", "nsr_validation", "social_trend"],
+        "schemaVersion": "social-evidence-query-v2",
+    }
+
+
+def social_evidence_repository():
+    global SOCIAL_EVIDENCE_REPOSITORY
+    with SOCIAL_EVIDENCE_REPOSITORY_LOCK:
+        if SOCIAL_EVIDENCE_REPOSITORY is None:
+            SOCIAL_EVIDENCE_REPOSITORY = SocialEvidenceRepository()
+            SOCIAL_EVIDENCE_REPOSITORY.recover_interrupted_jobs()
+    return SOCIAL_EVIDENCE_REPOSITORY
+
+
+def public_social_evidence_job(job):
+    if not job:
+        return None
+    visible = {
+        "jobId", "planId", "orgId", "edition", "projectId", "centerType", "status", "stage",
+        "progress", "message", "retryable", "requestCount", "actualCost", "result", "createdAt", "updatedAt",
+    }
+    return {key: value for key, value in job.items() if key in visible}
+
+
+class StaleNsrSource(ValueError):
+    pass
+
+
+def preview_social_evidence_query_plan(body, org_id="local", edition="china"):
+    body = dict(body or {})
+    if body.get("centerType") == "nsr_validation":
+        resolved = resolve_vehicle_nsr_validation_context(
+            ((body.get("vehicleContext") or {}).get("model") or (body.get("subject") or {}).get("model")),
+            org_id, edition,
+        )
+        supplied_fingerprint = str((body.get("nsrSource") or {}).get("fingerprint") or "").strip()
+        if supplied_fingerprint and supplied_fingerprint != resolved["nsrSource"]["fingerprint"]:
+            raise StaleNsrSource("NSR数据版本已变化，请重新预览后再启动验证")
+        requested_ids = {
+            str(row.get("targetId") or "") for row in (body.get("validationTargets") or []) if isinstance(row, dict)
+        }
+        trusted_targets = [
+            row for row in resolved["validationTargets"] if not requested_ids or row["targetId"] in requested_ids
+        ]
+        if requested_ids and len(trusted_targets) != len(requested_ids):
+            raise ValueError("所选NSR标签不属于当前车型或当前数据版本")
+        body.update({
+            "subject": resolved["subject"], "vehicleContext": resolved["vehicleContext"],
+            "nsrSource": resolved["nsrSource"], "validationTargets": trusted_targets,
+        })
+    return build_social_evidence_query_plan(body, org_id, edition_from(edition))
+
+
+def resolve_vehicle_nsr_validation_context(model, org_id="local", edition="china", max_targets=5):
+    """Resolve only persisted, same-model attribute NSR rows for an immutable validation plan."""
+    model = str(model or "").strip()
+    if not model:
+        raise ValueError("请选择车型后再读取NSR验证标签")
+    identity = lambda value: re.sub(r"\s+", "", str(value or "")).casefold().replace("audi", "奥迪")
+    snapshot, catalog = None, None
+    with db() as conn:
+        try:
+            catalog_rows = conn.execute(
+                """select * from product_evaluation_datasets where org_id=? and edition=?
+                   order by updated_at desc""", (org_id, edition_from(edition)),
+            ).fetchall()
+        except sqlite3.Error:
+            catalog_rows = []
+        rows = conn.execute(
+            """select * from project_snapshots where org_id=? and edition=?
+               order by created_at desc limit 50""", (org_id, edition_from(edition)),
+        ).fetchall()
+    for row in catalog_rows:
+        if identity(row["source_model"]) == identity(model):
+            catalog = row
+            break
+    for row in rows:
+        if identity(row["model"]) == identity(model):
+            snapshot = row
+            break
+    if not (catalog or snapshot):
+        raise ValueError("当前车型没有可追溯的属性NSR数据")
+    try:
+        payload = json.loads((catalog["dataset_json"] if catalog else snapshot["payload_json"]) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("当前车型NSR数据不可读取") from exc
+    state = payload if catalog else payload.get("state") if isinstance(payload.get("state"), dict) else {}
+    raw_rows = state.get("rows") if isinstance(state.get("rows"), list) else []
+    grouped = {}
+    for row in raw_rows:
+        if not isinstance(row, list) or len(row) <= 14 or identity(row[0]) != identity(model):
+            continue
+        label, source = str(row[4] or "").strip(), str(row[2] or "").strip()
+        try:
+            nsr = float(row[14])
+        except (TypeError, ValueError):
+            continue
+        if not label or not source or not math.isfinite(nsr):
+            continue
+        bucket = grouped.setdefault(label, {"values": {}, "category": str(row[3] or "").strip(), "impact": []})
+        bucket["values"].setdefault(source, []).append(nsr)
+        try:
+            impact = float(row[9])
+            if math.isfinite(impact):
+                bucket["impact"].append(impact)
+        except (TypeError, ValueError):
+            pass
+    if not grouped:
+        raise ValueError("当前车型数据没有可用的属性NSR，不能启动验证")
+
+    language = {
+        "智能座舱": ["车机好用", "语音助手", "座舱体验"],
+        "辅助/自动驾驶": ["辅助驾驶", "智驾好用", "自动泊车"],
+        "辅助驾驶": ["智驾好用", "自动泊车"],
+        "豪华感": ["内饰质感", "豪华氛围", "用料"],
+        "驾控": ["操控", "底盘", "驾驶感受"],
+        "舒适性": ["乘坐舒适", "座椅舒适", "滤震"],
+        "续航": ["真实续航", "掉电", "能耗"],
+    }
+    candidates = []
+    for label, bucket in grouped.items():
+        source_means = [sum(values) / len(values) for values in bucket["values"].values()]
+        baseline = sum(source_means) / len(source_means)
+        impact = sum(bucket["impact"]) / len(bucket["impact"]) if bucket["impact"] else 3
+        candidates.append((label, baseline, impact, sorted(bucket["values"])))
+    candidates.sort(key=lambda row: (row[1] > 0, -abs(row[1]), -row[2], row[0]))
+    selected = candidates[:max(1, min(int(max_targets or 5), 5))]
+    targets = []
+    for label, baseline, _impact, _sources in selected:
+        attribute_id = hashlib.sha256(f"{identity(model)}|{label}".encode("utf-8")).hexdigest()[:16]
+        targets.append({
+            "targetId": f"nsr-target-{attribute_id}", "attributeId": attribute_id,
+            "label": label, "baselineNsr": round(baseline, 6),
+            "queryTerms": {
+                "canonical": [label], "userLanguage": language.get(label, []), "scenes": [],
+                "support": ["好用", "满意", "优秀", "推荐"],
+                "challenge": ["不好用", "卡顿", "问题", "吐槽"], "comparison": ["对比", "不如", "更好"],
+            },
+        })
+    context_version = f"product-evaluation:{catalog['fingerprint'][:16]}" if catalog else snapshot["id"]
+    dataset_version = catalog["dataset_version"] if catalog else snapshot["data_version"] or snapshot["created_at"]
+    fingerprint_payload = {
+        "contextVersion": context_version, "datasetVersion": dataset_version, "model": model,
+        "targets": [{"label": row["label"], "baselineNsr": row["baselineNsr"]} for row in targets],
+    }
+    fingerprint = str(catalog["fingerprint"] or "") if catalog else hashlib.sha256(json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    brand = str((state.get("config") or {}).get("brand") or (snapshot["brand"] if snapshot else "") or "").strip()
+    return {
+        "subject": {"brand": brand, "model": model, "aliases": list(dict.fromkeys([model, re.sub(r"\s+", "", model)]))},
+        "vehicleContext": {
+            "brand": brand, "model": model, "modelCode": re.sub(r"[^A-Za-z0-9]+", "-", model).strip("-").lower() or attribute_id,
+            "contextSource": "decision_cockpit", "contextVersion": context_version,
+        },
+        "nsrSource": {"datasetVersion": dataset_version, "fingerprint": f"sha256:{fingerprint}"},
+        "validationTargets": targets,
+    }
+
+
+def start_social_evidence_v2_job(body, *, org_id="local", edition="china", repository=None,
+                                 adapter=None, async_mode=True, frozen_plan=None):
+    repository = repository or social_evidence_repository()
+    plan = frozen_plan or preview_social_evidence_query_plan(body, org_id, edition)
+    service = SocialEvidenceService(repository)
+    job = service.create_job(plan)
+    worker_mode = social_evidence_worker_mode()
+    if async_mode and worker_mode == "off":
+        job = repository.update_job(
+            job["jobId"], org_id, status="manual_required", stage="awaiting_worker", retryable=True,
+            message="公开社媒证据任务 Worker 尚未启用",
+        )
+        return public_social_evidence_job(job)
+    if async_mode and worker_mode == "external":
+        job = repository.update_job(
+            job["jobId"], org_id, status="queued", stage="awaiting_worker", retryable=False,
+            message="任务已进入公开证据采集队列",
+        )
+        return public_social_evidence_job(job)
+    adapter = adapter or TikHubEvidenceAdapter()
+
+    def work():
+        try:
+            service.run_job(job["jobId"], org_id, adapter)
+        except Exception:
+            # The service persists a neutral terminal/degraded state before raising.
+            return
+
+    if async_mode:
+        Thread(target=work, daemon=True, name=f"social-evidence-{job['jobId'][:16]}").start()
+        return public_social_evidence_job(repository.get_job(job["jobId"], org_id))
+    work()
+    return public_social_evidence_job(repository.get_job(job["jobId"], org_id))
+
+
+def get_social_evidence_v2_job(job_id, org_id="local", repository=None):
+    return public_social_evidence_job((repository or social_evidence_repository()).get_job(job_id, org_id))
+
+
+def retry_social_evidence_v2_job(job_id, *, org_id="local", repository=None, adapter=None, async_mode=True):
+    repository = repository or social_evidence_repository()
+    prior = repository.get_job(job_id, org_id)
+    if not prior:
+        raise KeyError("证据任务不存在或无权访问")
+    if not prior.get("retryable"):
+        raise ValueError("当前任务不可重试")
+    plan = repository.get_plan(prior["planId"], org_id)
+    if not plan:
+        raise KeyError("原查询计划不可用")
+    frozen_plan = json.loads(json.dumps(plan, ensure_ascii=False))
+    frozen_plan["planId"] = f"se_plan_{uuid.uuid4().hex}"
+    frozen_plan["createdAt"] = now()
+    return start_social_evidence_v2_job(
+        frozen_plan, org_id=org_id, edition=plan["edition"], repository=repository,
+        adapter=adapter, async_mode=async_mode, frozen_plan=frozen_plan,
+    )
+
+
+def get_nsr_validation_mart(mart_id, org_id="local", repository=None):
+    mart = (repository or social_evidence_repository()).get_mart(mart_id, org_id)
+    if not mart or mart.get("martType") != "nsr_validation":
+        raise KeyError("NSR验证证据集不存在或无权访问")
+    return mart
+
+
+def save_nsr_validation_adjudication(mart_id, body, *, org_id="local", user_id="local", repository=None):
+    mart = get_nsr_validation_mart(mart_id, org_id, repository)
+    target_id = str((body or {}).get("targetId") or "").strip()
+    target = next((row for row in mart.get("targetValidations") or [] if row.get("targetId") == target_id), None)
+    if not target:
+        raise ValueError("所选NSR验证标签不属于当前证据集")
+    allowed_evidence = {row.get("evidenceId") for row in target.get("evidence") or []}
+    requested_evidence = [str(value or "").strip() for value in (body.get("evidenceIds") or []) if str(value or "").strip()]
+    if any(value not in allowed_evidence for value in requested_evidence):
+        raise ValueError("裁决证据不属于当前NSR标签")
+    decision = str((body or {}).get("decision") or "").strip()
+    if decision in {"supported", "challenged", "mixed"} and not requested_evidence:
+        raise ValueError("支持、挑战或混合裁决至少需要一条当前标签原文证据")
+    with db() as conn:
+        init_vehicle_decision_schema(conn)
+        return adjudicate_nsr_validation(
+            conn, mart_id, target_id, body.get("decision"), body.get("reason"), requested_evidence,
+            org_id=org_id, user_id=user_id,
+        )
+
+
 def active_local_job_summary():
     """Return restart-safety state for the project-local service watchdog."""
     active_statuses = {"queued", "running"}
@@ -395,6 +678,13 @@ def active_local_job_summary():
         # Fail closed: an unreadable job store must defer an automatic restart.
         persistent_check = "unknown"
         by_type["persistentStateUnknown"] = 1
+
+    if social_evidence_v2_enabled():
+        try:
+            by_type["socialEvidenceV2"] = social_evidence_repository().active_job_count()
+        except (OSError, sqlite3.Error):
+            persistent_check = "unknown"
+            by_type["socialEvidenceV2StateUnknown"] = 1
 
     return {
         "total": sum(by_type.values()),
@@ -1295,7 +1585,7 @@ def stable_id(*parts):
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 def validate_social_trends_with_models(result):
-    """Reuse MMN's Qwen + DeepSeek evidence review without exposing provider branding."""
+    """Run three blind evidence reviews and publish one neutral MMN conclusion."""
     source_items = result.get("comparisonItems") or result.get("items") or []
     evidence = [{
         "id": x.get("id"),
@@ -1308,16 +1598,25 @@ def validate_social_trends_with_models(result):
     } for x in source_items if x.get("id")]
     result["verifiedComparisonItems"] = []
     qa = result.setdefault("qa", {})
+    def withhold(status, reason):
+        review = {"required": True, "status": status, "reviewedEvidenceCount": len(evidence),
+                  "verifiedEvidenceIds": [], "errors": {} if not reason else {"system": reason}}
+        qa["threeFlagships"] = review
+        qa["dualModel"] = review
+        result["unifiedInsight"] = {"publicationStatus": "withheld", "validationStatus": status,
+                                    "scopeType": "own_vs_competitors" if len(result.get("modelComparisons") or []) > 1 else "own_period",
+                                    "models": [x.get("model") for x in result.get("modelComparisons", []) if x.get("model")],
+                                    "headline": "证据不足，暂不发布统一结论", "limitations": [reason] if reason else []}
+        return result
     if not evidence:
-        qa["dualModel"] = {"required": True, "status": "insufficient_evidence", "verifiedEvidenceIds": []}
-        return result
-    if not (qwen_config()["configured"] and deepseek_config()["configured"]):
-        qa["dualModel"] = {"required": True, "status": "pending_configuration", "verifiedEvidenceIds": []}
-        return result
+        return withhold("insufficient_evidence", "没有可供复核的内容证据")
+    if not (qwen_config()["configured"] and deepseek_config()["configured"] and kimi_config()["configured"]):
+        return withhold("pending_configuration", "三路独立审阅能力尚未配置完整")
     project_brands = sorted({x["expectedBrand"] for x in evidence if x["expectedBrand"]})
-    reviewed = {"qwen": {}, "deepseek": {}}
-    conclusions = {"qwen": [], "deepseek": []}
-    error_lists = {"qwen": [], "deepseek": []}
+    providers = (("reviewer_1", call_qwen), ("reviewer_2", call_deepseek), ("reviewer_3", call_kimi))
+    reviewed = {name: {} for name, _ in providers}
+    conclusions = {name: [] for name, _ in providers}
+    error_lists = {name: [] for name, _ in providers}
     batch_size = 24
     for offset in range(0, len(evidence), batch_size):
         batch = evidence[offset:offset + batch_size]
@@ -1331,7 +1630,7 @@ def validate_social_trends_with_models(result):
             "keyword": result.get("keyword"), "projectBrands": project_brands, "evidence": batch,
         }, ensure_ascii=False)}]
         expected_ids = {str(x["id"]) for x in batch}
-        for provider, caller in (("qwen", call_qwen), ("deepseek", call_deepseek)):
+        for provider, caller in providers:
             try:
                 output = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
                 rows = {str(x.get("id")): x for x in output.get("items", []) if isinstance(x, dict) and x.get("id") is not None}
@@ -1348,36 +1647,66 @@ def validate_social_trends_with_models(result):
     verified = []
     verified_items = []
     for key, expected in expected_by_id.items():
-        qitem, ditem = reviewed["qwen"].get(key), reviewed["deepseek"].get(key)
-        if not qitem or not ditem:
+        rows = [reviewed[provider].get(key) for provider, _ in providers]
+        if not all(rows):
             continue
-        qbrand = str(qitem.get("brandName") or "").strip()
-        dbrand = str(ditem.get("brandName") or "").strip()
-        if not (qitem.get("relevant") is True and ditem.get("relevant") is True
-                and qitem.get("sentiment") == ditem.get("sentiment")
-                and qbrand and qbrand == dbrand == expected["expectedBrand"]):
+        brands = [str(row.get("brandName") or "").strip() for row in rows]
+        sentiments = [row.get("sentiment") for row in rows]
+        if not (all(row.get("relevant") is True for row in rows)
+                and len(set(sentiments)) == 1 and len(set(brands)) == 1
+                and brands[0] == expected["expectedBrand"]):
             continue
         verified.append(key)
         original = next((x for x in source_items if str(x.get("id")) == key), None)
         if original:
             item = dict(original)
-            item["brandName"] = qbrand
-            qmodel = str(qitem.get("modelName") or "").strip()
-            dmodel = str(ditem.get("modelName") or "").strip()
-            item["validatedModelName"] = qmodel if qmodel and qmodel == dmodel else ""
-            item["validationStatus"] = "dual_model_verified"
+            item["brandName"] = brands[0]
+            models = [str(row.get("modelName") or "").strip() for row in rows]
+            item["validatedModelName"] = models[0] if models[0] and len(set(models)) == 1 else ""
+            item["validationStatus"] = "three_review_verified"
             verified_items.append(item)
     errors = {provider: "；".join(rows) for provider, rows in error_lists.items() if rows}
-    complete = not errors and all(len(reviewed[provider]) == len(expected_by_id) for provider in ("qwen", "deepseek"))
-    qa["dualModel"] = {
+    complete = not errors and all(len(reviewed[provider]) == len(expected_by_id) for provider, _ in providers)
+    collection_complete = (result.get("collectionStatus") or {}).get("status") == "complete"
+    all_evidence_aligned = len(verified) == len(expected_by_id)
+    status = ("insufficient_evidence" if not complete else "conditional" if not collection_complete
+              else "aligned" if all_evidence_aligned else "disagreement")
+    review = {
         "required": True,
-        "status": "aligned" if complete else "manual_required",
+        "status": status,
         "reviewedEvidenceCount": len(expected_by_id),
         "verifiedEvidenceIds": verified,
         "errors": errors,
     }
+    qa["threeFlagships"] = review
+    qa["dualModel"] = review
     result["verifiedComparisonItems"] = verified_items if complete else []
-    qa["strategyOutput"] = "\n".join(conclusions[provider][-1] for provider in ("qwen", "deepseek") if conclusions[provider]) or "证据不足，暂不输出策略结论"
+    comparisons = result.get("modelComparisons") or []
+    own = next((row for row in comparisons if row.get("role") == "own"), comparisons[0] if comparisons else {})
+    competitors = [row for row in comparisons if row.get("role") == "competitor"]
+    leader = max(comparisons, key=lambda row: float(row.get("heat") or 0), default=own)
+    scope_type = "own_vs_competitors" if competitors else "own_period"
+    headline = (f"{leader.get('model')}在所选范围内公开内容综合热度领先；{own.get('model')}需结合内容量与风险证据判断传播质量"
+                if competitors else f"{own.get('model')}在所选周期内形成{int(own.get('contentCount') or 0)}条可分析公开内容")
+    limitations = []
+    if not collection_complete:
+        limitations.append("采集未完整结束，当前结论只代表已返回证据，不能解释为周期内无其他内容")
+    if not complete:
+        limitations.append("三路独立审阅未全部完成，统一结论暂缓发布")
+    if complete and not all_evidence_aligned:
+        limitations.append(f"三路审阅对 {len(expected_by_id) - len(verified)} 条证据存在分歧，统一结论仅引用共同通过的证据")
+    publication = ("published" if status == "aligned" else "conditional"
+                   if status in {"conditional", "disagreement"} and verified else "withheld")
+    result["unifiedInsight"] = {
+        "publicationStatus": publication, "validationStatus": status, "scopeType": scope_type,
+        "models": [row.get("model") for row in comparisons if row.get("model")], "headline": headline if complete else "证据不足，暂不发布统一结论",
+        "ownFinding": {"model": own.get("model"), "contentCount": own.get("contentCount", 0), "heat": own.get("heat", 0),
+                       "positiveRate": own.get("positiveRate", 0), "riskCount": own.get("riskCount", 0)},
+        "competitorFindings": [{"model": row.get("model"), "contentCount": row.get("contentCount", 0), "heat": row.get("heat", 0),
+                                "positiveRate": row.get("positiveRate", 0), "riskCount": row.get("riskCount", 0)} for row in competitors],
+        "evidenceIds": verified, "limitations": limitations,
+    }
+    qa["strategyOutput"] = result["unifiedInsight"]["headline"]
     return result
 
 
@@ -3309,6 +3638,8 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/social-trends/collect",
     "/api/social-trends/jobs",
     "/api/social-trends/import",
+    "/api/social-evidence/jobs",
+    "/api/social-evidence/query-plans/preview",
 })
 
 
@@ -3317,7 +3648,8 @@ def cloud_post_required_roles(path):
     creator_script_action = re.fullmatch(
         r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", str(path or "")
     )
-    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action else {"admin"}
+    social_evidence_retry = re.fullmatch(r"/api/social-evidence/jobs/[^/]+/retry", str(path or ""))
+    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action or social_evidence_retry else {"admin"}
 
 
 def auth_secret():
@@ -4797,15 +5129,15 @@ def executive_brief_evidence_packet():
         {"id": "penetration_buffer", "title": "新能源结构占比", "detail": f"新能源零售渗透率为{penetration['value']}%"},
     ]
     brand_implications = [
-        {"id": "im", "brand": "智己", "summaryDetail": "双旗舰模型一致认为，智己本阶段应把高端新能源心智拆成可感知的驾控、智能、补能与豪华体验，判断重点从参数领先转向用户是否形成明确换购理由。", "actionDetail": "内容执行按核心车型建立人群分层：高意向用户优先承接试驾与换购，观望用户用真实场景和车主证言解释技术价值，并按周淘汰无效技术表达。", "signalDetail": "复盘需同时看品牌搜索、试驾线索、换购人群占比、优势属性提及率和高意向评论；只有认知与线索同步改善，才判定传播有效。"},
-        {"id": "mg", "brand": "MG", "summaryDetail": "双旗舰模型一致认为，MG必须把国内年轻化经营与海外交付经营拆开判断，避免用全球销量或单一运动标签替代区域需求、终端价格和库存质量。", "actionDetail": "国内内容围绕通勤、旅行和个性表达组织；海外按重点区域逐一匹配车型、现车、渠道承接和上市节奏，传播排期必须服从真实交付能力。", "signalDetail": "国内按周追踪年轻人群搜索与互动，海外同步监测区域订单、库存周转、交付周期、运价和终端价格，出现库存与传播错配时及时降档。"},
-        {"id": "roewe", "brand": "荣威", "summaryDetail": "双旗舰模型一致认为，荣威需要重建主流家庭用户的购买确定性，把空间、舒适、可靠、能耗与长期成本组织成可比较的价值体系，而不是继续依赖优惠形成短期刺激。", "actionDetail": "围绕家庭通勤、亲子和跨城三个高频场景形成同价位证据包，明确每个场景的产品证明、车主证言与到店承接，并将优惠降为成交辅助信息。", "signalDetail": "复盘同时观察家庭人群内容渗透、核心产品点NSR、试驾和换购线索、价格敏感评论及成交转化，防止声量提升但价值认知没有建立。"},
-        {"id": "vw", "brand": "大众", "summaryDetail": "双旗舰模型一致认为，上汽大众要以两套经营逻辑分别管理燃油基本盘和新能源认知转换：前者稳信任与保有体验，后者补智能与本土场景适配。", "actionDetail": "燃油产品集中表达品质、保值、服务网络和换购权益；新能源产品用真实对比解释座舱、辅助驾驶、补能与空间，不混用一套内容和转化指标。", "signalDetail": "每周并行追踪燃油换购留存、新能源搜索占比、智能化属性NSR和试驾线索，并观察两类用户迁移方向，识别基本盘流失或新能源承接不足。"},
-        {"id": "audi", "brand": "AUDI", "summaryDetail": "双旗舰模型一致认为，上汽奥迪必须把传统豪华信任转译为新能源购买理由；E7X应以设计、驾控、智能、舒适和场景体验的相对优势建立新认知。", "actionDetail": "执行上按总体声量、平台NSR、属性VOC和竞品差距形成闭环：先补传播规模，再放大已验证优势，并为弱势平台单独匹配内容语言、达人和试驾证据。", "signalDetail": "复盘同时看E7X总体声量、全网及分平台NSR、核心属性提及、竞品共同比较、试驾预约和豪华新能源人群渗透，避免只用单一声量判断。"},
-        {"id": "buick", "brand": "别克", "summaryDetail": "双旗舰模型一致认为，别克要重新连接家庭出行优势与新能源转型，降低价格信息对品牌价值的遮蔽，并明确燃油、插混和纯电各自适用的人群与场景。", "actionDetail": "三种能源形式分别建立家庭场景证据、使用成本解释和车主口碑，增加长期用车与服务保障内容；泛化优惠只承担临门转化，不再占据主叙事。", "signalDetail": "按能源形式拆分家庭人群好感、价格负面评论、核心属性NSR、到店试驾和置换成交，判断价值认知是否真正改善而非被促销短暂拉动。"},
-        {"id": "cadillac", "brand": "凯迪拉克", "summaryDetail": "双旗舰模型一致认为，凯迪拉克当前首要任务是阻止价格叙事继续侵蚀豪华价值、保值预期与老用户信心，新能源转型不能再以折扣代替体验解释。", "actionDetail": "控制优惠内容占比，集中放大设计、驾控、舒适、静谧与服务体验；新能源产品必须增加真实场景试驾和可核验技术证据，建立同级差异。", "signalDetail": "周度复盘价格相关声量占比、豪华属性NSR、保值焦虑、老用户情绪、试驾线索和新能源迁移率；若价格声量上升而豪华认知下降，应立即收缩促销叙事。"},
-        {"id": "maxus", "brand": "大通", "summaryDetail": "双旗舰模型一致认为，上汽大通要把商用、皮卡与海外增长拆成区域和车型机会，出口规模不能替代订单质量、库存、运力、渠道能力与利润稳定性的经营判断。", "actionDetail": "按重点国家和区域建立车型机会清单，让内容场景、行业用途、经销商承接和交付节奏一致；高库存或运力受限区域不得继续无差别放大传播。", "signalDetail": "周度追踪区域订单、车型结构、库存周转、交付周期、运价、终端价格和内容反馈，用订单与交付的同步性决定区域传播资源增减。"},
-        {"id": "wuling", "brand": "五菱", "summaryDetail": "双旗舰模型一致认为，五菱下一阶段要从规模与亲民价格升级到长期可信赖的产品价值，重点补强品质、安全、空间、能耗和家庭场景认知。", "actionDetail": "围绕代步、接送、家庭短途和县域出行沉淀真实用户内容，把低成本优势与品质安全证据绑定；主力车型分工必须清楚，避免新品互相稀释认知。", "signalDetail": "按周观察新能源规模、品质与安全NSR、真实车主口碑、县域覆盖、复购换购和主力车型认知集中度，确认规模优势是否转化为品牌资产。"},
+        {"id": "im", "brand": "智己", "summaryDetail": "三路旗舰模型一致认为，智己本阶段应把高端新能源心智拆成可感知的驾控、智能、补能与豪华体验，判断重点从参数领先转向用户是否形成明确换购理由。", "actionDetail": "内容执行按核心车型建立人群分层：高意向用户优先承接试驾与换购，观望用户用真实场景和车主证言解释技术价值，并按周淘汰无效技术表达。", "signalDetail": "复盘需同时看品牌搜索、试驾线索、换购人群占比、优势属性提及率和高意向评论；只有认知与线索同步改善，才判定传播有效。"},
+        {"id": "mg", "brand": "MG", "summaryDetail": "三路旗舰模型一致认为，MG必须把国内年轻化经营与海外交付经营拆开判断，避免用全球销量或单一运动标签替代区域需求、终端价格和库存质量。", "actionDetail": "国内内容围绕通勤、旅行和个性表达组织；海外按重点区域逐一匹配车型、现车、渠道承接和上市节奏，传播排期必须服从真实交付能力。", "signalDetail": "国内按周追踪年轻人群搜索与互动，海外同步监测区域订单、库存周转、交付周期、运价和终端价格，出现库存与传播错配时及时降档。"},
+        {"id": "roewe", "brand": "荣威", "summaryDetail": "三路旗舰模型一致认为，荣威需要重建主流家庭用户的购买确定性，把空间、舒适、可靠、能耗与长期成本组织成可比较的价值体系，而不是继续依赖优惠形成短期刺激。", "actionDetail": "围绕家庭通勤、亲子和跨城三个高频场景形成同价位证据包，明确每个场景的产品证明、车主证言与到店承接，并将优惠降为成交辅助信息。", "signalDetail": "复盘同时观察家庭人群内容渗透、核心产品点NSR、试驾和换购线索、价格敏感评论及成交转化，防止声量提升但价值认知没有建立。"},
+        {"id": "vw", "brand": "大众", "summaryDetail": "三路旗舰模型一致认为，上汽大众要以两套经营逻辑分别管理燃油基本盘和新能源认知转换：前者稳信任与保有体验，后者补智能与本土场景适配。", "actionDetail": "燃油产品集中表达品质、保值、服务网络和换购权益；新能源产品用真实对比解释座舱、辅助驾驶、补能与空间，不混用一套内容和转化指标。", "signalDetail": "每周并行追踪燃油换购留存、新能源搜索占比、智能化属性NSR和试驾线索，并观察两类用户迁移方向，识别基本盘流失或新能源承接不足。"},
+        {"id": "audi", "brand": "AUDI", "summaryDetail": "三路旗舰模型一致认为，上汽奥迪必须把传统豪华信任转译为新能源购买理由；E7X应以设计、驾控、智能、舒适和场景体验的相对优势建立新认知。", "actionDetail": "执行上按总体声量、平台NSR、属性VOC和竞品差距形成闭环：先补传播规模，再放大已验证优势，并为弱势平台单独匹配内容语言、达人和试驾证据。", "signalDetail": "复盘同时看E7X总体声量、全网及分平台NSR、核心属性提及、竞品共同比较、试驾预约和豪华新能源人群渗透，避免只用单一声量判断。"},
+        {"id": "buick", "brand": "别克", "summaryDetail": "三路旗舰模型一致认为，别克要重新连接家庭出行优势与新能源转型，降低价格信息对品牌价值的遮蔽，并明确燃油、插混和纯电各自适用的人群与场景。", "actionDetail": "三种能源形式分别建立家庭场景证据、使用成本解释和车主口碑，增加长期用车与服务保障内容；泛化优惠只承担临门转化，不再占据主叙事。", "signalDetail": "按能源形式拆分家庭人群好感、价格负面评论、核心属性NSR、到店试驾和置换成交，判断价值认知是否真正改善而非被促销短暂拉动。"},
+        {"id": "cadillac", "brand": "凯迪拉克", "summaryDetail": "三路旗舰模型一致认为，凯迪拉克当前首要任务是阻止价格叙事继续侵蚀豪华价值、保值预期与老用户信心，新能源转型不能再以折扣代替体验解释。", "actionDetail": "控制优惠内容占比，集中放大设计、驾控、舒适、静谧与服务体验；新能源产品必须增加真实场景试驾和可核验技术证据，建立同级差异。", "signalDetail": "周度复盘价格相关声量占比、豪华属性NSR、保值焦虑、老用户情绪、试驾线索和新能源迁移率；若价格声量上升而豪华认知下降，应立即收缩促销叙事。"},
+        {"id": "maxus", "brand": "大通", "summaryDetail": "三路旗舰模型一致认为，上汽大通要把商用、皮卡与海外增长拆成区域和车型机会，出口规模不能替代订单质量、库存、运力、渠道能力与利润稳定性的经营判断。", "actionDetail": "按重点国家和区域建立车型机会清单，让内容场景、行业用途、经销商承接和交付节奏一致；高库存或运力受限区域不得继续无差别放大传播。", "signalDetail": "周度追踪区域订单、车型结构、库存周转、交付周期、运价、终端价格和内容反馈，用订单与交付的同步性决定区域传播资源增减。"},
+        {"id": "wuling", "brand": "五菱", "summaryDetail": "三路旗舰模型一致认为，五菱下一阶段要从规模与亲民价格升级到长期可信赖的产品价值，重点补强品质、安全、空间、能耗和家庭场景认知。", "actionDetail": "围绕代步、接送、家庭短途和县域出行沉淀真实用户内容，把低成本优势与品质安全证据绑定；主力车型分工必须清楚，避免新品互相稀释认知。", "signalDetail": "按周观察新能源规模、品质与安全NSR、真实车主口碑、县域覆盖、复购换购和主力车型认知集中度，确认规模优势是否转化为品牌资产。"},
     ]
     brand_frameworks = {
         "智己": {"conflict": "技术配置具备传播素材，但参数声量尚未稳定转化为豪华新能源换购理由。", "choice": "资源从泛参数教育转向高意向家庭的驾控、智能、补能与豪华体验证明。", "priority": "先建立一套可复制的核心车型换购证据包，再扩大媒介覆盖。", "phase1": "锁定高意向与观望两类人群，完成核心场景、竞品异议和证明素材清单。", "phase2": "集中投放试驾、车主证言与场景对比，按平台淘汰低转化表达。", "phase3": "把有效内容固化为经销商承接话术，并按区域复制。", "owner": "品牌、产品、媒介与销售共同维护同一张证据—线索看板。", "leading": "品牌搜索、优势属性提及率、高意向评论占比。", "conversion": "试驾预约、换购线索、有效线索到店率。", "threshold": "连续两周声量增长但试驾或换购线索不增长，即判定表达失效。", "correction": "暂停低效参数内容，把预算转向已验证场景与高转化平台。"},
@@ -4999,6 +5331,8 @@ def load_executive_brief_cache(packet):
         return None
     if cached.get("factsFingerprint") != packet["fingerprint"]:
         return None
+    if set((cached.get("providerChecks") or {}).keys()) != set(EXECUTIVE_BRIEF_REVIEW_PROVIDERS):
+        return None
     return cached
 
 def save_executive_brief_cache(payload):
@@ -5015,12 +5349,12 @@ def public_executive_brief_state(packet, cached=None):
         review_running = (EXECUTIVE_BRIEF_REVIEW_TASKS.get(packet["fingerprint"]) or {}).get("status") == "running"
     review_completed = bool(cached.get("reviewedAt"))
     status_label = (
-        "双旗舰模型交叉验证已通过"
+        "三路旗舰模型交叉验证已通过"
         if status == "verified"
         else (
-            "双旗舰模型交叉验证中 · 暂不发布"
+            "三路旗舰模型交叉验证中 · 暂不发布"
             if review_running or not review_completed
-            else "双旗舰模型交叉验证未通过 · 暂不发布"
+            else "三路旗舰模型交叉验证未通过 · 暂不发布"
         )
     )
     return {
@@ -5038,14 +5372,17 @@ def public_executive_brief_state(packet, cached=None):
         "weeklyRefresh": packet.get("weeklyRefresh") or {},
         "batchId": packet.get("batchId") or "",
         "factsFingerprint": packet["fingerprint"],
-        "providerChecks": cached.get("providerChecks") or {"qwen": "pending", "deepseek": "pending"},
+        "providerChecks": {
+            f"flagship{chr(65 + index)}": (cached.get("providerChecks") or {}).get(provider, "pending")
+            for index, provider in enumerate(EXECUTIVE_BRIEF_REVIEW_PROVIDERS)
+        },
         "reviewRunning": review_running,
         "reviewCompleted": review_completed,
         "reviewedAt": cached.get("reviewedAt") or "",
         "priorValueMethod": "按本期值 ÷（1＋同比）反算，显示至0.1万辆",
     }
 
-def run_executive_brief_dual_review(packet=None):
+def run_executive_brief_triple_review(packet=None):
     packet = packet or executive_brief_evidence_packet()
     prompt = executive_brief_review_prompt(packet)
 
@@ -5053,7 +5390,7 @@ def run_executive_brief_dual_review(packet=None):
         try:
             if provider == "qwen":
                 raw = call_qwen(prompt, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=1800, enable_thinking=False)
-            else:
+            elif provider == "deepseek":
                 raw = call_deepseek(
                     prompt,
                     temperature=.05,
@@ -5062,14 +5399,21 @@ def run_executive_brief_dual_review(packet=None):
                     max_tokens=1800,
                     response_format={"type": "json_object"},
                 )
+            elif provider == "kimi":
+                raw = call_kimi(
+                    prompt,
+                    temperature=.05,
+                    profile="deep",
+                    timeout=MMN_CRITIC_TIMEOUT,
+                    max_tokens=1800,
+                )
             return "verified" if normalize_executive_brief_review(raw, packet) else "rejected"
         except Exception:
             return "unavailable"
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        qwen_future = executor.submit(review, "qwen")
-        deepseek_future = executor.submit(review, "deepseek")
-        checks = {"qwen": qwen_future.result(), "deepseek": deepseek_future.result()}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {provider: executor.submit(review, provider) for provider in EXECUTIVE_BRIEF_REVIEW_PROVIDERS}
+        checks = {provider: future.result() for provider, future in futures.items()}
     status = "verified" if all(value == "verified" for value in checks.values()) else "pending_review"
     result = {
         "status": status,
@@ -5084,7 +5428,11 @@ def enqueue_executive_brief_review(packet=None, force=False):
     packet = packet or executive_brief_evidence_packet()
     if os.getenv("MMN_EXECUTIVE_BRIEF_MODELS_ENABLED", "true").lower() not in {"1", "true", "yes", "on"}:
         return False
-    if not (qwen_config("deep")["configured"] and deepseek_config("deep")["configured"]):
+    if not (
+        qwen_config("deep")["configured"]
+        and deepseek_config("deep")["configured"]
+        and kimi_config("deep")["configured"]
+    ):
         return False
     with EXECUTIVE_BRIEF_REVIEW_LOCK:
         task = EXECUTIVE_BRIEF_REVIEW_TASKS.get(packet["fingerprint"]) or {}
@@ -5094,7 +5442,7 @@ def enqueue_executive_brief_review(packet=None, force=False):
 
     def work():
         try:
-            run_executive_brief_dual_review(packet)
+            run_executive_brief_triple_review(packet)
         finally:
             with EXECUTIVE_BRIEF_REVIEW_LOCK:
                 EXECUTIVE_BRIEF_REVIEW_TASKS[packet["fingerprint"]] = {"status": "done", "finishedAt": now()}
@@ -9671,17 +10019,25 @@ def start_opportunity_map_job(body, *, org_id="", user_id="local", runner=None):
     return get_opportunity_map_job(job_id)
 
 
+def _normalize_social_trend_body(body):
+    normalized = dict(body or {})
+    normalized["keyword"] = normalized_vehicle_label(normalized.get("keyword"))
+    normalized["competitors"] = sanitize_competitor_models(
+        normalized["keyword"], normalized.get("competitors", []), limit=3,
+    )
+    return normalized
+
+
 def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callback=None):
+    body = _normalize_social_trend_body(body)
     platforms = body.get("platforms") or ["douyin", "xiaohongshu", "weibo"]
     edition = edition_from(body.get("edition", "china"))
     time_range = body.get("timeRange", "30d")
     start_date = body.get("startDate", "")
     end_date = body.get("endDate", "")
     thresholds = body.get("thresholds") or {"douyin": 8000, "xiaohongshu": 500, "weibo": 500}
-    keyword = str(body.get("keyword") or "").strip()
-    competitors = list(dict.fromkeys(
-        str(value or "").strip() for value in (body.get("competitors") or []) if str(value or "").strip()
-    ))[:5]
+    keyword = body.get("keyword", "")
+    competitors = body.get("competitors", [])
     models = [keyword] + competitors
     if not keyword:
         raise ValueError("请输入本品品牌或车型")
@@ -9700,17 +10056,19 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
             overall = 2 + round(collection_span * (index + local_progress / 100) / len(models))
             role = "本品" if index == 0 else "竞品"
             report(stage, overall, f"{role} {model}：{message}")
+        model_aliases = (body.get("aliasesByModel") or {}).get(model) or []
         collected.append(collect_social_trends(
-            model, platforms, body.get("pages", 1),
+            model, platforms, body["pages"] if "pages" in body else 0,
             body.get("count", 20), time_range, index == 0, thresholds, on_model_progress, start_date, end_date,
+            model_aliases,
         ))
     report("comparison", 82, "已完成本品与竞品样本对齐")
     result = attach_competitor_rankings(collected[0], collected[1:])
     result = apply_social_trend_history(result, previous)
-    report("validation", 88, "正在执行MMN实体与双模型交叉校验")
+    report("validation", 88, "正在执行MMN实体与三路独立审阅")
     result = validate_social_trends_with_models(result)
-    dual_status = (result.get("qa", {}).get("dualModel") or {}).get("status")
-    report("storage", 96, "双模型校验通过，正在写入正式快照" if dual_status == "aligned" else "双模型未完整通过，仅保存待复核快照")
+    review_status = (result.get("qa", {}).get("threeFlagships") or {}).get("status")
+    report("storage", 96, "三路审阅一致，正在写入正式快照" if review_status == "aligned" else "审阅或采集未完整，仅保存受限快照")
     with db() as conn:
         snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
             "platforms": platforms, "timeRange": time_range, "startDate": start_date, "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
@@ -9725,16 +10083,17 @@ def _public_social_trend_job(job):
 
 
 def _social_trend_job_request_key(body):
+    body = _normalize_social_trend_body(body)
     return json.dumps({
-        "keyword": str((body or {}).get("keyword") or "").strip(),
+        "keyword": vehicle_identity_key(body.get("keyword")),
         "platforms": list((body or {}).get("platforms") or []),
-        "competitors": list((body or {}).get("competitors") or []),
+        "competitors": [vehicle_identity_key(value) for value in body.get("competitors", [])],
         "thresholds": (body or {}).get("thresholds") or {},
         "timeRange": (body or {}).get("timeRange") or "30d",
         "startDate": (body or {}).get("startDate") or "",
         "endDate": (body or {}).get("endDate") or "",
         "edition": (body or {}).get("edition") or "china",
-        "pages": (body or {}).get("pages") or 1,
+        "pages": (body or {}).get("pages", 0),
         "count": (body or {}).get("count") or 20,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -9773,6 +10132,7 @@ def get_social_trend_job(job_id, org_id=""):
 
 
 def start_social_trend_job(body, *, org_id="local", runner=None):
+    body = _normalize_social_trend_body(body)
     runner = runner or run_social_trend_collection_pipeline
     job_id = str(uuid.uuid4())
     stamp = now()
@@ -13092,6 +13452,43 @@ def vehicle_decision_surface_inputs(model, org_id="local", edition="china"):
             "evidenceStatus": "aligned" if matched.get("segment_label") or matched.get("market_key") else "limited",
             "sourceVersion": warning.get("schema_version") or "sales-warning",
         })
+    try:
+        validation_mart = social_evidence_repository().latest_mart(
+            f"nsr_validation:{edition}:{model}", org_id, edition, "nsr_validation",
+        )
+        mart_model = ((validation_mart or {}).get("vehicleContext") or {}).get("model")
+        if validation_mart and re.sub(r"\s+", "", str(mart_model or "")).casefold() == model_key:
+            with db() as conn:
+                init_vehicle_decision_schema(conn)
+                adjudications = list_nsr_validation_adjudications(conn, validation_mart["martId"], org_id=org_id)
+            latest_by_target = {}
+            for item in adjudications:
+                latest_by_target.setdefault(item["targetId"], item)
+            target_map = {item.get("targetId"): item for item in validation_mart.get("targetValidations") or []}
+            for target_id, adjudication in latest_by_target.items():
+                if adjudication.get("decision") != "supported":
+                    continue
+                target = target_map.get(target_id)
+                if not target or not adjudication.get("evidenceIds") or not int(target.get("evidenceCount") or 0):
+                    continue
+                evidence_ids = [
+                    *adjudication.get("evidenceIds", []),
+                    f"SOCIAL_MART:{validation_mart['martId']}",
+                    f"NSR_ADJUDICATION:{adjudication['id']}",
+                ]
+                inputs["product_voice"].append({
+                    "conclusion": f"{model}的“{target.get('label')}”在{validation_mart['queryScope']['dateWindow']['start']}至{validation_mart['queryScope']['dateWindow']['end']}公开讨论样本中，经人工裁决为支持；该结论不重算NSR。",
+                    "claimType": "fact", "evidenceIds": evidence_ids,
+                    "timeWindow": validation_mart["queryScope"]["dateWindow"],
+                    "businessImpact": 4, "confidence": min(.82, .55 + int(target.get("evidenceCount") or 0) * .02),
+                    "evidenceStatus": "aligned", "uncertainty": "仅代表已采集公开讨论证据，不代表市场需求、销量或因果。",
+                    "sourceVersion": f"{validation_mart['schemaVersion']}:{validation_mart['martId']}",
+                    "validationMartId": validation_mart["martId"], "validationTargetId": target_id,
+                    "adjudicationId": adjudication["id"], "nsrSource": validation_mart.get("nsrSource"),
+                })
+    except (KeyError, OSError, sqlite3.Error, TypeError, ValueError):
+        # Decision snapshots remain available when no accepted validation mart exists.
+        pass
     return inputs
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -13206,7 +13603,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 "activeSocialTrendJobs": active_jobs["byType"].get("socialTrend", 0),
                 "activeLocalJobs": active_jobs["total"],
                 "activeJobs": active_jobs,
+                "socialEvidenceV2": social_evidence_capabilities(),
             })
+            return
+        if parsed.path == "/api/social-evidence/capabilities":
+            self.send_json({"ok": True, **social_evidence_capabilities()})
+            return
+        if parsed.path == "/api/social-evidence/nsr-context":
+            try:
+                if cloud_login_required() and not self.require_cloud_auth():
+                    return
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                context = resolve_vehicle_nsr_validation_context(
+                    query.get("model", [""])[0], auth.get("org_id", "local"),
+                    edition_from(query.get("edition", ["china"])[0]),
+                )
+                self.send_json({"ok": True, "context": context})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
             return
         if parsed.path == "/api/product-whitepaper/latest":
             try:
@@ -13361,6 +13776,63 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         {"competitors": competitors, "timeRange": time_range} if competitors or time_range else None,
                     )
             self.send_json({"ok": True, "result": result})
+            return
+        if parsed.path == "/api/social-evidence/jobs/latest":
+            try:
+                query = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                job = social_evidence_repository().latest_job(
+                    str(query.get("projectId", [""])[0]).strip(), auth.get("org_id", "local"),
+                    edition_from(query.get("edition", ["china"])[0]), str(query.get("centerType", [""])[0]).strip(),
+                )
+                self.send_json({"ok": True, "job": public_social_evidence_job(job)})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        social_evidence_job_match = re.fullmatch(r"/api/social-evidence/jobs/([^/]+)", parsed.path)
+        if social_evidence_job_match:
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 404)
+                return
+            auth = self.current_auth() or {}
+            job = get_social_evidence_v2_job(social_evidence_job_match.group(1), auth.get("org_id", "local"))
+            if not job:
+                self.send_json({"ok": False, "error": "证据任务不存在或无权访问"}, 404)
+            else:
+                self.send_json({"ok": True, "job": job})
+            return
+        if parsed.path == "/api/social-evidence/marts/latest":
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 404)
+                return
+            query = parse_qs(parsed.query)
+            auth = self.current_auth() or {}
+            project_id = str(query.get("projectId", [""])[0]).strip()
+            mart_type = str(query.get("martType", [""])[0]).strip()
+            edition = edition_from(query.get("edition", ["china"])[0])
+            if not project_id or mart_type not in {"social_trend", "brand_penetration", "nsr_validation"}:
+                self.send_json({"ok": False, "error": "缺少有效项目或证据集类型"}, 400)
+                return
+            mart = social_evidence_repository().latest_mart(project_id, auth.get("org_id", "local"), edition, mart_type)
+            self.send_json({"ok": True, "mart": mart})
+            return
+        nsr_adjudications_match = re.fullmatch(r"/api/social-evidence/marts/([^/]+)/adjudications", parsed.path)
+        if nsr_adjudications_match:
+            try:
+                auth = self.current_auth() or {}
+                mart = get_nsr_validation_mart(
+                    nsr_adjudications_match.group(1), auth.get("org_id", "local"),
+                )
+                with db() as conn:
+                    init_vehicle_decision_schema(conn)
+                    adjudications = list_nsr_validation_adjudications(
+                        conn, mart["martId"], org_id=auth.get("org_id", "local"),
+                    )
+                self.send_json({"ok": True, "adjudications": adjudications})
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
             return
         social_trend_job_match = re.fullmatch(r"/api/social-trends/jobs/([^/]+)", parsed.path)
         if social_trend_job_match:
@@ -14719,6 +15191,64 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         )
                         saved += 1
                 self.send_json({"ok": True, "saved": saved, "updatedAt": stamp})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-evidence/query-plans/preview":
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 409)
+                return
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                edition = edition_from(body.get("edition", "china"))
+                plan = preview_social_evidence_query_plan(body, auth.get("org_id", "local"), edition)
+                self.send_json({"ok": True, "plan": plan})
+            except StaleNsrSource as exc:
+                self.send_json({"ok": False, "error": str(exc), "code": "NSR_SOURCE_STALE"}, 409)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        social_evidence_retry_match = re.fullmatch(r"/api/social-evidence/jobs/([^/]+)/retry", parsed.path)
+        if social_evidence_retry_match:
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 409)
+                return
+            try:
+                auth = self.current_auth() or {}
+                job = retry_social_evidence_v2_job(social_evidence_retry_match.group(1), org_id=auth.get("org_id", "local"))
+                self.send_json({"ok": True, "job": job}, 202)
+            except (KeyError, ValueError) as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 409)
+            return
+        if parsed.path == "/api/social-evidence/jobs":
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 409)
+                return
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                edition = edition_from(body.get("edition", "china"))
+                job = start_social_evidence_v2_job(body, org_id=auth.get("org_id", "local"), edition=edition)
+                self.send_json({"ok": True, "job": job}, 202)
+            except StaleNsrSource as exc:
+                self.send_json({"ok": False, "error": str(exc), "code": "NSR_SOURCE_STALE"}, 409)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        nsr_adjudication_match = re.fullmatch(r"/api/social-evidence/marts/([^/]+)/adjudications", parsed.path)
+        if nsr_adjudication_match:
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                adjudication = save_nsr_validation_adjudication(
+                    nsr_adjudication_match.group(1), body,
+                    org_id=auth.get("org_id", "local"),
+                    user_id=auth.get("user_id") or auth.get("username") or "local",
+                )
+                self.send_json({"ok": True, "adjudication": adjudication}, 201)
+            except KeyError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 404)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

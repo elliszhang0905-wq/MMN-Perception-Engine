@@ -1,13 +1,24 @@
+import json
 import os
 import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from social_trends import TikHubClient, _aggregate, _parse_import_date, apply_history, attach_competitor_rankings, collect, douyin_next_cursor, ensure_tikhub_success, import_records, init_schema, latest_snapshot, normalize_item, passenger_vehicle_scope_exclusion_reason, save_snapshot
+from social_trends import TikHubClient, _aggregate, _parse_import_date, apply_history, attach_competitor_rankings, collect, douyin_next_cursor, douyin_pagination_state, ensure_tikhub_success, import_records, init_schema, latest_snapshot, normalize_item, passenger_vehicle_scope_exclusion_reason, sanitize_competitor_models, save_snapshot, vehicle_identity_key, vehicle_search_aliases
 
 
 class SocialTrendsTest(unittest.TestCase):
+    def test_vehicle_search_aliases_cover_chinese_english_brand_and_short_model(self):
+        self.assertEqual(vehicle_search_aliases("奥迪E7X"), ["奥迪E7X", "AUDI E7X", "E7X"])
+
+    def test_vehicle_identity_normalization_excludes_own_and_duplicate_competitors(self):
+        self.assertEqual(vehicle_identity_key(" 奥迪 E7x "), vehicle_identity_key("奥迪E7X"))
+        self.assertEqual(
+            sanitize_competitor_models("奥迪 E7X", ["奥迪E7X", " 奔驰GLC EV ", "奔驰GLC  EV", "问界M7", "问界M7"]),
+            ["奔驰GLC EV", "问界M7"],
+        )
+
     def test_social_assistant_aliases_and_excel_date_are_imported(self):
         result = import_records([{
             "视频ID": "7631825727737892130", "视频链接": "https://www.douyin.com/video/7631825727737892130",
@@ -31,6 +42,16 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(item["coverUrl"], "https://p3.example.com/cover.jpeg")
         self.assertEqual(item["dynamicCoverUrl"], "https://p3.example.com/cover.webp")
         self.assertEqual(len(item["evidence"]["contentHash"]), 64)
+
+    def test_normalizes_title_description_hashtags_and_match_fields(self):
+        item = normalize_item("douyin", {
+            "aweme_id": "structured-1", "title": "AUDI E7X 海外首秀",
+            "desc": "奥迪E7X 设计解析 #E7X# #奥迪#",
+            "cha_list": [{"cha_name": "纯电SUV"}],
+        }, "奥迪E7X", "now")
+        self.assertEqual(item["title"], "AUDI E7X 海外首秀")
+        self.assertIn("奥迪E7X", item["description"])
+        self.assertEqual(set(item["hashtags"]), {"E7X", "奥迪", "纯电SUV"})
 
     def test_xiaohongshu_timestamp_is_preserved_as_publish_time(self):
         item = normalize_item("xiaohongshu", {
@@ -73,7 +94,7 @@ class SocialTrendsTest(unittest.TestCase):
             {"aweme_id": "out-window", "desc": "车型A 窗口外内容", "create_time": int((now - timedelta(days=1)).timestamp())},
         ]}
         search_ranges = []
-        def search(platform, keyword, page, count, time_range, cursor):
+        def search(platform, keyword, page, count, time_range, cursor, search_context=None):
             search_ranges.append(time_range)
             return payload, {"endpoint": "test", "status": 200}
         with patch.object(TikHubClient, "search", side_effect=search):
@@ -131,7 +152,7 @@ class SocialTrendsTest(unittest.TestCase):
             {"data": {"business_data": [{"data": {"has_more": 0, "cursor": 16}}]}},
         ]
         calls = []
-        def search(platform, keyword, page, count, time_range, cursor):
+        def search(platform, keyword, page, count, time_range, cursor, search_context=None):
             calls.append((page, cursor))
             return payloads[len(calls) - 1], {"endpoint": "test", "status": 200}
         with patch.object(TikHubClient, "search", side_effect=search):
@@ -140,7 +161,37 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(douyin_next_cursor(payloads[0]), "8")
         self.assertEqual(douyin_next_cursor(payloads[1]), "")
 
-    def test_collection_falls_back_to_valid_content_when_popularity_threshold_removes_everything(self):
+    def test_douyin_exhaustive_collection_preserves_search_context_and_deduplicates_aliases(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        calls = []
+        def search(platform, alias, page, count, time_range, cursor, search_context=None):
+            calls.append((alias, page, cursor, dict(search_context or {})))
+            if page == 1:
+                return {"data": {"business_data": [{"data": {
+                    "has_more": 1, "cursor": 8, "search_id": f"sid-{alias}", "backtrace": "trace-1",
+                    "aweme_id": "same", "desc": "奥迪E7X 普通体验", "create_time": now,
+                }}]}}, {"endpoint": "test", "status": 200}
+            return {"data": {"business_data": [{"data": {
+                "has_more": 0, "cursor": 16, "search_id": f"sid-{alias}", "backtrace": "trace-2",
+                "aweme_id": f"{alias}-2", "desc": f"{alias} 深度体验", "create_time": now,
+            }}]}}, {"endpoint": "test", "status": 200}
+        with patch.object(TikHubClient, "search", side_effect=search):
+            result = collect("奥迪E7X", platforms=["douyin"], pages=0, include_enrichment=False)
+        aliases = vehicle_search_aliases("奥迪E7X")
+        self.assertEqual([call[0] for call in calls[::2]], aliases)
+        self.assertTrue(all(call[2] == "8" for call in calls[1::2]))
+        self.assertTrue(all(call[3]["searchId"].startswith("sid-") for call in calls[1::2]))
+        self.assertEqual(result["collectionStatus"]["status"], "complete")
+        self.assertEqual(len(result["items"]), 1 + len(aliases))
+        shared = next(item for item in result["items"] if item["platformItemId"] == "same")
+        self.assertEqual(set(shared["matchedAliases"]), set(aliases))
+        self.assertIn("description", shared["matchedFields"])
+
+    def test_douyin_pagination_state_reads_cursor_and_context(self):
+        state = douyin_pagination_state({"data": {"cursor": 8, "has_more": 1, "search_id": "sid", "backtrace": "trace"}})
+        self.assertEqual(state, {"hasMore": True, "cursor": "8", "searchId": "sid", "backtrace": "trace"})
+
+    def test_low_popularity_content_stays_in_related_pool_but_not_hot_pool(self):
         now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
         payload = {"data": [{
             "aweme_id": "fallback-1", "desc": "上汽奥迪 新车体验",
@@ -150,13 +201,12 @@ class SocialTrendsTest(unittest.TestCase):
             result = collect("上汽奥迪", platforms=["douyin"], include_enrichment=False,
                              thresholds={"douyin": 8000})
         self.assertEqual(len(result["items"]), 1)
-        self.assertTrue(result["admission"]["thresholdFallback"]["applied"])
-        self.assertEqual(result["admission"]["thresholdFallback"]["admittedCount"], 1)
-        self.assertEqual(result["items"][0]["evidence"]["verificationStatus"],
-                         "tikhub_search_observation_below_popularity_threshold")
-        self.assertNotIn("below_like_threshold", result["admission"]["rejectedReasons"])
+        self.assertEqual(result["hotItems"], [])
+        self.assertEqual(result["contentRanking"], [])
+        self.assertEqual(result["admission"]["admittedCount"], 1)
+        self.assertEqual(result["hotAdmission"]["qualifiedCount"], 0)
 
-    def test_collection_keeps_strict_threshold_when_at_least_one_item_meets_it(self):
+    def test_popularity_threshold_only_controls_hot_pool(self):
         now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
         payload = {"data": [
             {"aweme_id": "hot-1", "desc": "上汽奥迪 热门发布", "create_time": now,
@@ -167,9 +217,20 @@ class SocialTrendsTest(unittest.TestCase):
         with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
             result = collect("上汽奥迪", platforms=["douyin"], include_enrichment=False,
                              thresholds={"douyin": 8000})
-        self.assertEqual([item["platformItemId"] for item in result["items"]], ["hot-1"])
-        self.assertFalse(result["admission"]["thresholdFallback"]["applied"])
-        self.assertEqual(result["admission"]["rejectedReasons"]["below_like_threshold"], 1)
+        self.assertEqual({item["platformItemId"] for item in result["items"]}, {"hot-1", "cool-1"})
+        self.assertEqual([item["platformItemId"] for item in result["hotItems"]], ["hot-1"])
+        self.assertNotIn("below_like_threshold", result["admission"]["rejectedReasons"])
+
+    def test_low_popularity_negative_content_enters_risk_pool(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        payload = {"data": [{"aweme_id": "risk-low", "desc": "奥迪E7X 异响问题投诉", "create_time": now,
+                              "statistics": {"digg_count": 3}}]}
+        with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
+            result = collect("奥迪E7X", platforms=["douyin"], pages=1, include_enrichment=False,
+                             thresholds={"douyin": 8000})
+        self.assertEqual(result["hotItems"], [])
+        self.assertEqual([item["platformItemId"] for item in result["riskItems"]], ["risk-low"])
+        self.assertEqual(result["analysisCoverage"]["risk"]["analyzed"], 1)
 
     def test_collection_keeps_low_heat_evidence_for_a_platform_without_any_qualified_sample(self):
         now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
@@ -181,8 +242,8 @@ class SocialTrendsTest(unittest.TestCase):
             result = collect("车型A", platforms=["douyin", "weibo"], include_enrichment=False,
                              thresholds={"douyin": 8000, "weibo": 500})
         self.assertEqual({item["platformItemId"] for item in result["items"]}, {"douyin-low", "weibo-hot"})
-        self.assertTrue(result["admission"]["thresholdFallback"]["applied"])
-        self.assertEqual(result["admission"]["thresholdFallback"]["platforms"], ["douyin"])
+        self.assertEqual([item["platformItemId"] for item in result["hotItems"]], ["weibo-hot"])
+        self.assertEqual(result["hotAdmission"]["belowThresholdCount"], 1)
         self.assertEqual(result["admission"]["rejectedByPlatform"]["douyin"], {})
 
     def test_weibo_rfc2822_publish_time_is_bucketed_in_timeline(self):
@@ -193,11 +254,12 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(result["timeline"][0]["date"], "2026-07-11")
         self.assertEqual(result["timelineUndated"]["contentCount"], 0)
 
-    def test_aggregate_deduplicates_and_exposes_low_confidence(self):
+    def test_aggregate_deduplicates_and_exposes_analysis_coverage_instead_of_confidence(self):
         item = normalize_item("weibo", {"mid": "a", "text": "某车型问题和投诉", "comments_count": 2}, "某车型", "now")
         result = _aggregate([item, item], "某车型", [], [])
         self.assertEqual(len(result["items"]), 1)
-        self.assertEqual(result["confidenceLabel"], "低")
+        self.assertNotIn("confidenceLabel", result)
+        self.assertEqual(result["analysisCoverage"]["sentiment"]["rate"], 100)
         self.assertEqual(result["statusHint"], "未形成高热度")
         self.assertTrue(result["qa"]["evidenceTraceable"])
 
@@ -208,6 +270,41 @@ class SocialTrendsTest(unittest.TestCase):
         loaded = latest_snapshot(conn, "车型A", "org-a", "china")
         self.assertEqual(loaded["snapshot"]["id"], saved["id"])
         self.assertIsNone(latest_snapshot(conn, "车型A", "org-b", "china"))
+
+    def test_read_time_normalization_downgrades_false_aligned_review_when_evidence_disagrees(self):
+        result = _aggregate([], "车型A", [], [])
+        result["qa"]["threeFlagships"] = {"status": "aligned", "reviewedEvidenceCount": 10,
+                                                 "verifiedEvidenceIds": [f"e-{index}" for index in range(9)]}
+        result["unifiedInsight"] = {"validationStatus": "aligned", "publicationStatus": "published", "limitations": []}
+        from social_trends import normalize_comparison_result
+        normalized = normalize_comparison_result(result)
+        self.assertEqual(normalized["qa"]["threeFlagships"]["status"], "disagreement")
+        self.assertEqual(normalized["unifiedInsight"]["publicationStatus"], "conditional")
+        self.assertIn("1 条证据存在分歧", normalized["unifiedInsight"]["limitations"][0])
+
+    def test_latest_snapshot_normalizes_a_legacy_own_model_competitor_without_rewriting_history(self):
+        conn = sqlite3.connect(":memory:"); conn.row_factory = sqlite3.Row; init_schema(conn)
+        own_item = normalize_item("weibo", {"mid": "own", "text": "奥迪E7X 推荐"}, "奥迪E7X", "now")
+        competitor_item = normalize_item("weibo", {"mid": "m7", "text": "问界M7 推荐"}, "问界M7", "now")
+        result = attach_competitor_rankings(
+            _aggregate([own_item], "奥迪E7X", [], []),
+            [_aggregate([competitor_item], "问界M7", [], [])],
+        )
+        legacy = json.loads(json.dumps(result, ensure_ascii=False))
+        legacy["modelComparisons"].insert(1, {**legacy["modelComparisons"][0], "model": "奥迪 E7X", "role": "competitor"})
+        legacy["comparisonEvidence"].append(dict(legacy["comparisonEvidence"][0]))
+        saved = save_snapshot(conn, legacy, "org-a", "china", {
+            "platforms": ["weibo"], "competitors": ["奥迪 E7X", "问界M7"],
+        })
+        stored_json = conn.execute("select result_json from social_trend_snapshots where id=?", (saved["id"],)).fetchone()[0]
+        loaded = latest_snapshot(conn, "奥迪E7X", "org-a", "china", {"competitors": ["问界M7"]})
+        self.assertEqual([row["model"] for row in loaded["modelComparisons"]], ["奥迪E7X", "问界M7"])
+        self.assertEqual(loaded["snapshot"]["filters"]["competitors"], ["问界M7"])
+        self.assertEqual(len(loaded["comparisonEvidence"]), 2)
+        self.assertEqual(
+            conn.execute("select result_json from social_trend_snapshots where id=?", (saved["id"],)).fetchone()[0],
+            stored_json,
+        )
 
     def test_api_key_is_only_read_from_server_environment(self):
         with patch.dict(os.environ, {"TIKHUB_API_KEY": "server-secret"}):
@@ -248,6 +345,20 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(collection["sources"][0]["itemCount"], 4)
         self.assertEqual(collection["warnings"][0]["platform"], "xiaohongshu")
         self.assertEqual(collection["admission"]["rejectedByPlatform"]["douyin"]["below_like_threshold"], 4)
+
+    def test_comparison_drops_a_legacy_own_model_competitor_and_duplicate_evidence(self):
+        own_item = normalize_item("weibo", {"mid": "same", "text": "奥迪E7X 推荐", "attitudes_count": 100}, "奥迪E7X", "now")
+        own = _aggregate([own_item], "奥迪E7X", [], [])
+        duplicate_own = _aggregate([dict(own_item)], "奥迪 E7X", [], [])
+        competitor = _aggregate(
+            [normalize_item("weibo", {"mid": "m7", "text": "问界M7 推荐", "attitudes_count": 80}, "问界M7", "now")],
+            "问界M7", [], [],
+        )
+        result = attach_competitor_rankings(own, [duplicate_own, competitor])
+        self.assertEqual([row["model"] for row in result["modelComparisons"]], ["奥迪E7X", "问界M7"])
+        self.assertEqual([row["model"] for row in result["modelHeatRanking"]], ["奥迪E7X", "问界M7"])
+        evidence_keys = [(vehicle_identity_key(item["normalizedModel"]), item["platform"], item["id"]) for item in result["comparisonEvidence"]]
+        self.assertEqual(len(evidence_keys), len(set(evidence_keys)))
 
     def test_dashboard_aggregation_includes_platform_creator_risk_and_comments(self):
         positive = normalize_item("douyin", {"aweme_id": "p1", "desc": "车型A 舒适推荐", "author": {"nickname": "车型A官方"}, "digg_count": 100}, "车型A", "2026-07-11T00:00:00Z")
@@ -291,8 +402,9 @@ class SocialTrendsTest(unittest.TestCase):
         ]
         result = import_records(rows, "奥迪E7X", ["douyin", "xiaohongshu", "weibo"], time_range="7d", filename="assistant.xlsx")
         self.assertEqual([x["platformItemId"] for x in result["contentRanking"]], ["d1", "x1"])
-        self.assertEqual(result["admission"]["admittedCount"], 2)
-        self.assertEqual(result["admission"]["rejectedReasons"]["below_like_threshold"], 1)
+        self.assertEqual({x["platformItemId"] for x in result["items"]}, {"d1", "d2", "x1"})
+        self.assertEqual(result["admission"]["admittedCount"], 3)
+        self.assertEqual(result["hotAdmission"]["belowThresholdCount"], 1)
         self.assertEqual(result["admission"]["rejectedReasons"]["model_not_relevant"], 1)
         self.assertEqual(result["items"][0]["evidence"]["source"], "社媒助手导入")
 

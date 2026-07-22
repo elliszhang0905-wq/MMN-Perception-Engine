@@ -13,6 +13,11 @@ def _result(items):
         "keyword": "智己",
         "items": [item for item in items if item.get("brandName") == "智己"],
         "comparisonItems": copy.deepcopy(items),
+        "modelComparisons": [
+            {"model": "智己", "role": "own", "contentCount": 1, "heat": 80, "positiveRate": 100, "riskCount": 0},
+            {"model": "零跑", "role": "competitor", "contentCount": 2, "heat": 120, "positiveRate": 50, "riskCount": 0},
+        ],
+        "collectionStatus": {"status": "complete"},
         "qa": {},
     }
 
@@ -52,15 +57,22 @@ class SocialTrendDualModelGateTest(unittest.TestCase):
 
         with patch.object(server, "qwen_config", return_value={"configured": True}), \
              patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
              patch.object(server, "call_qwen", side_effect=qwen), \
              patch.object(server, "call_deepseek", side_effect=deepseek), \
+             patch.object(server, "call_kimi", side_effect=lambda messages, **_kwargs: _review(messages, brand_overrides={"mixed-1": "多品牌"})), \
              patch.object(server, "parse_json_object", side_effect=lambda value: value):
             result = server.validate_social_trends_with_models(_result(items))
 
-        self.assertEqual(result["qa"]["dualModel"]["status"], "aligned")
-        self.assertEqual(result["qa"]["dualModel"]["reviewedEvidenceCount"], 3)
-        self.assertEqual(set(result["qa"]["dualModel"]["verifiedEvidenceIds"]), {"own-1", "peer-1"})
+        self.assertEqual(result["qa"]["threeFlagships"]["status"], "disagreement")
+        self.assertEqual(result["qa"]["threeFlagships"]["reviewedEvidenceCount"], 3)
+        self.assertEqual(set(result["qa"]["threeFlagships"]["verifiedEvidenceIds"]), {"own-1", "peer-1"})
         self.assertEqual({item["id"] for item in result["verifiedComparisonItems"]}, {"own-1", "peer-1"})
+        self.assertEqual(result["unifiedInsight"]["publicationStatus"], "conditional")
+        self.assertIn("1 条证据存在分歧", result["unifiedInsight"]["limitations"][0])
+        self.assertEqual(result["unifiedInsight"]["scopeType"], "own_vs_competitors")
+        self.assertEqual(result["unifiedInsight"]["models"], ["智己", "零跑"])
+        self.assertNotIn("qwen", json.dumps(result["unifiedInsight"], ensure_ascii=False).lower())
 
     def test_incomplete_provider_output_blocks_all_publication(self):
         items = [{"id": f"item-{index}", "brandName": "零跑", "text": "零跑B01上市", "sentiment": "positive"} for index in range(25)]
@@ -71,14 +83,32 @@ class SocialTrendDualModelGateTest(unittest.TestCase):
 
         with patch.object(server, "qwen_config", return_value={"configured": True}), \
              patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
              patch.object(server, "call_qwen", side_effect=incomplete_qwen), \
              patch.object(server, "call_deepseek", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_kimi", side_effect=lambda messages, **_kwargs: _review(messages)), \
              patch.object(server, "parse_json_object", side_effect=lambda value: value):
             result = server.validate_social_trends_with_models(_result(items))
 
-        self.assertEqual(result["qa"]["dualModel"]["status"], "manual_required")
+        self.assertEqual(result["qa"]["threeFlagships"]["status"], "insufficient_evidence")
         self.assertEqual(result["verifiedComparisonItems"], [])
-        self.assertIn("返回不完整", result["qa"]["dualModel"]["errors"]["qwen"])
+        self.assertIn("返回不完整", result["qa"]["threeFlagships"]["errors"]["reviewer_1"])
+        self.assertEqual(result["unifiedInsight"]["publicationStatus"], "withheld")
+
+    def test_partial_collection_cannot_be_masked_by_aligned_models(self):
+        items = [{"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"}]
+        payload = _result(items)
+        payload["collectionStatus"] = {"status": "partial", "reason": "safety_limit"}
+        with patch.object(server, "qwen_config", return_value={"configured": True}), \
+             patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
+             patch.object(server, "call_qwen", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_deepseek", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_kimi", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "parse_json_object", side_effect=lambda value: value):
+            result = server.validate_social_trends_with_models(payload)
+        self.assertEqual(result["qa"]["threeFlagships"]["status"], "conditional")
+        self.assertEqual(result["unifiedInsight"]["publicationStatus"], "conditional")
 
     def test_qwen_free_tier_rejection_exposes_provider_code_and_action(self):
         payload = json.dumps({"error": {

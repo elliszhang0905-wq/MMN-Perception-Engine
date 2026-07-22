@@ -1,9 +1,9 @@
 """Validated weekly market snapshot storage for the management dashboard.
 
 The refresher is deliberately fail-closed: an incomplete/newer payload never
-replaces the last published snapshot.  Production can point
-``MMN_WEEKLY_MARKET_FEED_URL`` at an authorised JSON feed; tests and admin tools
-may pass the same payload directly.
+replaces the last published snapshot. The production discovery source is the
+fixed CPCA weekly market-scan index; tests and admin tools may still pass a
+validated payload directly.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import html
 import json
-import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -24,9 +23,15 @@ SNAPSHOT_FILE = "weekly_market_snapshot.json"
 STATUS_FILE = "weekly_market_refresh_status.json"
 REQUIRED_FACTS = {"retail", "wholesale", "nev_retail", "nev_penetration"}
 OFFICIAL_INDEX_URL = "https://www.cpcaauto.com/news.php?types=csjd&anid=128"
-OFFICIAL_SYNDICATION_INDEX_URLS = tuple(
-    f"https://npo00410y.npoall.com/news/page-{page}.html" for page in range(1, 4)
-)
+
+
+class LatestArticleParseError(ValueError):
+    """The newest official article exists but cannot be safely published."""
+
+    def __init__(self, title, url):
+        super().__init__(f"官网最新一期已发布但数据处理未完成：{title}")
+        self.title = title
+        self.url = url
 
 
 class _TextAndLinksParser(HTMLParser):
@@ -128,7 +133,11 @@ def parse_official_market_article(article_html, url, title=""):
     retail = _metric_match(text, r"(\d{1,2})月1[-—至](\d{1,2})日，全国乘用车市场零售([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%", "乘用车零售")
     month, end_day, retail_value, retail_direction, retail_yoy = retail.groups()
     wholesale = _metric_match(text, r"全国乘用车厂商批发([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%", "乘用车厂商批发")
-    nev = _metric_match(text, r"全国乘用车市场新能源零售([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%", "新能源零售")
+    nev = _metric_match(
+        text,
+        r"全国乘用车(?:市场新能源|新能源市场)零售([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%",
+        "新能源零售",
+    )
     penetration = _metric_match(text, r"新能源零售渗透率([\d.]+)%", "新能源零售渗透率")
     published = re.search(r"时间[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", text)
     natural_week = _format_week_period(week_parts)
@@ -155,36 +164,23 @@ def parse_official_market_article(article_html, url, title=""):
 
 def fetch_latest_official_market_payload(fetch_text=None, index_url=OFFICIAL_INDEX_URL):
     fetch = fetch_text or _fetch_text
-    index_urls = [index_url]
-    if index_url == OFFICIAL_INDEX_URL:
-        index_urls.extend(OFFICIAL_SYNDICATION_INDEX_URLS)
-    errors = []
-    for current_index_url in index_urls:
-        try:
-            index_html = fetch(current_index_url)
-            parser = _TextAndLinksParser()
-            parser.feed(index_html)
-            candidates = []
-            for title, href in parser.links:
-                if not _is_weekly_market_scan_title(
-                    title,
-                    require_weekly_analysis=current_index_url == OFFICIAL_INDEX_URL,
-                ):
-                    continue
-                parts = _week_title_parts(title)
-                if parts:
-                    candidates.append(
-                        (date(parts[0], parts[3], parts[4]), title, urljoin(current_index_url, href))
-                    )
-            if not candidates:
-                raise ValueError("当前发布页未找到车市扫描周报")
-            _, title, article_url = max(candidates, key=lambda item: item[0])
-            return parse_official_market_article(fetch(article_url), article_url, title)
-        except (OSError, TimeoutError, ValueError) as exc:
-            errors.append(exc)
-    if errors:
-        raise errors[-1]
-    raise ValueError("中国汽车流通协会发布渠道未找到车市扫描周报")
+    index_html = fetch(index_url)
+    parser = _TextAndLinksParser()
+    parser.feed(index_html)
+    candidates = []
+    for title, href in parser.links:
+        if not _is_weekly_market_scan_title(title, require_weekly_analysis=True):
+            continue
+        parts = _week_title_parts(title)
+        if parts:
+            candidates.append((date(parts[0], parts[3], parts[4]), title, urljoin(index_url, href)))
+    if not candidates:
+        raise ValueError("乘联分会发布页未找到车市扫描周报")
+    _, title, article_url = max(candidates, key=lambda item: item[0])
+    try:
+        return parse_official_market_article(fetch(article_url), article_url, title)
+    except ValueError as exc:
+        raise LatestArticleParseError(title, article_url) from exc
 
 
 def _expected_completed_week_end(today=None):
@@ -292,15 +288,7 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
     attempted_at = _now()
     try:
         if payload is None:
-            url = str(feed_url or os.getenv("MMN_WEEKLY_MARKET_FEED_URL") or "").strip()
-            if not url:
-                payload = fetch_latest_official_market_payload(fetch_text=official_fetcher)
-            elif fetcher:
-                payload = fetcher(url)
-            else:
-                request = Request(url, headers={"User-Agent": "MMN-Weekly-Market-Refresh/1.0"})
-                with urlopen(request, timeout=30) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
+            payload = fetch_latest_official_market_payload(fetch_text=official_fetcher)
         snapshot = _validate(payload)
         natural_week_end = snapshot["source"].get("naturalWeekEndDate")
         expected_end = _expected_completed_week_end(today)
@@ -323,19 +311,31 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
     except Exception as exc:
         error = str(exc)
         awaiting = error.startswith("最近自然周数据待发布")
-        source_unavailable = not awaiting and isinstance(exc, (OSError, TimeoutError))
+        latest_parse_failed = isinstance(exc, LatestArticleParseError)
+        source_unavailable = not awaiting and not latest_parse_failed and isinstance(exc, (OSError, TimeoutError))
         status = {
-            "status": "awaiting_publication" if awaiting else ("source_unavailable" if source_unavailable else "carried_forward"),
+            "status": (
+                "awaiting_publication"
+                if awaiting else (
+                    "latest_parse_failed"
+                    if latest_parse_failed else ("source_unavailable" if source_unavailable else "carried_forward")
+                )
+            ),
             "statusLabel": (
                 "最近自然周数据待发布 · 当前显示上期月内累计"
                 if awaiting else (
-                    "官方数据源暂时不可用 · 当前显示上期月内累计"
-                    if source_unavailable else "数据校验未通过 · 当前显示上期月内累计"
+                    "最新一期已发布，数据处理未完成 · 当前显示上期月内累计"
+                    if latest_parse_failed else (
+                        "官方数据源暂时不可用 · 当前显示上期月内累计"
+                        if source_unavailable else "数据校验未通过 · 当前显示上期月内累计"
+                    )
                 )
             ),
             "lastAttemptAt": attempted_at,
             "lastSuccessAt": "",
             "error": error,
         }
+        if latest_parse_failed:
+            status["latestArticle"] = {"title": exc.title, "url": exc.url}
     _atomic_json(data_dir / STATUS_FILE, status)
     return status

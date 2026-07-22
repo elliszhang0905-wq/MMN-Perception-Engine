@@ -9,6 +9,7 @@ import os
 import re
 import sqlite3
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -60,6 +61,142 @@ ENRICHMENT_ENDPOINTS = {
         "comments": ("GET", "/api/v1/weibo/web/fetch_post_comments"),
     },
 }
+
+
+def normalized_vehicle_label(value):
+    """Return a stable display label without changing the user's vehicle wording."""
+    return " ".join(unicodedata.normalize("NFKC", str(value or "")).split())
+
+
+def vehicle_identity_key(value):
+    """Compare vehicle names independent of spacing, width and letter case."""
+    return re.sub(r"\s+", "", normalized_vehicle_label(value)).casefold()
+
+
+def sanitize_competitor_models(keyword, competitors, limit=3):
+    """Preserve selection order while excluding the own model and duplicates."""
+    own_key = vehicle_identity_key(keyword)
+    seen = set()
+    sanitized = []
+    for value in competitors or []:
+        label = normalized_vehicle_label(value)
+        identity = vehicle_identity_key(label)
+        if not identity or identity == own_key or identity in seen:
+            continue
+        seen.add(identity)
+        sanitized.append(label)
+        if len(sanitized) >= limit:
+            break
+    return sanitized
+
+
+VEHICLE_BRAND_ALIASES = {
+    "奥迪": "AUDI", "奔驰": "Mercedes-Benz", "宝马": "BMW", "大众": "Volkswagen",
+    "特斯拉": "Tesla", "沃尔沃": "Volvo", "凯迪拉克": "Cadillac", "雷克萨斯": "Lexus",
+}
+
+
+def vehicle_search_aliases(keyword, supplied=None):
+    """Build deterministic public-search aliases without inventing model names."""
+    canonical = normalized_vehicle_label(keyword)
+    aliases = []
+    for value in [canonical, *(supplied or [])]:
+        label = normalized_vehicle_label(value)
+        if label and vehicle_identity_key(label) not in {vehicle_identity_key(x) for x in aliases}:
+            aliases.append(label)
+    compact = re.sub(r"\s+", "", canonical)
+    for chinese_brand, english_brand in VEHICLE_BRAND_ALIASES.items():
+        if not compact.startswith(chinese_brand):
+            continue
+        model = compact[len(chinese_brand):].strip()
+        if model:
+            english = f"{english_brand} {model}"
+            if vehicle_identity_key(english) not in {vehicle_identity_key(x) for x in aliases}:
+                aliases.append(english)
+            if re.search(r"[A-Za-z0-9]", model) and len(model) >= 2 and vehicle_identity_key(model) not in {vehicle_identity_key(x) for x in aliases}:
+                aliases.append(model)
+        break
+    return aliases
+
+
+def _comparison_evidence_identity(item, fallback_model=""):
+    model = item.get("normalizedModel") or item.get("brandName") or fallback_model
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), dict) else {}
+    content_id = (item.get("id") or item.get("platformItemId") or item.get("sourceUrl")
+                  or evidence.get("contentHash") or f'{item.get("text", "")}|{item.get("publishedAt", "")}')
+    return vehicle_identity_key(model), str(item.get("platform") or ""), str(content_id or "")
+
+
+def normalize_comparison_result(result):
+    """Defensively normalize new and historical comparison payloads at read time."""
+    own_model = normalized_vehicle_label(result.get("keyword"))
+    own_key = vehicle_identity_key(own_model)
+    canonical_models = {own_key: own_model} if own_key else {}
+
+    comparisons = []
+    seen_models = set()
+    for row in result.get("modelComparisons", []) or []:
+        model = normalized_vehicle_label(row.get("model"))
+        identity = vehicle_identity_key(model)
+        if not identity or identity in seen_models:
+            continue
+        seen_models.add(identity)
+        canonical_models[identity] = own_model if identity == own_key else model
+        normalized = dict(row)
+        normalized["model"] = canonical_models[identity]
+        normalized["role"] = "own" if identity == own_key else "competitor"
+        comparisons.append(normalized)
+    result["modelComparisons"] = comparisons
+    model_collection = [{"model": row.get("model"), "status": (row.get("collectionStatus") or {}).get("status", "not_assessed")}
+                        for row in comparisons]
+    result["collectionStatus"] = {
+        **(result.get("collectionStatus") or {}),
+        "status": "complete" if model_collection and all(row["status"] == "complete" for row in model_collection) else "partial",
+        "models": model_collection,
+    }
+
+    for key in ("modelHeatRanking", "positiveCompetitorsTop5"):
+        normalized_rows = []
+        seen = set()
+        for row in result.get(key, []) or []:
+            model = normalized_vehicle_label(row.get("model"))
+            identity = vehicle_identity_key(model)
+            if not identity or identity in seen or (key == "positiveCompetitorsTop5" and identity == own_key):
+                continue
+            seen.add(identity)
+            normalized = dict(row)
+            normalized["model"] = canonical_models.get(identity, own_model if identity == own_key else model)
+            normalized_rows.append(normalized)
+        result[key] = normalized_rows
+
+    for key in ("comparisonEvidence", "comparisonItems"):
+        normalized_items = []
+        seen = set()
+        for source_item in result.get(key, []) or []:
+            item = dict(source_item)
+            model = normalized_vehicle_label(item.get("normalizedModel") or item.get("brandName") or own_model)
+            identity = vehicle_identity_key(model)
+            canonical = canonical_models.get(identity, own_model if identity == own_key else model)
+            item["normalizedModel"] = canonical
+            item["brandName"] = canonical
+            evidence_identity = _comparison_evidence_identity(item, canonical)
+            if evidence_identity in seen:
+                continue
+            seen.add(evidence_identity)
+            normalized_items.append(item)
+        result[key] = normalized_items
+    review = (result.get("qa") or {}).get("threeFlagships") or {}
+    reviewed_count = int(review.get("reviewedEvidenceCount") or 0)
+    verified_count = len(review.get("verifiedEvidenceIds") or [])
+    if review.get("status") == "aligned" and reviewed_count > verified_count:
+        review["status"] = "disagreement"
+        insight = result.get("unifiedInsight") or {}
+        insight["validationStatus"] = "disagreement"
+        insight["publicationStatus"] = "conditional" if verified_count else "withheld"
+        limitation = f"三路审阅对 {reviewed_count - verified_count} 条证据存在分歧，统一结论仅引用共同通过的证据"
+        insight["limitations"] = list(dict.fromkeys([*(insight.get("limitations") or []), limitation]))
+        result["unifiedInsight"] = insight
+    return result
 
 
 def _backend_env(name, default=""):
@@ -258,8 +395,28 @@ def _media_url(value):
     return ""
 
 
-def normalize_item(platform, row, keyword, fetched_at):
-    text = clean_content_text(_first(row, "desc", "title", "note_title", "text", "content", "raw_text", default=""))
+def _hashtags(row, text):
+    values = []
+    for name in ("cha_list", "challenge_list", "tag_list", "hashtags", "topics"):
+        raw = row.get(name)
+        if not isinstance(raw, list):
+            continue
+        for value in raw:
+            if isinstance(value, dict):
+                value = _first(value, "cha_name", "name", "title", "tag_name", default="")
+            label = clean_content_text(value).strip("# ")
+            if label:
+                values.append(label)
+    values.extend(match.strip() for match in re.findall(r"#([^#\s]{1,40})#?", str(text or "")))
+    return list(dict.fromkeys(value for value in values if value))
+
+
+def normalize_item(platform, row, keyword, fetched_at, search_alias=""):
+    title = clean_content_text(_first(row, "title", "note_title", "video_title", default=""))
+    description = clean_content_text(_first(row, "desc", "description", "text", "content", "raw_text", default=""))
+    text = clean_content_text(" ".join(value for value in (title, description) if value))
+    if not text:
+        text = title or description
     item_id = str(_first(row, "aweme_id", "note_id", "mid", "id", "item_id", default="")).strip()
     author = _first(row, "author", "user", "note_card", default={})
     author_name = _first(author, "nickname", "name", "nick_name", "user_name", default="") if isinstance(author, dict) else str(author)
@@ -287,8 +444,14 @@ def normalize_item(platform, row, keyword, fetched_at):
     heat = math.log10(1 + engagement + views * .08) * 20
     canonical = re.sub(r"[\s·•_-]+", "", text.lower())[:80]
     content_hash = hashlib.sha256(f"{platform}|{item_id or canonical}".encode()).hexdigest()
+    aliases = [search_alias] if search_alias else []
+    searchable_fields = {"title": title, "description": description, "hashtags": " ".join(_hashtags(row, text))}
+    matched_fields = [name for name, value in searchable_fields.items()
+                      if search_alias and vehicle_identity_key(search_alias) in vehicle_identity_key(value)]
     return {"id": content_hash[:20], "platform": platform, "platformLabel": PLATFORMS[platform]["label"],
             "platformItemId": item_id, "keyword": keyword, "normalizedModel": keyword.strip(), "text": text,
+            "title": title, "description": description, "hashtags": _hashtags(row, text),
+            "matchedAliases": aliases, "matchedFields": matched_fields,
             "author": author_name, "publishedAt": str(published), "sourceUrl": url,
             "coverUrl": cover_url, "dynamicCoverUrl": dynamic_cover_url,
             "metrics": {"likes": likes, "comments": comments, "shares": shares, "collects": collects, "views": views},
@@ -303,15 +466,24 @@ def passenger_vehicle_scope_exclusion_reason(value):
     return "commercial_vehicle_entity" if COMMERCIAL_VEHICLE_ENTITY_PATTERN.search(str(text or "")) else ""
 
 
-def douyin_next_cursor(payload):
+def douyin_pagination_state(payload):
+    state = {"hasMore": False, "cursor": "", "searchId": "", "backtrace": ""}
     for node in _walk((payload or {}).get("data") or {}):
         if "cursor" not in node or "has_more" not in node:
             continue
-        if str(node.get("has_more")).lower() not in {"1", "true"}:
-            return ""
-        cursor = str(node.get("cursor") or "").strip()
-        return cursor
-    return ""
+        state = {
+            "hasMore": str(node.get("has_more")).lower() in {"1", "true"},
+            "cursor": str(node.get("cursor") or "").strip(),
+            "searchId": str(node.get("search_id") or node.get("searchId") or "").strip(),
+            "backtrace": str(node.get("backtrace") or "").strip(),
+        }
+        return state
+    return state
+
+
+def douyin_next_cursor(payload):
+    state = douyin_pagination_state(payload)
+    return state["cursor"] if state["hasMore"] else ""
 
 
 def ensure_tikhub_success(payload, path):
@@ -356,7 +528,7 @@ class TikHubClient:
                 if attempt == 2: raise RuntimeError("TikHub 网络错误") from exc
             time.sleep(2 ** attempt)
 
-    def search(self, platform, keyword, page=1, count=20, time_range="30d", cursor=""):
+    def search(self, platform, keyword, page=1, count=20, time_range="30d", cursor="", search_context=None):
         cfg = dict(PLATFORMS[platform])
         override = os.getenv(f"TIKHUB_SOCIAL_{platform.upper()}_ENDPOINT")
         if override:
@@ -364,7 +536,10 @@ class TikHubClient:
         page_value = cursor if platform == "douyin" and cursor else (page - 1) * count if platform == "douyin" else page
         params = {cfg["query"]: keyword, cfg["page"]: page_value}
         window = TIME_FILTERS.get(time_range, TIME_FILTERS["30d"])[platform]
-        if platform == "douyin": params.update({"sort_type": "0", "publish_time": window, "filter_duration": "0", "content_type": "0", "search_id": "", "backtrace": ""})
+        if platform == "douyin":
+            context = search_context or {}
+            params.update({"sort_type": "0", "publish_time": window, "filter_duration": "0", "content_type": "0",
+                           "search_id": context.get("searchId", ""), "backtrace": context.get("backtrace", "")})
         if platform == "xiaohongshu": params.update({"sort_type": "general", "note_type": "不限", "time_filter": window, "ai_mode": 0})
         if platform == "weibo": params.update({"search_type": "1", **({"time_scope": window} if window else {})})
         return self.request_json(cfg["method"], cfg["path"], params)
@@ -382,7 +557,8 @@ class TikHubClient:
         return self.request_json(method, path, params)
 
 
-def _aggregate(items, keyword, sources, warnings, comment_rows=None, hot_lists=None, selected_platforms=None):
+def _aggregate(items, keyword, sources, warnings, comment_rows=None, hot_lists=None, selected_platforms=None,
+               hot_items=None, collection_status=None):
     unique = {item["id"]: item for item in items}
     items = sorted(unique.values(), key=lambda row: row["heat"], reverse=True)
     platform_rows = []
@@ -400,7 +576,6 @@ def _aggregate(items, keyword, sources, warnings, comment_rows=None, hot_lists=N
     for word in words:
         if word.lower() not in TECHNICAL_WORDS and word not in stop and keyword not in word: counts[word] = counts.get(word, 0) + 1
     hot_words = [{"word": word, "count": count} for word, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[:20]]
-    confidence = min(1, len(items) / 30)
     total_heat = sum(row["heat"] for row in items) or 1
     for row in platform_rows:
         row["share"] = round(row["heat"] / total_heat * 100, 1)
@@ -440,30 +615,51 @@ def _aggregate(items, keyword, sources, warnings, comment_rows=None, hot_lists=N
     for word in hot_words[:8]:
         matching = [row for row in items if word["word"] in row["text"]]
         clusters.append({"topic": word["word"], "contentCount": len(matching), "heat": round(sum(x["heat"] for x in matching), 2), "sentiment": {"positive": sum(x["sentiment"] == "positive" for x in matching), "negative": sum(x["sentiment"] == "negative" for x in matching)}})
-    return {"keyword": keyword, "generatedAt": utcnow(), "items": items, "contentRanking": items[:50],
+    hot_items = sorted({item["id"]: item for item in (items if hot_items is None else hot_items)}.values(), key=lambda row: row["heat"], reverse=True)
+    analyzed_count = len(items)
+    coverage = {
+        "relevance": {"analyzed": analyzed_count, "total": analyzed_count, "rate": 100 if analyzed_count else 0},
+        "sentiment": {"analyzed": analyzed_count, "total": analyzed_count, "rate": 100 if analyzed_count else 0,
+                      "method": "规则初判并进入三路独立复核"},
+        "risk": {"analyzed": analyzed_count, "total": analyzed_count, "rate": 100 if analyzed_count else 0},
+    }
+    return {"keyword": keyword, "generatedAt": utcnow(), "items": items, "hotItems": hot_items, "contentRanking": hot_items[:50],
             "hotWords": hot_words, "ownModelRanking": [{"model": keyword, "heat": round(sum(x["heat"] for x in items), 2), "contentCount": len(items)}],
             "positiveCompetitorsTop5": [], "platforms": platform_rows, "platformShare": platform_rows,
             "creatorRanking": creator_ranking, "matrixSummary": {"contentCount": sum(x["matrixContent"] for x in items), "creatorCount": sum(x["matrixContent"] for x in creator_ranking), "heat": round(sum(x["heat"] for x in items if x["matrixContent"]), 2)},
             "timeline": timeline_rows, "timelineUndated": undated, "riskTopics": sorted(risk_topics, key=lambda x: -x["heat"])[:10], "riskItems": risks[:20],
             "commentInsights": comment_summary, "hotLists": hot_lists or [], "contentClusters": clusters,
-            "sources": sources, "warnings": warnings,
-            "confidence": round(confidence, 2), "confidenceLabel": "高" if confidence >= .7 else "中" if confidence >= .4 else "低",
+            "sources": sources, "warnings": warnings, "collectionStatus": collection_status or {"status": "not_assessed"},
+            "analysisCoverage": coverage,
             "statusHint": "未形成高热度" if not items or max((x["heat"] for x in items), default=0) < 60 else "已形成可识别热度",
             "methodology": {"heat": "log10(1+点赞+2×评论+3×分享+2.5×收藏+0.08×播放)×20，封顶100；跨平台总热度为内容热度求和",
                             "dedup": "平台内容ID优先，缺失时使用平台+规范化文本哈希", "sentiment": "正负向词证据计数；冲突或无命中标记中性并进入模型复核", "matrix": "作者名与正文中的官方/品牌/媒体/矩阵标记"},
             "qa": {"evidenceTraceable": all(row["sourceUrl"] and row["evidence"]["contentHash"] for row in items),
-                   "dualModel": {"required": True, "status": "pending"}, "strategyOutput": "待双模型交叉验证后输出策略结论"}}
+                   "threeFlagships": {"required": True, "status": "pending"}, "strategyOutput": "待三路独立审阅形成统一结论"}}
 
 
 def attach_competitor_rankings(result, competitor_results):
+    own_model = normalized_vehicle_label(result.get("keyword"))
+    sanitized_models = sanitize_competitor_models(
+        own_model, [row.get("keyword") for row in competitor_results], limit=3,
+    )
+    allowed = {vehicle_identity_key(model) for model in sanitized_models}
+    distinct_competitors = []
+    seen_competitors = set()
+    for competitor in competitor_results:
+        identity = vehicle_identity_key(competitor.get("keyword"))
+        if identity not in allowed or identity in seen_competitors:
+            continue
+        seen_competitors.add(identity)
+        distinct_competitors.append(competitor)
+    competitor_results = distinct_competitors
     rankings = []
     for competitor in competitor_results[:3]:
         positive_items = [item for item in competitor.get("items", []) if item.get("sentiment") == "positive"]
         rankings.append({"model": competitor.get("keyword", ""),
                          "positiveHeat": round(sum(float(item.get("heat") or 0) for item in positive_items), 2),
                          "positiveContentCount": len(positive_items),
-                         "contentCount": len(competitor.get("items", [])),
-                         "confidence": competitor.get("confidence", 0)})
+                         "contentCount": len(competitor.get("items", []))})
     result["positiveCompetitorsTop5"] = sorted((x for x in rankings if x["model"]), key=lambda x: (-x["positiveHeat"], x["model"]))[:5]
     own = result.get("ownModelRanking", [])
     result["modelHeatRanking"] = sorted(own + [{"model": x.get("keyword"), "heat": round(sum(i["heat"] for i in x.get("items", [])), 2), "contentCount": len(x.get("items", []))} for x in competitor_results], key=lambda x: -x["heat"])
@@ -481,7 +677,8 @@ def attach_competitor_rankings(result, competitor_results):
             "platforms": dataset.get("platforms", []),
             "hotWords": dataset.get("hotWords", [])[:8],
             "topContent": dataset.get("contentRanking", [])[:5],
-            "confidence": dataset.get("confidence", 0),
+            "collectionStatus": dataset.get("collectionStatus", {"status": "not_assessed"}),
+            "analysisCoverage": dataset.get("analysisCoverage", {}),
             "collection": {
                 "admission": dataset.get("admission", {}),
                 "warnings": dataset.get("warnings", []),
@@ -489,106 +686,129 @@ def attach_competitor_rankings(result, competitor_results):
             },
         })
     result["modelComparisons"] = comparisons
-    result["comparisonEvidence"] = sorted([item for dataset in [result] + competitor_results for item in dataset.get("contentRanking", [])[:10]], key=lambda x: -float(x.get("heat") or 0))[:50]
+    comparison_evidence = []
+    seen_evidence = set()
+    for dataset in [result] + competitor_results:
+        model = normalized_vehicle_label(dataset.get("keyword"))
+        for source_item in dataset.get("contentRanking", [])[:10]:
+            item = dict(source_item)
+            item["normalizedModel"] = model
+            item["brandName"] = model
+            identity = _comparison_evidence_identity(item, model)
+            if identity in seen_evidence:
+                continue
+            seen_evidence.add(identity)
+            comparison_evidence.append(item)
+    result["comparisonEvidence"] = sorted(comparison_evidence, key=lambda x: -float(x.get("heat") or 0))[:50]
     comparison_items = []
     seen_items = set()
     for dataset in [result] + competitor_results:
         model = str(dataset.get("keyword") or "").strip()
         for source_item in dataset.get("items", []):
             item = dict(source_item)
-            item["normalizedModel"] = str(item.get("normalizedModel") or model).strip()
-            item["brandName"] = str(item.get("brandName") or item["normalizedModel"] or model).strip()
-            identity = (item["brandName"], item.get("id") or item.get("sourceUrl"))
+            item["normalizedModel"] = model
+            item["brandName"] = model
+            identity = _comparison_evidence_identity(item, model)
             if identity in seen_items:
                 continue
             seen_items.add(identity)
             comparison_items.append(item)
     result["comparisonItems"] = sorted(comparison_items, key=lambda x: -float(x.get("heat") or 0))
-    return result
+    return normalize_comparison_result(result)
 
 
-def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", include_enrichment=True, thresholds=None, progress_callback=None, start_date="", end_date=""):
+def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", include_enrichment=True, thresholds=None,
+            progress_callback=None, start_date="", end_date="", aliases=None):
     keyword = str(keyword or "").strip()
     if not keyword: raise ValueError("请输入车型名")
     platforms = [p for p in (platforms or PLATFORMS) if p in PLATFORMS]
-    client, items, sources, warnings = TikHubClient(), [], [], []
+    client, raw_items, sources, warnings = TikHubClient(), [], [], []
     if not client.configured(): raise RuntimeError("服务端未配置 TIKHUB_API_KEY")
     collected_at = datetime.now(timezone.utc)
     start, end, end_exclusive, search_time_range = resolve_date_window(time_range, start_date, end_date, collected_at)
-    page_count = max(1, min(int(pages), 3))
-    total_steps = len(platforms) * page_count + 2
-    if include_enrichment: total_steps += len(platforms) * 2
-    completed_steps = 0
-    def advance(stage, message):
-        nonlocal completed_steps
-        completed_steps += 1
-        if progress_callback:
-            progress_callback(stage, round(completed_steps / max(1, total_steps) * 100), message)
+    query_aliases = vehicle_search_aliases(keyword, aliases)
+    requested_pages = int(pages or 0)
+    safety_limit = max(1, int(_backend_env("MMN_SOCIAL_MAX_PAGES", "100")))
+    page_limit = min(requested_pages, safety_limit) if requested_pages > 0 else safety_limit
+    page_size = min(50, max(1, int(count)))
+    diagnostics = []
     for platform in platforms:
-        douyin_cursor = ""
-        for page in range(1, page_count + 1):
-            try:
-                payload, source = client.search(platform, keyword, page, min(50, max(1, int(count))), search_time_range, douyin_cursor)
-                fetched = utcnow(); rows = _content_rows(payload)
-                items.extend(normalize_item(platform, row, keyword, fetched) for row in rows)
-                sources.append({"platform": platform, **source, "fetchedAt": fetched, "itemCount": len(rows)})
-            except Exception as exc:
-                warnings.append({"platform": platform, "message": str(exc)})
-                advance("collect", f"{PLATFORMS[platform]['label']}第{page}页采集失败，已记录原因")
-                break
-            advance("collect", f"已完成{PLATFORMS[platform]['label']}第{page}页采集")
-            if platform == "douyin":
-                douyin_cursor = douyin_next_cursor(payload)
-                if not douyin_cursor:
+        for alias in query_aliases:
+            cursor, context, end_reason, alias_rows = "", {}, "", 0
+            for page in range(1, page_limit + 1):
+                try:
+                    payload, source = client.search(platform, alias, page, page_size, search_time_range, cursor, context)
+                    fetched = utcnow(); rows = _content_rows(payload); alias_rows += len(rows)
+                    raw_items.extend(normalize_item(platform, row, keyword, fetched, alias) for row in rows)
+                    sources.append({"platform": platform, "alias": alias, "page": page, **source,
+                                    "fetchedAt": fetched, "itemCount": len(rows)})
+                except Exception as exc:
+                    warnings.append({"platform": platform, "alias": alias, "message": str(exc)})
+                    end_reason = "request_failed"
                     break
+                if platform == "douyin":
+                    state = douyin_pagination_state(payload)
+                    if not state["hasMore"]:
+                        end_reason = "exhausted"
+                        break
+                    cursor = state["cursor"]
+                    context = {"searchId": state["searchId"], "backtrace": state["backtrace"]}
+                    if not cursor:
+                        end_reason = "pagination_context_missing"
+                        break
+                elif not rows or len(rows) < page_size:
+                    end_reason = "exhausted"
+                    break
+            if not end_reason:
+                end_reason = "requested_page_limit" if requested_pages > 0 else "safety_limit"
+            diagnostics.append({"platform": platform, "alias": alias, "pagesFetched": page,
+                                "candidateCount": alias_rows, "status": "complete" if end_reason == "exhausted" else "partial",
+                                "endReason": end_reason})
+        if progress_callback:
+            progress_callback("collect", 33, f"已完成{PLATFORMS[platform]['label']}全部查询词采集")
     like_thresholds = ({**DEFAULT_LIKE_THRESHOLDS, **{key: int(float(value)) for key, value in thresholds.items() if key in PLATFORMS}}
                        if thresholds is not None else None)
-    admitted, rejected, threshold_candidates = [], [], []
-    keyword_key = re.sub(r"[\s·•_-]+", "", keyword.lower())
-    for item in items:
+    unique_items = {}
+    duplicate_count = 0
+    for item in raw_items:
+        current = unique_items.get(item["id"])
+        if not current:
+            unique_items[item["id"]] = item
+            continue
+        duplicate_count += 1
+        current["matchedAliases"] = list(dict.fromkeys([*current.get("matchedAliases", []), *item.get("matchedAliases", [])]))
+        current["matchedFields"] = list(dict.fromkeys([*current.get("matchedFields", []), *item.get("matchedFields", [])]))
+    admitted, rejected = [], []
+    alias_keys = [vehicle_identity_key(alias) for alias in query_aliases]
+    for item in unique_items.values():
         published = _parse_import_date(item.get("publishedAt")); reason = ""
         if passenger_vehicle_scope_exclusion_reason(item): reason = "commercial_vehicle_entity"
-        elif keyword_key not in re.sub(r"[\s·•_-]+", "", item.get("text", "").lower()): reason = "model_not_relevant"
+        elif not any(alias_key and alias_key in vehicle_identity_key(item.get("text", "")) for alias_key in alias_keys): reason = "model_not_relevant"
         elif not published: reason = "publish_time_unverified"
         elif outside_date_window(published, start, end, end_exclusive): reason = "outside_time_range"
-        elif like_thresholds is not None and item["metrics"]["likes"] < like_thresholds[item["platform"]]: reason = "below_like_threshold"
         rejection = {"id": item["id"], "platform": item["platform"], "title": item["text"], "likes": item["metrics"]["likes"], "reason": reason}
-        if reason == "below_like_threshold":
-            threshold_candidates.append((item, rejection))
-        elif reason:
+        if reason:
             rejected.append(rejection)
         else:
             item["evidence"]["verificationStatus"] = "tikhub_search_observation"
             admitted.append(item)
-    threshold_fallback = {"applied": False, "reason": "", "admittedCount": 0, "platforms": [], "requestedThresholds": like_thresholds}
-    admitted_platforms = {item["platform"] for item in admitted}
-    fallback_candidates = []
-    for platform in platforms:
-        platform_candidates = [(item, rejection) for item, rejection in threshold_candidates if item["platform"] == platform]
-        if platform not in admitted_platforms and platform_candidates:
-            fallback_candidates.extend(platform_candidates)
-            threshold_fallback["platforms"].append(platform)
-    if fallback_candidates:
-        for item, _ in fallback_candidates:
-            item["evidence"]["verificationStatus"] = "tikhub_search_observation_below_popularity_threshold"
-            admitted.append(item)
-        threshold_fallback.update({
-            "applied": True,
-            "reason": "no_content_met_like_threshold_on_platform",
-            "admittedCount": len(fallback_candidates),
-        })
-    fallback_identities = {(item["platform"], item["id"]) for item, _ in fallback_candidates}
-    rejected.extend(rejection for item, rejection in threshold_candidates if (item["platform"], item["id"]) not in fallback_identities)
-    items = admitted
-    admission = {"inputCount": len(admitted) + len(rejected), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": 0, "thresholds": like_thresholds,
+    hot_items = [item for item in admitted if like_thresholds is None or item["metrics"]["likes"] >= like_thresholds[item["platform"]]]
+    admission = {"inputCount": len(unique_items), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": duplicate_count,
                  "dateWindow": {"timeRange": time_range, "start": start.isoformat(), "end": end.isoformat(), "endExclusive": end_exclusive},
-                 "thresholdFallback": threshold_fallback,
                  "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})},
                  "rejectedByPlatform": {platform: {reason: sum(x["platform"] == platform and x["reason"] == reason for x in rejected)
                                                        for reason in sorted({x["reason"] for x in rejected if x["platform"] == platform})}
                                         for platform in platforms},
                  "rejectedSamples": rejected[:30]}
-    advance("admission", f"已完成乘用车实体、时间窗与热度门槛校验，通过{len(admitted)}条")
+    hot_admission = {"thresholds": like_thresholds, "qualifiedCount": len(hot_items),
+                     "belowThresholdCount": len(admitted) - len(hot_items),
+                     "purpose": "仅用于热门内容排行，不影响内容量、情感和风险分析"}
+    collection_complete = bool(diagnostics) and all(row["status"] == "complete" for row in diagnostics)
+    collection_status = {"status": "complete" if collection_complete else "partial",
+                         "scope": "所选平台公开搜索接口在所选时间窗和查询词下可返回的结果",
+                         "queries": diagnostics, "reason": "" if collection_complete else "存在未采尽或失败的查询"}
+    if progress_callback:
+        progress_callback("admission", 67, f"已完成相关性与时间窗校验，相关内容{len(admitted)}条")
     comment_rows, hot_lists = [], []
     if include_enrichment:
         for platform in platforms:
@@ -597,8 +817,7 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
                     payload, source = client.hot_list(platform); rows = _text_rows(payload)[:20]
                     hot_lists.append({"platform": platform, "platformLabel": PLATFORMS[platform]["label"], "items": [x["text"] for x in rows], **source})
                 except Exception as exc: warnings.append({"platform": platform, "capability": "hot_list", "message": str(exc)})
-            advance("enrichment", f"已完成{PLATFORMS[platform]['label']}热榜补充")
-            top = sorted((x for x in items if x["platform"] == platform), key=lambda x: -x["heat"])[:1]
+            top = sorted((x for x in hot_items if x["platform"] == platform), key=lambda x: -x["heat"])[:1]
             for item in top:
                 try:
                     payload, source = client.comments(item)
@@ -607,12 +826,14 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
                         comment_rows.append({"platform": platform, "platformLabel": PLATFORMS[platform]["label"], "contentId": item["id"], "text": row["text"], "sentiment": sentiment, "positiveHits": positive, "negativeHits": negative, "sourceUrl": item["sourceUrl"]})
                     sources.append({"platform": platform, "capability": "comments", **source, "fetchedAt": utcnow()})
                 except Exception as exc: warnings.append({"platform": platform, "capability": "comments", "message": str(exc)})
-            advance("enrichment", f"已完成{PLATFORMS[platform]['label']}评论补充")
-    result = _aggregate(items, keyword, sources, warnings, comment_rows, hot_lists, platforms)
+    result = _aggregate(admitted, keyword, sources, warnings, comment_rows, hot_lists, platforms,
+                        hot_items=hot_items, collection_status=collection_status)
     if admission:
-        result["admission"] = admission; result["rankingMethod"] = "点赞量降序，其次评论量、收藏量、分享量、发布时间"
-        result["contentRanking"] = sorted(result["items"], key=lambda x: (-x["metrics"]["likes"], -x["metrics"]["comments"], -x["metrics"]["collects"], -x["metrics"]["shares"], -_number(x["publishedAt"])))[:50]
-    advance("aggregate", "已完成去重与指标聚合")
+        result["admission"] = admission; result["hotAdmission"] = hot_admission
+        result["rankingMethod"] = "热门池按点赞量降序，其次评论量、收藏量、分享量、发布时间"
+        result["contentRanking"] = sorted(result["hotItems"], key=lambda x: (-x["metrics"]["likes"], -x["metrics"]["comments"], -x["metrics"]["collects"], -x["metrics"]["shares"], -_number(x["publishedAt"])))[:50]
+    if progress_callback:
+        progress_callback("aggregate", 100, "已完成去重、三类内容池与指标聚合")
     return result
 
 
@@ -637,7 +858,6 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
         elif keyword_key not in re.sub(r"[\s·•_-]+", "", text.lower()): reason = "model_not_relevant"
         elif not published: reason = "publish_time_unverified"
         elif outside_date_window(published, start, end, end_exclusive): reason = "outside_time_range"
-        elif likes < thresholds[platform]: reason = "below_like_threshold"
         identity = f"{platform}|{item_id or url or text[:100]}"
         if identity in seen: duplicates += 1; continue
         seen.add(identity)
@@ -652,15 +872,21 @@ def import_records(records, keyword, platforms=None, thresholds=None, time_range
         item["evidence"].update({"source": "社媒助手导入", "filename": filename, "verificationStatus": "page_export_verified"})
         admitted.append(item)
     admitted.sort(key=lambda x: (-x["metrics"]["likes"], -x["metrics"]["comments"], -x["metrics"]["collects"], -x["metrics"]["shares"], -_number(x["publishedAt"])))
-    result = _aggregate(admitted, keyword, [{"source": "social_assistant_import", "filename": filename, "itemCount": len(records or [])}], [], selected_platforms=platforms)
-    result["contentRanking"] = admitted[:50]; result["items"] = admitted
+    hot_items = [item for item in admitted if item["metrics"]["likes"] >= thresholds[item["platform"]]]
+    result = _aggregate(admitted, keyword, [{"source": "social_assistant_import", "filename": filename, "itemCount": len(records or [])}], [],
+                        selected_platforms=platforms, hot_items=hot_items,
+                        collection_status={"status": "complete", "scope": "用户导入文件中的全部记录"})
+    result["contentRanking"] = hot_items[:50]; result["items"] = admitted; result["hotItems"] = hot_items
     result["admission"] = {"inputCount": len(records or []), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": duplicates,
-                           "thresholds": thresholds, "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})},
+                           "rejectedReasons": {reason: sum(x["reason"] == reason for x in rejected) for reason in sorted({x["reason"] for x in rejected})},
                            "dateWindow": {"timeRange": time_range, "start": start.isoformat(), "end": end.isoformat(), "endExclusive": end_exclusive},
                            "rejectedByPlatform": {platform: {reason: sum(x["platform"] == platform and x["reason"] == reason for x in rejected)
                                                                for reason in sorted({x["reason"] for x in rejected if x["platform"] == platform})}
                                                 for platform in platforms},
                            "rejectedSamples": rejected[:30]}
+    result["hotAdmission"] = {"thresholds": thresholds, "qualifiedCount": len(hot_items),
+                              "belowThresholdCount": len(admitted) - len(hot_items),
+                              "purpose": "仅用于热门内容排行，不影响内容量、情感和风险分析"}
     result["rankingMethod"] = "点赞量降序，其次评论量、收藏量、分享量、发布时间"
     result["sourceMode"] = "social_assistant_import"
     return attach_competitor_rankings(result, [])
@@ -695,15 +921,17 @@ def latest_snapshot(conn, keyword, org_id="local", edition="china", project_filt
         (org_id, edition, keyword),
     ).fetchall()
     expected = project_filters or {}
-    expected_competitors = [str(value or "").strip() for value in expected.get("competitors", []) if str(value or "").strip()]
+    expected_competitors = sanitize_competitor_models(keyword, expected.get("competitors", []))
     expected_time_range = str(expected.get("timeRange") or "").strip()
     for row in rows:
         filters = json.loads(row["filters_json"] or "{}")
-        if expected_competitors and filters.get("competitors", []) != expected_competitors:
+        stored_competitors = sanitize_competitor_models(keyword, filters.get("competitors", []))
+        if expected_competitors and stored_competitors != expected_competitors:
             continue
         if expected_time_range and str(filters.get("timeRange") or "") != expected_time_range:
             continue
         result = json.loads(row["result_json"])
+        filters["competitors"] = stored_competitors
         result["snapshot"] = {"id": row["id"], "createdAt": row["created_at"], "filters": filters}
-        return result
+        return normalize_comparison_result(result)
     return None

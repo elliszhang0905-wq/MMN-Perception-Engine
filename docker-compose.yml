@@ -112,6 +112,23 @@ services:
       retries: 5
     networks: [mmn_net]
 
+  mmn-social-evidence-worker:
+    profiles: ["social-evidence-v2"]
+    image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
+    container_name: mmn-social-evidence-worker
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      MMN_SOCIAL_EVIDENCE_V2_ENABLED: "true"
+      MMN_SOCIAL_EVIDENCE_WORKER_MODE: external
+      MMN_SOCIAL_EVIDENCE_DB: /app/data/social_evidence.sqlite
+      MMN_SOCIAL_EVIDENCE_RAW_DIR: /app/data/social_evidence_raw
+    command: ["python3", "scripts/run_social_evidence_worker.py", "--poll-seconds", "2"]
+    volumes:
+      - mmn_data:/app/data
+      - mmn_logs:/app/logs
+    networks: [mmn_net]
+
   mmn-scheduler:
     image: mmn-perception-engine:${MMN_IMAGE_TAG:-latest}
     container_name: mmn-scheduler

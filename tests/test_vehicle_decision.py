@@ -131,6 +131,26 @@ class VehicleDecisionTest(unittest.TestCase):
         pptx = vd.render_report_pptx(report)
         self.assertTrue(zipfile.is_zipfile(io.BytesIO(pptx)))
 
+    def test_nsr_validation_adjudication_persists_links_without_changing_baseline(self):
+        saved = vd.adjudicate_nsr_validation(
+            self.conn, "mart-1", "target-cockpit", "supported", "原文支持且车型标签一致",
+            ["evidence-2", "evidence-1", "evidence-1"], org_id="org-a", user_id="ellis",
+        )
+        self.assertEqual(saved["evidenceIds"], ["evidence-1", "evidence-2"])
+        listed = vd.list_nsr_validation_adjudications(self.conn, "mart-1", org_id="org-a")
+        self.assertEqual(listed[0]["decision"], "supported")
+        self.assertEqual(listed[0]["targetId"], "target-cockpit")
+        self.assertEqual(listed[0]["evidenceIds"], ["evidence-1", "evidence-2"])
+        rejected = vd.adjudicate_nsr_validation(
+            self.conn, "mart-1", "target-luxury", "mixed", "正反样本同时存在",
+            ["evidence-3"], org_id="org-a", user_id="ellis",
+        )
+        self.assertEqual(rejected["evidenceIds"], [])
+        self.assertEqual(rejected["reviewedEvidenceIds"], ["evidence-3"])
+        self.assertEqual(vd.list_nsr_validation_adjudications(self.conn, "mart-1", org_id="org-b"), [])
+        columns = {row[1] for row in self.conn.execute("pragma table_info(human_adjudications)")}
+        self.assertNotIn("baseline_nsr", columns)
+
     def test_action_edition_dates_and_completion_rate_are_validated(self):
         snapshot = self.snapshot()
         report = vd.generate_report(self.conn, snapshot["id"], org_id="org-a", user_id="ellis")

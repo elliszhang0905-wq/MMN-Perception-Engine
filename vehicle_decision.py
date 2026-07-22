@@ -378,6 +378,56 @@ def adjudicate_conflict(conn, conflict_id, decision, reason, *, org_id, user_id)
     return get_report(conn, conflict["report_id"], org_id=org_id)
 
 
+def adjudicate_nsr_validation(conn, mart_id, target_id, decision, reason, evidence_ids, *, org_id, user_id):
+    """Persist human judgment and evidence links without changing the NSR baseline."""
+    mart_id = _required_text(mart_id, "NSR验证证据集")
+    target_id = _required_text(target_id, "NSR验证标签")
+    decision = _required_text(decision, "裁决决定")
+    reason = _required_text(reason, "裁决理由")
+    if decision not in {"supported", "challenged", "mixed", "insufficient_evidence"}:
+        raise ValueError("NSR验证裁决值不受支持")
+    evidence_ids = sorted({str(value or "").strip() for value in (evidence_ids or []) if str(value or "").strip()})
+    created_at, adjudication_id = _now(), _id("adj")
+    composite_target = f"{mart_id}:{target_id}"
+    conn.execute(
+        "insert into human_adjudications values (?,?,?,?,?,?,?,?)",
+        (adjudication_id, org_id, "nsr_validation_target", composite_target, decision, reason, user_id, created_at),
+    )
+    linked_evidence_ids = evidence_ids if decision == "supported" else []
+    for evidence_id in linked_evidence_ids:
+        conn.execute(
+            "insert or ignore into decision_evidence_links values (?,?,?,?,?,?)",
+            (_id("del"), org_id, "nsr_validation_adjudication", adjudication_id, evidence_id, created_at),
+        )
+    conn.commit()
+    return {
+        "id": adjudication_id, "martId": mart_id, "targetId": target_id,
+        "decision": decision, "reason": reason, "adjudicator": user_id,
+        "evidenceIds": linked_evidence_ids, "reviewedEvidenceIds": evidence_ids, "createdAt": created_at,
+    }
+
+
+def list_nsr_validation_adjudications(conn, mart_id, *, org_id):
+    mart_id = _required_text(mart_id, "NSR验证证据集")
+    rows = conn.execute(
+        """select * from human_adjudications where org_id=? and target_type='nsr_validation_target'
+           and target_id like ? order by created_at desc""", (org_id, f"{mart_id}:%"),
+    ).fetchall()
+    result = []
+    for row in rows:
+        evidence = conn.execute(
+            """select evidence_id from decision_evidence_links where org_id=?
+               and subject_type='nsr_validation_adjudication' and subject_id=? order by evidence_id""",
+            (org_id, row["id"]),
+        ).fetchall()
+        result.append({
+            "id": row["id"], "martId": mart_id, "targetId": row["target_id"][len(mart_id) + 1:],
+            "decision": row["decision"], "reason": row["reason"], "adjudicator": row["adjudicator"],
+            "evidenceIds": [item["evidence_id"] for item in evidence], "createdAt": row["created_at"],
+        })
+    return result
+
+
 def publish_report(conn, report_id, *, org_id, user_id, approval_note):
     report = get_report(conn, report_id, org_id=org_id)
     if report["status"] == "manual_required" or any(item["severity"] == "critical" and item["status"] != "resolved" for item in report["conflicts"]):

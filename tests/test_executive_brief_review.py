@@ -8,6 +8,15 @@ import server
 
 
 class ExecutiveBriefReviewTest(unittest.TestCase):
+    def setUp(self):
+        self.data_directory = tempfile.TemporaryDirectory()
+        self.data_patch = patch.object(server, "DATA_DIR", Path(self.data_directory.name))
+        self.data_patch.start()
+
+    def tearDown(self):
+        self.data_patch.stop()
+        self.data_directory.cleanup()
+
     def valid_review(self, packet):
         return json.dumps(
             {
@@ -64,20 +73,24 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
             candidate = {**valid, **mutation}
             self.assertFalse(server.normalize_executive_brief_review(json.dumps(candidate, ensure_ascii=False), packet))
 
-    def test_summary_is_published_only_when_both_models_pass(self):
+    def test_summary_is_published_only_when_all_three_models_pass(self):
         packet = server.executive_brief_evidence_packet()
         response = self.valid_review(packet)
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(server, "executive_brief_cache_path", return_value=Path(tmp) / "review.json"), \
              patch.object(server, "call_qwen", return_value=response), \
-             patch.object(server, "call_deepseek", return_value=response):
-            state = server.run_executive_brief_dual_review(packet)
+             patch.object(server, "call_deepseek", return_value=response), \
+             patch.object(server, "call_kimi", return_value=response):
+            state = server.run_executive_brief_triple_review(packet)
         self.assertEqual(state["status"], "verified")
         self.assertEqual(state["summary"], packet["candidate"])
         self.assertEqual(len(state["actions"]), 3)
         self.assertEqual(len(state["vehicleActions"]), 9)
         self.assertEqual(len(state["brandImplications"]), 9)
-        self.assertEqual(state["providerChecks"], {"qwen": "verified", "deepseek": "verified"})
+        self.assertEqual(
+            state["providerChecks"],
+            {"flagshipA": "verified", "flagshipB": "verified", "flagshipC": "verified"},
+        )
         self.assertTrue(state["reviewCompleted"])
 
     def test_model_failure_keeps_summary_private(self):
@@ -86,14 +99,15 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(server, "executive_brief_cache_path", return_value=Path(tmp) / "review.json"), \
              patch.object(server, "call_qwen", return_value=response), \
-             patch.object(server, "call_deepseek", side_effect=RuntimeError("secret provider detail")):
-            state = server.run_executive_brief_dual_review(packet)
+             patch.object(server, "call_deepseek", side_effect=RuntimeError("secret provider detail")), \
+             patch.object(server, "call_kimi", return_value=response):
+            state = server.run_executive_brief_triple_review(packet)
         self.assertEqual(state["status"], "pending_review")
         self.assertEqual(state["summary"], "")
         self.assertEqual(state["actions"], [])
         self.assertEqual(state["vehicleActions"], [])
         self.assertEqual(state["brandImplications"], [])
-        self.assertEqual(state["statusLabel"], "双旗舰模型交叉验证未通过 · 暂不发布")
+        self.assertEqual(state["statusLabel"], "三路旗舰模型交叉验证未通过 · 暂不发布")
         self.assertTrue(state["reviewCompleted"])
         self.assertNotIn("secret provider detail", json.dumps(state, ensure_ascii=False))
 

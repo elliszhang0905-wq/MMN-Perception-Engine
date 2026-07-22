@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from weekly_market_refresh import (
+    LatestArticleParseError,
     fetch_latest_official_market_payload,
     load_weekly_market_snapshot,
     refresh_weekly_market_snapshot,
@@ -64,6 +65,25 @@ class WeeklyMarketRefreshTests(unittest.TestCase):
         self.assertEqual(payload["source"]["naturalWeekPeriod"], "2026年7月6—12日")
         self.assertEqual(payload["facts"][0]["value"], 44.3)
 
+    def test_latest_official_article_accepts_new_energy_market_word_order(self):
+        index = '<a href="newslist.php?types=csjd&id=4279">【周度分析】车市扫描(20260713-0719)</a>'
+        article = """<h1>【周度分析】车市扫描(20260713-0719)</h1><p>发布时间：2026-07-22 18:10:45</p>
+        <p>乘用车：7月1-19日，全国乘用车市场零售77.0万辆，同比去年7月同期下降16%；
+        全国乘用车厂商批发74.7万辆，同比去年7月同期下降17%。
+        新能源：全国乘用车新能源市场零售48.5万辆，同比去年7月同期下降4%。
+        渗透率：全国乘用车市场新能源零售渗透率63%。</p>"""
+        payload = fetch_latest_official_market_payload(
+            fetch_text=lambda url: article if "id=4279" in url else index
+        )
+        facts = {item["id"]: item for item in payload["facts"]}
+        self.assertEqual(facts["retail"]["value"], 77.0)
+        self.assertEqual(facts["wholesale"]["value"], 74.7)
+        self.assertEqual(facts["nev_retail"]["value"], 48.5)
+        self.assertEqual(facts["nev_penetration"]["value"], 63.0)
+        self.assertEqual(payload["source"]["url"], "https://www.cpcaauto.com/newslist.php?types=csjd&id=4279")
+        self.assertEqual(payload["source"]["naturalWeekPeriod"], "2026年7月13—19日")
+        self.assertEqual(payload["source"]["period"], "截至2026年7月19日 · 7月月内累计")
+
     def test_fixed_weekly_index_ignores_newer_non_market_scan_categories(self):
         index = """
         <a href="newslist.php?types=csjd&id=4273">【联合发布】一周新车快讯(2026年7月11日-7月17日）</a>
@@ -88,29 +108,35 @@ class WeeklyMarketRefreshTests(unittest.TestCase):
         self.assertEqual(payload["source"]["url"], "https://www.cpcaauto.com/newslist.php?types=csjd&id=4272")
         self.assertEqual(fetched[-1], "https://www.cpcaauto.com/newslist.php?types=csjd&id=4272")
 
-    def test_association_syndication_is_used_when_primary_site_is_unreachable(self):
-        index = '<a href="/news/itemid-283606.html">协会发布 | 车市扫描(2026年7月6日-7月12日)</a>'
-        article = """<h1>协会发布 | 车市扫描(2026年7月6日-7月12日)</h1>
-        <p>乘用车：7月1-12日，全国乘用车市场零售44.3万辆，同比去年7月同期下降15%；
-        全国乘用车厂商批发37.9万辆，同比去年7月同期下降26%。
-        新能源：全国乘用车市场新能源零售28万辆，同比去年7月同期下降8%。
-        渗透率：新能源零售渗透率63.1%。</p>"""
+    def test_latest_official_article_parse_failure_does_not_fall_back_to_an_older_source(self):
+        index = '<a href="newslist.php?types=csjd&id=4279">【周度分析】车市扫描(20260713-0719)</a>'
+        fetched = []
 
         def fetch(url):
-            if url == "https://www.cpcaauto.com/news.php?types=csjd&anid=128":
-                raise OSError("primary unavailable")
-            if url.endswith("page-1.html"):
-                return "<html>暂无周报</html>"
-            if url.endswith("page-2.html"):
-                return index
-            if url.endswith("itemid-283606.html"):
-                return article
-            raise AssertionError(f"unexpected URL: {url}")
+            fetched.append(url)
+            return "<p>字段结构发生变化</p>" if "id=4279" in url else index
 
-        payload = fetch_latest_official_market_payload(fetch_text=fetch)
-        self.assertEqual(payload["source"]["naturalWeekPeriod"], "2026年7月6—12日")
-        self.assertEqual(payload["source"]["url"], "https://npo00410y.npoall.com/news/itemid-283606.html")
-        self.assertEqual(payload["facts"][3]["value"], 63.1)
+        with self.assertRaises(LatestArticleParseError) as raised:
+            fetch_latest_official_market_payload(fetch_text=fetch)
+        self.assertEqual(raised.exception.url, "https://www.cpcaauto.com/newslist.php?types=csjd&id=4279")
+        self.assertEqual(len(fetched), 2)
+
+    def test_latest_parse_failure_preserves_snapshot_and_reports_true_state(self):
+        index = '<a href="newslist.php?types=csjd&id=4279">【周度分析】车市扫描(20260713-0719)</a>'
+
+        with tempfile.TemporaryDirectory() as directory:
+            refresh_weekly_market_snapshot(directory, payload=BASELINE)
+            status = refresh_weekly_market_snapshot(
+                directory,
+                official_fetcher=lambda url: "<p>字段结构发生变化</p>" if "id=4279" in url else index,
+                today=__import__("datetime").date(2026, 7, 22),
+            )
+            snapshot, refresh = load_weekly_market_snapshot(directory, BASELINE)
+        self.assertEqual(status["status"], "latest_parse_failed")
+        self.assertEqual(status["statusLabel"], "最新一期已发布，数据处理未完成 · 当前显示上期月内累计")
+        self.assertEqual(status["latestArticle"]["url"], "https://www.cpcaauto.com/newslist.php?types=csjd&id=4279")
+        self.assertEqual(snapshot["source"]["naturalWeekEndDate"], "2026-07-12")
+        self.assertEqual(refresh["status"], "latest_parse_failed")
 
     def test_unpublished_latest_natural_week_is_explicit_not_a_fake_success(self):
         with tempfile.TemporaryDirectory() as directory:

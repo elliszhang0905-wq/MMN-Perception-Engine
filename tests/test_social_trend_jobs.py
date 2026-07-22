@@ -8,6 +8,21 @@ import server
 
 
 class SocialTrendJobsTest(unittest.TestCase):
+    def test_request_normalization_excludes_own_and_duplicate_competitors(self):
+        normalized = server._normalize_social_trend_body({
+            "keyword": "奥迪 E7X",
+            "competitors": ["奥迪E7X", " 奔驰GLC EV ", "奔驰GLC  EV", "问界M7", "问界M7"],
+        })
+        self.assertEqual(normalized["keyword"], "奥迪 E7X")
+        self.assertEqual(normalized["competitors"], ["奔驰GLC EV", "问界M7"])
+        self.assertEqual(
+            server._social_trend_job_request_key(normalized),
+            server._social_trend_job_request_key({
+                "keyword": "奥迪E7X",
+                "competitors": ["奥迪 E7X", "奔驰GLC  EV", "问界M7", "问界 M7"],
+            }),
+        )
+
     def test_local_auto_update_defers_restart_while_collection_is_active(self):
         script = (Path(__file__).resolve().parents[1] / "scripts" / "ensure_local_mmn.sh").read_text(encoding="utf-8")
         self.assertIn("has_active_social_trend_jobs", script)
