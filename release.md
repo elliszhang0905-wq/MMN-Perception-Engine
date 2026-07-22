@@ -1,5 +1,15 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-22｜beta 1.03 产品评价部分汇总分层导入
+
+- 发布版本码：`beta-1.03-20260722-product-evaluation-partial-1`；提交 `df8f220` 已推送 GitHub `main` 并部署 ECS。
+- 修复汇总表导入的全有或全无错误：当原表具备多车型整体声量、互动量和完整全网 NSR，但没有属性 NSR 区块时，系统保留可验证指标并登记源车型；属性机会地图显示缺口，不用定性占比或竞品数据伪造属性 NSR。
+- 《3车产品评价_0706.xlsx》已通过正式导入接口登记为启境GT7数据包；本品为启境GT7，竞品为理想L8/极氪8X，启境GT7全网声量 `189,910`、互动量 `2,474,543`、全网 NSR `84%`，属性明细 `0` 行且 `attributeNsrAvailable=false`。
+- 干净发布提交验证：Python全量 `520/520`、150项后端门禁和完整浏览器发布门禁通过，`failed=[]`、`runtimeErrors=[]`。本地与生产均覆盖刷新恢复、智己L6/奥迪E7X/启境GT7切换隔离、1440px与390px；生产控制台和失败请求均为空，390px页面无横向溢出。
+- ECS发布前回滚点：`backups/product_partial_20260722_230843/source_before.tar.gz`（SHA-256 `9ce2bd6b7c4e36c186a07130b9a24681e9ada07fa6e17924a4e3ab23d65f8121`）、同目录 `env_before`（SHA-256 `69d834bd972b3c32f04ac32c52221a21ffa661a1e75aa84618f19a09c1d22208`）、`backups/mmn_backup_20260722_230945.tar.gz`（SHA-256 `bb6c3c8ccedefb23862fd70de916e4af67ef747e9d6b7dc3cd24fd061c843502`）；部署脚本另生成 `backups/mmn_backup_20260722_231020.tar.gz`（SHA-256 `4c387347553f05c0600a7eed70874931830ecc9129c694c55ffc0a757923854a`）。
+- ECS数据保护：76张表保持不变；`organizations=6`、`users=6`、`vertical_rank_assets=4642`、`social_trend_snapshots=9`保持基线，目录表由2条增至3条。浏览器验收产生的5条临时项目快照已按明确ID删除，`project_snapshots`恢复210，SQLite `quick_check=ok`。
+- ECS运行：六个服务正常；健康接口返回本版本码，部署标记为 `df8f220`，发布后应用/代理日志未发现 Traceback、ERROR 或 HTTP 5xx。
+
 ## 2026-07-22｜beta 1.03 车型产品评价目录发布
 
 - 发布版本码：`beta-1.03-20260722-product-evaluation-catalog-2`；功能提交 `806f103`、递归保护修复提交 `0e0f505` 已推送 GitHub `main` 并部署 ECS。
