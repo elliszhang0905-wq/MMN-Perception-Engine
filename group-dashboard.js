@@ -428,6 +428,7 @@ function renderFullSegmentWarnings(warning){
   load(false,false,true);
  };
  window.addEventListener("mmn:vehicle-context-updated",event=>{
+  if(!event.detail?.changed)return;
   if(PRODUCT_EVALUATION_BOOTSTRAP_MODELS.has(event.detail?.model))ensureSelectedProductEvaluation();
  });
  window.addEventListener("mmn:auth-ready",ensureSelectedProductEvaluation);

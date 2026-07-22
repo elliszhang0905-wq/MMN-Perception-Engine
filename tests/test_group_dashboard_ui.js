@@ -308,6 +308,7 @@ assert.match(ui, /registerProductEvaluation/);
 assert.match(ui, /PRODUCT_EVALUATION_BOOTSTRAP_MODELS=new Set\(\["奥迪E7X"\]\)/);
 assert.match(ui, /mmn:vehicle-context-updated/);
 assert.match(ui, /mmn:auth-ready/);
+assert.match(ui, /mmn:vehicle-context-updated[\s\S]*?if\(!event\.detail\?\.changed\)return;[\s\S]*?ensureSelectedProductEvaluation/, "unchanged vehicle events must not recursively re-render the cached management dashboard");
 assert.match(ui, /ensureSelectedProductEvaluation/);
 assert.match(ui, /load\(false,false,true\)/);
 assert.match(ui, /if\(!window\.mmnAuthReady\)return/);
