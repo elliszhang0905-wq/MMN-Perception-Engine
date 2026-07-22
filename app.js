@@ -1,4 +1,4 @@
-const APP_VERSION="beta 1.02";
+const APP_VERSION="beta 1.03";
 const emotions={兴奋:[1,0],惊喜:[.9,0],期待:[.75,.1],信任:[1,0],认可:[.85,0],自豪:[.95,0],怀疑:[-.4,.5],焦虑:[-.55,.7],失望:[-.75,.85],愤怒:[-1,1],后悔:[-.95,1],嘲讽:[-.7,.9]};
 const identityWeights={目标核心人群:1.35,增量人群:1.2,高影响力车主:1.3,家庭用户:1.15,科技用户:1.15,性能用户:1.1,价格敏感用户:1,未知:.85};
 const intentWeights={高意向:1.5,中意向:1.15,低意向:.8,无:.5};
@@ -241,7 +241,7 @@ const headers=["车型","类型","平台","一级赛道","认知标签","情绪"
 const pageNames={dashboard:"决策驾驶舱",brandpenetration:"品牌穿透中心",socialtrends:"社媒趋势中心",policyintelligence:"政策环境分析",data:"声量数据",cognition:"认知诊断",vertical:"竞品格局",videos:"内容资产",creatorassets:"达人资产诊断",bloggerskill:"博主蒸馏孵化",contentstrategy:"MMN策略输出",actions:"行动预算",knowhow:"打法知识库",strategykb:"RAG资产库",learning:"人工结论",architecture:"版本架构",workspace:"空间权限",config:"项目权重",eval:"Eval评测"};
 const hiddenPages=new Set(["actions"]);
 const creatorAssetState={tab:"distill",tasks:[],creators:[],methods:[],selectedCreator:null,selectedAsset:null,processingAssetId:"",loading:false,error:""};
-const socialTrendState={loading:false,result:null,mart:null,queryPlan:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:0,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"all"};
+const socialTrendState={loading:false,restoring:false,restoreKey:"",result:null,mart:null,queryPlan:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:0,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"all"};
 let socialEvidenceCapabilities={enabled:false,workerMode:"off",supportedCenters:[],schemaVersion:""};
 let mmnEvalState={loading:false,running:false,data:null,error:"",filter:"all",activeCaseId:""};
 function activeEdition(){try{return typeof edition==="string"?edition:loadEdition()}catch{return"china"}}
@@ -688,7 +688,7 @@ function resetBrowserScopeTransientState(){
  videoSearch="";verticalSearch="";verticalPeriodPickerOpen=false;verticalAssetRestoreTried=false;currentDrillContext=null;semanticState={result:null,schema:null};
  contentStrategyState={loading:false,result:null,error:""};contentPptState={loading:false,result:null,error:""};cognitionStrategyState={loading:false,result:null,error:""};dashboardTopicPlanState={loading:false,result:null,error:""};
  if(socialTrendState.stageTimer)clearInterval(socialTrendState.stageTimer);if(socialTrendState.progressTimer)clearInterval(socialTrendState.progressTimer);
- Object.assign(socialTrendState,{loading:false,result:null,mart:null,queryPlan:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:socialTrendState.runToken+1,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"all"});
+ Object.assign(socialTrendState,{loading:false,restoring:false,restoreKey:"",result:null,mart:null,queryPlan:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:socialTrendState.runToken+1,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"all"});
  Object.assign(creatorAssetState,{tab:"distill",tasks:[],creators:[],methods:[],selectedCreator:null,selectedAsset:null,processingAssetId:"",loading:false,error:""});
  bloggerSkillState={stats:{sources:0,samples:0,profiles:0,ragChunks:0},sources:[],samples:[],profiles:[],knowledgeItems:[],creatorWorkbenches:[],importJob:null};bloggerSkillPersonFilter="";bloggerTaskPollToken++;bloggerImportPollToken++;bloggerImportPollingJobId="";
  contentCapabilityState={stats:{sources:0,chunks:0,matched:0},chunks:[],tagOptions:{},knowledgeItems:[]};contentCapabilitySearch="";contentCapabilitySelectedTags=[];
@@ -1484,7 +1484,7 @@ function renderSocialEvidencePlan(plan=socialTrendState.queryPlan,mart=socialTre
  coverageBox.innerHTML=`<div><span>证据覆盖</span><b>${coverage?`${coverage.contentCount||0} 条公开内容`:"尚未运行"}</b></div><div><span>已覆盖平台</span><b>${coverage?.platforms?.length||0}</b></div><div><span>缺失平台</span><b>${missing.length?missing.map(escapeHtml).join("、"):coverage?"无":"待确认"}</b></div><div><span>证据状态</span><b>${mart?.status==="verified"?"已形成证据集":mart?"证据有限":"等待分析"}</b></div><p>平台原生互动指标按各平台口径保留，不直接相加为市场结论。</p>`;
 }
 async function loadSocialEvidenceCapabilities(){
- try{const data=await api("/api/social-evidence/capabilities");socialEvidenceCapabilities={...socialEvidenceCapabilities,...data,enabled:Boolean(data.clientEnabled)};renderSocialEvidencePlan();if(document.querySelector("#socialtrends")?.classList.contains("active"))loadLatestSocialTrendEvidenceMart();if(document.querySelector("#brandpenetration")?.classList.contains("active"))loadBrandPenetrationSnapshot()}
+ try{const data=await api("/api/social-evidence/capabilities");socialEvidenceCapabilities={...socialEvidenceCapabilities,...data,enabled:Boolean(data.clientEnabled)};renderSocialEvidencePlan();if(document.querySelector("#socialtrends")?.classList.contains("active"))loadLatestSocialTrendSnapshot();if(document.querySelector("#brandpenetration")?.classList.contains("active"))loadBrandPenetrationSnapshot()}
  catch{socialEvidenceCapabilities={enabled:false,workerMode:"off",supportedCenters:[],schemaVersion:""};renderSocialEvidencePlan()}
 }
 async function waitForSocialEvidenceJob(jobId,isCurrent,onProgress){
@@ -1508,6 +1508,29 @@ async function loadLatestSocialTrendEvidenceMart(){
  try{const mart=await latestSocialEvidenceMart(payload.projectId,"social_trend");if(mart){socialTrendState.mart=mart;socialTrendState.queryPlan=payload;renderSocialTrends()}else renderSocialEvidencePlan(payload,null)}
  catch(_){renderSocialEvidencePlan(payload,null)}
 }
+function restoreSocialTrendScope(result){
+ const filters=result?.snapshot?.filters||{},comparisonCompetitors=(result?.modelComparisons||[]).filter(item=>item.role!=="own").map(item=>item.model),restoredCompetitors=sanitizeSocialCompetitors(result?.keyword,comparisonCompetitors.length?comparisonCompetitors:(filters.competitors||[]));
+ socialTrendState.competitors=restoredCompetitors;
+ const timeRange=String(filters.timeRange||"");if(timeRange){const input=document.querySelector("#social-trend-time");if(input)input.value=timeRange;document.querySelectorAll("[data-social-time]").forEach(button=>button.classList.toggle("active",button.dataset.socialTime===timeRange));const custom=document.querySelector("#social-custom-dates");if(custom)custom.hidden=timeRange!=="custom"}
+ const platforms=Array.isArray(filters.platforms)?filters.platforms.filter(Boolean):[];if(platforms.length){document.querySelectorAll('[name="social-platform"]').forEach(input=>{input.checked=platforms.includes(input.value)});document.querySelectorAll("[data-social-platform]").forEach(button=>button.classList.toggle("active",button.dataset.socialPlatform==="all"?[...document.querySelectorAll('[name="social-platform"]')].every(input=>input.checked):platforms.includes(button.dataset.socialPlatform)))}
+}
+function cancelSocialTrendRestore(){socialTrendState.restoreKey="";socialTrendState.restoring=false}
+async function loadLatestLegacySocialTrendSnapshot(){
+ if(socialEvidenceCapabilities.enabled||socialTrendState.loading)return;
+ const keyword=document.querySelector("#social-trend-keyword")?.value.trim()||state.config.model||"";if(!keyword)return;
+ const restoreKey=`${activeEdition()}::${keyword}`;if(socialTrendState.restoring&&socialTrendState.restoreKey===restoreKey)return;
+ socialTrendState.restoring=true;socialTrendState.restoreKey=restoreKey;socialTrendState.error="";renderSocialTrends();
+ try{
+  const query=new URLSearchParams({keyword,edition:activeEdition(),centerType:"social_trend"}),data=await api(`/api/social-trends/latest?${query.toString()}`);
+  if(socialTrendState.restoreKey!==restoreKey)return;
+  const result=data.result||null;socialTrendState.result=result;socialTrendState.mart=null;socialTrendState.visibleModels=(result?.modelComparisons||[]).map(item=>item.model).filter(Boolean);
+  if(result)restoreSocialTrendScope(result);
+ }catch(error){if(socialTrendState.restoreKey===restoreKey)socialTrendState.error=error.message||"最近一次结果读取失败"}
+ finally{if(socialTrendState.restoreKey===restoreKey){socialTrendState.restoring=false;renderSocialTrends()}}
+}
+async function loadLatestSocialTrendSnapshot(){
+ return socialEvidenceCapabilities.enabled?loadLatestSocialTrendEvidenceMart():loadLatestLegacySocialTrendSnapshot();
+}
 function renderSocialTrendEvidenceMart(mart){
  if(!mart||mart.martType!=="social_trend")throw new Error("社媒趋势证据集类型不匹配");
  const box=document.querySelector("#social-trend-dashboard"),quotes=mart.userLanguage||[],occupancy=mart.competitorOccupancy||[],change=mart.changeSignals?.[0]||{},delta=change.delta; if(!box)return;
@@ -1518,10 +1541,10 @@ function renderSocialTrends(){
  const box=document.querySelector("#social-trend-dashboard"),status=document.querySelector("#social-trend-status");if(!box)return;
  renderSocialCompetitorPicker();
  renderSocialTrendProgress();
- if(socialTrendState.loading){box.innerHTML='<div class="social-dashboard-skeleton" aria-busy="true" aria-label="社媒趋势看板生成中"><i></i><i></i><i></i><i></i></div>';return}
+ if(socialTrendState.loading||socialTrendState.restoring){box.innerHTML=`<div class="social-dashboard-skeleton" aria-busy="true" aria-label="${socialTrendState.restoring?"正在恢复最近一次社媒趋势快照":"社媒趋势看板生成中"}"><i></i><i></i><i></i><i></i></div>`;return}
  if(socialTrendState.error){status.hidden=false;status.innerHTML=`<p class="social-progress-error">分析未完成：${escapeHtml(socialTrendState.error)}。请重试。</p>`;box.innerHTML="";return}
  if(socialTrendState.mart){renderSocialTrendEvidenceMart(socialTrendState.mart);return}
- const r=socialTrendState.result;if(!r)return;
+ const r=socialTrendState.result;if(!r){box.innerHTML='<article class="panel social-empty-state" role="status"><span>SOCIAL TREND SNAPSHOT</span><h2>当前车型尚未形成可用快照</h2><p>点击“开始分析”采集公开平台证据，或通过“导入数据”使用已有材料。未通过时间、链接与相关性准入的内容不会生成结论。</p></article>';return}
  const items=r.items||[],totalHeat=(r.platforms||[]).reduce((sum,x)=>sum+Number(x.heat||0),0),positive=items.filter(x=>x.sentiment==="positive").length,risk=items.filter(x=>x.sentiment==="negative").length,positiveRate=items.length?positive/items.length*100:0;
  const allComparisonModels=(r.modelComparisons||[]).map(x=>x.model),visibleModels=socialTrendState.visibleModels.length?socialTrendState.visibleModels:allComparisonModels,allEvidence=(r.comparisonEvidence||r.contentRanking||[]).filter(x=>visibleModels.includes(x.normalizedModel||r.keyword)),evidenceItems=allEvidence.filter(x=>(socialTrendState.evidencePlatform==="all"||x.platform===socialTrendState.evidencePlatform)&&(socialTrendState.evidenceScope==="all"||(socialTrendState.evidenceScope==="own"?socialVehicleIdentityKey(x.normalizedModel||r.keyword)===socialVehicleIdentityKey(r.keyword):socialVehicleIdentityKey(x.normalizedModel||r.keyword)!==socialVehicleIdentityKey(r.keyword)))),rankings=evidenceItems.map((x,i)=>{const m=x.metrics||{},isOwn=socialVehicleIdentityKey(x.normalizedModel||r.keyword)===socialVehicleIdentityKey(r.keyword);return `<tr><td><b class="social-rank-no">${i+1}</b></td><td><span class="social-model-tag ${isOwn?'own':'competitor'}">${escapeHtml(x.normalizedModel||r.keyword)}${isOwn?'<i>本品</i>':''}</span></td><td>${socialPlatformBadge(x.platform,x.platformLabel)}</td><td><a href="${escapeAttr(x.sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(x.text||"原始内容")}</a><small>${escapeHtml(x.author||"未知作者")} · ${x.matrixContent?"矩阵内容":"自然内容"}</small></td><td><div class="social-raw-metrics"><span>赞 <b>${socialMetric(m.likes)}</b></span><span>评 <b>${socialMetric(m.comments)}</b></span><span>转 <b>${socialMetric(m.shares)}</b></span><span>藏 <b>${socialMetric(m.collects)}</b></span><span>播 <b>${socialMetric(m.views)}</b></span></div></td><td><span class="social-heat-value">♨ ${socialMetric(x.heat)}</span></td><td><span class="sentiment ${x.sentiment}">${x.sentiment==="positive"?"正向":x.sentiment==="negative"?"负向":"中性"}</span></td><td><a class="social-source-link" href="${escapeAttr(x.sourceUrl)}" target="_blank" rel="noopener">查看原文 ↗</a></td></tr>`}).join("");
  const heatBars=(r.contentRanking||[]).slice(0,5).map((x,i)=>`<li><b><i>${i+1}</i>${escapeHtml(x.text||"相关内容")}</b><span><i style="width:${Math.max(8,Math.min(100,x.heat||0))}%"></i></span><em>${socialMetric(x.heat)}</em></li>`).join("")||'<p class="empty">未形成高热度内容</p>';
@@ -1562,7 +1585,7 @@ function renderSocialTrends(){
  bindSocialRiskPopover();
 }
 async function runSocialTrendAnalysis(event){
- event.preventDefault();const keyword=document.querySelector("#social-trend-keyword").value.trim(),platforms=[...document.querySelectorAll('[name="social-platform"]:checked')].map(x=>x.value);socialTrendState.competitors=sanitizeSocialCompetitors(keyword,socialTrendState.competitors);socialTrendState.evidenceScope="all";
+ event.preventDefault();cancelSocialTrendRestore();const keyword=document.querySelector("#social-trend-keyword").value.trim(),platforms=[...document.querySelectorAll('[name="social-platform"]:checked')].map(x=>x.value);socialTrendState.competitors=sanitizeSocialCompetitors(keyword,socialTrendState.competitors);socialTrendState.evidenceScope="all";
  const runButton=document.querySelector("#social-trend-run"),importButton=document.querySelector("#social-trend-import");if(!keyword||!platforms.length)return;if(runButton){runButton.disabled=true;runButton.textContent="分析进行中…"}if(importButton)importButton.disabled=true;
  clearTimeout(socialTrendState.stageTimer);clearInterval(socialTrendState.progressTimer);const runToken=socialTrendState.runToken+1;socialTrendState.runToken=runToken;socialTrendState.loading=true;socialTrendState.result=null;socialTrendState.mart=null;socialTrendState.error="";socialTrendState.stage="collecting";socialTrendState.progress=1;socialTrendState.startedAt=Date.now();renderSocialTrends();
  try{
@@ -1583,7 +1606,7 @@ async function runSocialTrendAnalysis(event){
 function socialThresholdValue(selector,fallback){const raw=document.querySelector(selector)?.value;const value=nullableNumber(raw);return value===null?fallback:value}
 function socialThresholdValues(){return {douyin:socialThresholdValue("#social-threshold-douyin",8000),xiaohongshu:socialThresholdValue("#social-threshold-xiaohongshu",500),weibo:socialThresholdValue("#social-threshold-weibo",500)}}
 async function importSocialTrendFile(file){
- const keyword=document.querySelector("#social-trend-keyword")?.value.trim(),platforms=[...document.querySelectorAll('[name="social-platform"]:checked')].map(x=>x.value),thresholds=socialThresholdValues();if(!keyword)throw new Error("请先填写车型关键词");
+ cancelSocialTrendRestore();const keyword=document.querySelector("#social-trend-keyword")?.value.trim(),platforms=[...document.querySelectorAll('[name="social-platform"]:checked')].map(x=>x.value),thresholds=socialThresholdValues();if(!keyword)throw new Error("请先填写车型关键词");
  const runToken=socialTrendState.runToken+1,runButton=document.querySelector("#social-trend-run"),importButton=document.querySelector("#social-trend-import");socialTrendState.runToken=runToken;clearTimeout(socialTrendState.stageTimer);clearInterval(socialTrendState.progressTimer);if(runButton)runButton.disabled=true;if(importButton)importButton.disabled=true;socialTrendState.loading=true;socialTrendState.error="";socialTrendState.stage="collecting";socialTrendState.progress=15;socialTrendState.startedAt=Date.now();renderSocialTrends();
  try{const window=socialTrendRequestWindow(),query=new URLSearchParams({filename:file.name,keyword,platforms:platforms.join(","),timeRange:window.timeRange,startDate:window.startDate,endDate:window.endDate,edition:activeEdition(),douyinMinLikes:thresholds.douyin,xiaohongshuMinLikes:thresholds.xiaohongshu,weiboMinLikes:thresholds.weibo}),data=await api(`/api/social-trends/import?${query}`,{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:file});if(runToken!==socialTrendState.runToken)return;data.result.sourceMode=data.result.sourceMode||"social_assistant_import";socialTrendState.result=data.result;socialTrendState.visibleModels=(data.result.modelComparisons||[]).map(x=>x.model);socialTrendState.stage="success";socialTrendState.progress=100}
  catch(error){if(runToken===socialTrendState.runToken){socialTrendState.error=error.message;socialTrendState.stage="error"}}finally{if(runToken===socialTrendState.runToken){socialTrendState.loading=false;if(runButton)runButton.disabled=false;if(importButton)importButton.disabled=false;renderSocialTrends()}}
@@ -5037,14 +5060,15 @@ function showPage(id){
  }
  document.querySelector("#page-title").textContent=pageNames[requestedId]||pageNames[id]||"内容资产中心";
  if(id==="creatorassets")loadCreatorAssets();
- if(id==="socialtrends"&&!socialTrendState.result&&!socialTrendState.mart){const input=document.querySelector("#social-trend-keyword");if(input&&!input.value)input.value=state.config.model||"";if(!socialTrendState.competitors.length)socialTrendState.competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);socialTrendState.competitors=sanitizeSocialCompetitors(input?.value||state.config.model,socialTrendState.competitors);renderSocialCompetitorPicker();loadLatestSocialTrendEvidenceMart()}
+ if(id==="socialtrends"&&!socialTrendState.result&&!socialTrendState.mart){const input=document.querySelector("#social-trend-keyword");if(input&&!input.value)input.value=state.config.model||"";if(!socialTrendState.competitors.length)socialTrendState.competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);socialTrendState.competitors=sanitizeSocialCompetitors(input?.value||state.config.model,socialTrendState.competitors);renderSocialCompetitorPicker();loadLatestSocialTrendSnapshot()}
  if(id==="brandpenetration")loadBrandPenetrationSnapshot();
  if(id==="policyintelligence")window.PolicyIntelligenceModule?.load?.();
  if(id==="eval"&&!mmnEvalState.data&&!mmnEvalState.loading)loadMmnEvalDashboard();
 }
 
 function brandPenetrationDisplayItems(result){
- if(result?.qa?.dualModel?.status!=="aligned")return[];
+ const qa=result?.qa||{},approved=["aligned","disagreement","conditional"].includes(qa?.threeFlagships?.status)||qa?.legacyEvidence?.status==="aligned"||qa?.dualModel?.status==="aligned";
+ if(!approved)return[];
  const source=result?.verifiedComparisonItems||[],seen=new Set();
  return source.filter(item=>{const brand=String(item.brandName||item.normalizedModel||item.keyword||"").trim(),key=`${brand}|${item.id||item.sourceUrl||item.platformItemId||""}`;if(seen.has(key))return false;seen.add(key);return true});
 }
@@ -5071,7 +5095,7 @@ async function loadBrandPenetrationSnapshot(){
    frame.contentWindow?.postMessage({type:"mmn-brand-penetration-mart",mart},"*");return;
   }
   const keyword=brandPenetrationSnapshotKeyword(config),projectQuery=keyword==="上汽奥迪品牌传播穿透"?"":`${(config?.competitors||[]).map(brand=>`&competitor=${encodeURIComponent(brand)}`).join("")}&timeRange=${encodeURIComponent(`${config?.range||30}d`)}`;
-  const data=await api(`/api/social-trends/latest?keyword=${encodeURIComponent(keyword)}&edition=${encodeURIComponent(activeEdition())}${projectQuery}`),result=data.result;
+  const data=await api(`/api/social-trends/latest?keyword=${encodeURIComponent(keyword)}&edition=${encodeURIComponent(activeEdition())}&centerType=brand_penetration${projectQuery}`),result=data.result;
   const matchingCount=brandPenetrationDisplayItems(result).length;
   if(!matchingCount)throw new Error("当前品牌组合还没有可用项目快照，请点击开始分析");
   if(keyword!=="上汽奥迪品牌传播穿透"&&!brandPenetrationResultMatchesProject(result,config))throw new Error("已有快照与当前品牌组合不一致，请重新分析");
@@ -5090,9 +5114,8 @@ async function runBrandPenetrationProject(config){
  const frame=document.querySelector("#brand-penetration-frame"),status=document.querySelector("#brand-penetration-snapshot-state"),meta=document.querySelector("#brand-penetration-snapshot-meta");
  const runToken=++brandPenetrationRunToken,deadline=Date.now()+15*60*1000;
  const isOfficial=brandPenetrationSnapshotKeyword(config)==="上汽奥迪品牌传播穿透";
- if(isOfficial&&!socialEvidenceCapabilities.enabled){if(status)status.textContent="正在刷新真实快照";await loadBrandPenetrationSnapshot();return}
  try{
-  updateBrandPenetrationProgress({progress:0,status:"queued",stage:"queued",message:"采集任务正在排队"});
+  updateBrandPenetrationProgress({progress:0,status:"queued",stage:"queued",message:isOfficial&&!socialEvidenceCapabilities.enabled?"正在读取已验证证据并启动三路独立复核":"采集任务正在排队"});
   if(socialEvidenceCapabilities.enabled){
    const payload=socialEvidenceJobPayload({centerType:"brand_penetration",subject:config.ownBrand,competitors:(config.competitors||[]).slice(0,5),timeRange:`${config.range||30}d`});
    const preview=await api("/api/social-evidence/query-plans/preview",{method:"POST",body:JSON.stringify(payload)});if(!preview.plan)throw new Error("品牌传播查询计划未形成");
@@ -5103,7 +5126,7 @@ async function runBrandPenetrationProject(config){
    if(status)status.textContent="公开传播证据集";if(meta)meta.textContent=`MMN · ${mart.coverage?.contentCount||0}条证据 · 刚刚更新`;
    frame.contentWindow?.postMessage({type:"mmn-brand-penetration-mart",mart},"*");return;
   }
-  const started=await api("/api/social-trends/jobs",{method:"POST",body:JSON.stringify({keyword:config.ownBrand,competitors:(config.competitors||[]).slice(0,5),platforms:["douyin","xiaohongshu","weibo"],timeRange:`${config.range||30}d`,edition:activeEdition()})});
+  const started=await api("/api/social-trends/jobs",{method:"POST",body:JSON.stringify({keyword:config.ownBrand,competitors:(config.competitors||[]).slice(0,5),platforms:["douyin","xiaohongshu","weibo"],timeRange:`${config.range||30}d`,edition:activeEdition(),centerType:"brand_penetration",analysisOnly:isOfficial,snapshotKeyword:isOfficial?"上汽奥迪品牌传播穿透":""})});
   let job=started.job;
   if(!job?.jobId)throw new Error("采集任务未成功创建");
   updateBrandPenetrationProgress(job);

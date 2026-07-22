@@ -752,7 +752,7 @@ class SocialEvidenceService:
     def create_job(self, plan):
         return self.repository.create_job(plan)
 
-    def run_job(self, job_id, org_id, adapter):
+    def run_job(self, job_id, org_id, adapter, brand_analysis_runner=None):
         job = self.repository.get_job(job_id, org_id)
         if not job:
             raise KeyError("任务不存在或无权访问")
@@ -847,6 +847,13 @@ class SocialEvidenceService:
                 mart = build_social_trend_mart(plan, items, previous)
             elif plan["centerType"] == "brand_penetration":
                 mart = build_brand_penetration_mart(plan, items, previous)
+                if brand_analysis_runner:
+                    self.repository.update_job(
+                        job_id, org_id, status="running", stage="validating", progress=88,
+                        message="正在生成品牌与逐竞品交叉验证结论",
+                    )
+                    mart["brandDecision"] = brand_analysis_runner(plan, items)
+                    mart["schemaVersion"] = "brand-penetration-mart-v3"
             else:
                 mart = build_nsr_validation_mart(plan, items, previous)
             for platform, stats in collection_coverage.items():
@@ -859,8 +866,13 @@ class SocialEvidenceService:
             else:
                 mart["coverageStatus"] = "bounded_complete"
             mart = self.repository.save_mart(job, mart)
-            final_status = "degraded" if platform_failures or not items else "ready"
-            message = "部分平台暂不可用，已保留其余证据" if platform_failures else "证据集已就绪" if items else "未取得符合准入规则的公开证据"
+            decision_status = ((mart.get("brandDecision") or {}).get("validation") or {}).get("status")
+            final_status = ("degraded" if platform_failures or not items else
+                            "manual_required" if decision_status and decision_status != "aligned" else "ready")
+            message = ("部分平台暂不可用，已保留其余证据" if platform_failures else
+                       "证据集已就绪，品牌结论等待人工复核" if final_status == "manual_required" else
+                       "证据集与品牌结论已就绪" if items and decision_status == "aligned" else
+                       "证据集已就绪" if items else "未取得符合准入规则的公开证据")
             return self.repository.update_job(job_id, org_id, status=final_status, stage="ready" if items else "admission",
                                               progress=100, retryable=bool(platform_failures) or not bool(items), requestCount=request_count,
                                               actualCost=actual_cost, result={"martId": mart["martId"]}, message=message) | {"mart": mart}

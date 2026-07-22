@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from social_evidence import SocialEvidenceRepository, SocialEvidenceService, TikHubEvidenceAdapter
+from server import analyze_brand_penetration_mart
 
 
 def main():
@@ -40,7 +41,10 @@ def main():
             time.sleep(max(0.2, min(args.poll_seconds, 30)))
             continue
         try:
-            service.run_job(job["jobId"], job["orgId"], adapter)
+            service.run_job(
+                job["jobId"], job["orgId"], adapter,
+                brand_analysis_runner=analyze_brand_penetration_mart,
+            )
         except Exception:
             # The service has already persisted a neutral degraded/manual state.
             pass

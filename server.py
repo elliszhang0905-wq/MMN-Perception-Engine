@@ -183,6 +183,12 @@ from social_evidence import (
     TikHubEvidenceAdapter,
     build_query_plan as build_social_evidence_query_plan,
 )
+from brand_penetration_analysis import (
+    REVIEW_ROLES as BRAND_PENETRATION_REVIEW_ROLES,
+    analysis_messages as brand_penetration_analysis_messages,
+    build_evidence_packet as build_brand_penetration_evidence_packet,
+    fuse_reviews as fuse_brand_penetration_reviews,
+)
 from mmn_eval.dashboard import (
     load_dashboard_payload as load_mmn_eval_dashboard,
     run_seed_dashboard as run_mmn_eval_dashboard,
@@ -235,7 +241,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260723-social-intelligence-1"
+APP_VERSION_CODE = "beta-1.03-20260723-cockpit-social-brand-1"
 APP_RELEASE_DATE = "2026-07-23"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -260,6 +266,9 @@ VEHICLE_CONFIG_VALIDATION_PROVIDERS = ("qwen", "deepseek", "kimi")
 MMN_ROUTER_CACHE_TTL = int(os.getenv("MMN_ROUTER_CACHE_TTL", "1800"))
 MMN_FAST_MODEL_TIMEOUT = int(os.getenv("MMN_FAST_MODEL_TIMEOUT", "35"))
 MMN_DEEP_MODEL_TIMEOUT = int(os.getenv("MMN_DEEP_MODEL_TIMEOUT", "75"))
+BRAND_PENETRATION_MODEL_TIMEOUT = max(
+    MMN_DEEP_MODEL_TIMEOUT, int(os.getenv("MMN_BRAND_PENETRATION_MODEL_TIMEOUT", "180")),
+)
 MMN_CRITIC_TIMEOUT = int(os.getenv("MMN_CRITIC_TIMEOUT", "90"))
 BF_MODELS_ENABLED = os.getenv("MMN_BF_MODELS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 ROUTER_RESPONSE_CACHE = {}
@@ -566,7 +575,7 @@ def start_social_evidence_v2_job(body, *, org_id="local", edition="china", repos
 
     def work():
         try:
-            service.run_job(job["jobId"], org_id, adapter)
+            service.run_job(job["jobId"], org_id, adapter, brand_analysis_runner=analyze_brand_penetration_mart)
         except Exception:
             # The service persists a neutral terminal/degraded state before raising.
             return
@@ -698,6 +707,46 @@ def brand_penetration_snapshot(conn, org_id="local", edition="china"):
     result = latest_social_trend_snapshot(conn, keyword, org_id, edition)
     if result is None and edition == "china" and org_id != "local":
         result = latest_social_trend_snapshot(conn, keyword, "local", edition)
+    return prepare_brand_penetration_snapshot(result)
+
+
+def prepare_brand_penetration_snapshot(result):
+    """Normalize the immutable legacy showcase into the current evidence shape."""
+    if not isinstance(result, dict) or not isinstance(result.get("brandResults"), dict):
+        return result
+    result = json.loads(json.dumps(result, ensure_ascii=False))
+    brand_results = result.get("brandResults") or {}
+    own_brand = str(result.get("primaryBrand") or next(iter(brand_results), "")).strip()
+    authoritative_items = [dict(item) for item in result.get("items") or []]
+    comparison_items = authoritative_items or [
+        dict(item, brandName=brand, normalizedModel=brand)
+        for brand, dataset in brand_results.items()
+        for item in (dataset or {}).get("items") or []
+    ]
+    comparisons = []
+    for brand, dataset in brand_results.items():
+        items = [
+            item for item in comparison_items
+            if str(item.get("brandName") or item.get("normalizedModel") or item.get("keyword") or "").strip() == brand
+        ]
+        positives = sum(item.get("sentiment") == "positive" for item in items)
+        negatives = sum(item.get("sentiment") == "negative" for item in items)
+        comparisons.append({
+            "model": brand, "role": "own" if brand == own_brand else "competitor",
+            "contentCount": len(items), "heat": round(sum(float(item.get("heat") or 0) for item in items), 2),
+            "positiveRate": round(positives / len(items) * 100, 1) if items else 0,
+            "riskCount": negatives, "collectionStatus": {"status": "complete"},
+        })
+    result["modelComparisons"] = comparisons
+    result["comparisonItems"] = comparison_items
+    verified_count = int(result.get("verifiedCount") or 0)
+    if verified_count and verified_count == len(comparison_items):
+        result["verifiedComparisonItems"] = comparison_items
+        result.setdefault("qa", {})["legacyEvidence"] = {
+            "status": "aligned", "verifiedEvidenceCount": verified_count,
+            "note": "历史快照只证明事件证据已验证，不代表已完成本轮三路品牌结论。",
+        }
+    result["collectionStatus"] = {"status": "complete"}
     return result
 
 def bf_repository():
@@ -1584,6 +1633,100 @@ def stable_id(*parts):
     text = "|".join(str(x or "") for x in parts)
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
+
+def run_brand_penetration_conclusions(result, provider_runner=None):
+    """Run three blind brand-decision reviews on one frozen, verified packet."""
+    packet = build_brand_penetration_evidence_packet(
+        result,
+        ((result.get("admission") or {}).get("dateWindow") or (result.get("snapshot") or {}).get("filters") or {}),
+    )
+    if packet.get("status") != "ready":
+        return fuse_brand_penetration_reviews({}, packet, {"system": "insufficient_evidence"})
+    messages = brand_penetration_analysis_messages(packet)
+    provider_by_role = dict(zip(BRAND_PENETRATION_REVIEW_ROLES, ("qwen", "deepseek", "kimi")))
+
+    def run_one(role):
+        provider = provider_by_role[role]
+        last_error = None
+        for attempt in range(2):
+            retry_messages = messages if attempt == 0 else [
+                {**messages[0], "content": messages[0]["content"] + " 上次输出未通过结构校验；请重新完整输出合法JSON，不要解释。"},
+                messages[1],
+            ]
+            try:
+                if provider_runner:
+                    raw = provider_runner(provider, retry_messages)
+                elif provider == "qwen":
+                    raw = call_qwen(retry_messages, temperature=.05, profile="deep", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000, enable_thinking=False)
+                elif provider == "deepseek":
+                    raw = call_deepseek(retry_messages, temperature=.05, profile="deep", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000, response_format={"type": "json_object"})
+                else:
+                    raw = call_kimi(retry_messages, temperature=.05, profile="fast", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000)
+                parsed = raw if isinstance(raw, dict) else parse_json_object(raw)
+                if not isinstance(parsed, dict):
+                    raise ValueError("未返回JSON品牌结论")
+                return parsed
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    print(f"[brand-penetration] {role} retrying after rejected output: {exc}", flush=True)
+        raise last_error or ValueError("未返回JSON品牌结论")
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {role: executor.submit(run_one, role) for role in BRAND_PENETRATION_REVIEW_ROLES}
+        for role, future in futures.items():
+            try:
+                outputs[role] = future.result()
+            except Exception as exc:
+                errors[role] = str(exc)
+                print(f"[brand-penetration] {role} call failed: {exc}", flush=True)
+    return fuse_brand_penetration_reviews(outputs, packet, errors)
+
+
+def analyze_existing_brand_penetration_snapshot(result, provider_runner=None):
+    """Add a current three-review decision without recollecting immutable evidence."""
+    prepared = prepare_brand_penetration_snapshot(result)
+    if not prepared or not prepared.get("verifiedComparisonItems") or not prepared.get("modelComparisons"):
+        raise ValueError("当前快照没有可用的已验证品牌证据")
+    prepared["brandDecision"] = run_brand_penetration_conclusions(prepared, provider_runner=provider_runner)
+    return prepared
+
+
+def analyze_brand_penetration_mart(plan, items, provider_runner=None):
+    """Adapt a V2 evidence mart into the same three-review brand-decision contract."""
+    own_brand = str((plan.get("subject") or {}).get("brand") or (plan.get("subject") or {}).get("model") or "").strip()
+    competitors = [str(value).strip() for value in plan.get("competitors") or [] if str(value).strip()]
+    brands = [own_brand, *competitors]
+    comparison_items = []
+    for item in items or []:
+        text = str(item.get("text") or "")
+        mentioned = [brand for brand in brands if brand and brand.casefold() in text.casefold()]
+        if len(mentioned) != 1:
+            continue
+        native = item.get("nativeMetrics") or {}
+        comparison_items.append({
+            **item, "id": item.get("canonicalContentId") or item.get("id"), "brandName": mentioned[0],
+            "normalizedModel": mentioned[0], "sentiment": item.get("sentiment") or "neutral",
+            "heat": sum(float(native.get(key) or 0) for key in ("likes", "comments", "shares", "collects")),
+        })
+    comparisons = []
+    for index, brand in enumerate(brands):
+        rows = [item for item in comparison_items if item.get("brandName") == brand]
+        comparisons.append({
+            "model": brand, "role": "own" if index == 0 else "competitor", "contentCount": len(rows),
+            "heat": round(sum(float(item.get("heat") or 0) for item in rows), 2),
+            "positiveRate": 0, "riskCount": 0, "collectionStatus": {"status": "complete"},
+        })
+    result = {
+        "keyword": own_brand, "comparisonItems": comparison_items, "modelComparisons": comparisons,
+        "collectionStatus": {"status": "complete"},
+        "admission": {"dateWindow": plan.get("dateWindow") or {}}, "qa": {},
+    }
+    if provider_runner:
+        result["verifiedComparisonItems"] = comparison_items
+        return run_brand_penetration_conclusions(result, provider_runner=provider_runner)
+    return validate_social_trends_with_models(result).get("brandDecision")
 def validate_social_trends_with_models(result):
     """Run three blind evidence reviews and publish one neutral MMN conclusion."""
     source_items = result.get("comparisonItems") or result.get("items") or []
@@ -1707,6 +1850,13 @@ def validate_social_trends_with_models(result):
         "evidenceIds": verified, "limitations": limitations,
     }
     qa["strategyOutput"] = result["unifiedInsight"]["headline"]
+    result["brandDecision"] = (
+        run_brand_penetration_conclusions(result)
+        if complete and verified_items
+        else fuse_brand_penetration_reviews(
+            {}, build_brand_penetration_evidence_packet(result), {"system": "evidence_review_incomplete"},
+        )
+    )
     return result
 
 
@@ -10022,8 +10172,9 @@ def start_opportunity_map_job(body, *, org_id="", user_id="local", runner=None):
 def _normalize_social_trend_body(body):
     normalized = dict(body or {})
     normalized["keyword"] = normalized_vehicle_label(normalized.get("keyword"))
+    competitor_limit = 5 if normalized.get("centerType") == "brand_penetration" else 3
     normalized["competitors"] = sanitize_competitor_models(
-        normalized["keyword"], normalized.get("competitors", []), limit=3,
+        normalized["keyword"], normalized.get("competitors", []), limit=competitor_limit,
     )
     return normalized
 
@@ -10046,6 +10197,32 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
         if progress_callback:
             progress_callback(stage, progress, message)
 
+    if body.get("centerType") == "brand_penetration" and body.get("analysisOnly"):
+        report("prepare", 8, "已读取当前品牌组合的已验证证据")
+        snapshot_keyword = str(body.get("snapshotKeyword") or keyword).strip()
+        with db() as conn:
+            existing = (
+                brand_penetration_snapshot(conn, org_id, edition)
+                if snapshot_keyword == "上汽奥迪品牌传播穿透"
+                else latest_social_trend_snapshot(conn, snapshot_keyword, org_id, edition, {
+                    "competitors": competitors, "timeRange": time_range, "centerType": "brand_penetration",
+                })
+            )
+        if not existing:
+            raise ValueError("当前品牌组合没有可复用的已验证证据")
+        report("brand_validation", 35, "三路独立复核正在生成品牌与逐竞品结论")
+        result = analyze_existing_brand_penetration_snapshot(existing)
+        report("brand_fusion", 90, "正在核对共同证据、分歧与行动方向")
+        with db() as conn:
+            snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
+                "platforms": platforms, "timeRange": time_range, "startDate": start_date,
+                "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
+                "centerType": "brand_penetration",
+            })
+        result["snapshot"] = snapshot
+        report("storage", 99, "品牌结论已与本轮证据指纹一同保存")
+        return result
+
     with db() as conn:
         previous = latest_social_trend_snapshot(conn, keyword, org_id, edition)
     report("prepare", 2, "已读取项目配置与历史快照")
@@ -10063,7 +10240,9 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
             model_aliases,
         ))
     report("comparison", 82, "已完成本品与竞品样本对齐")
-    result = attach_competitor_rankings(collected[0], collected[1:])
+    result = attach_competitor_rankings(
+        collected[0], collected[1:], limit=5 if body.get("centerType") == "brand_penetration" else 3,
+    )
     result = apply_social_trend_history(result, previous)
     report("validation", 88, "正在执行MMN实体与三路独立审阅")
     result = validate_social_trends_with_models(result)
@@ -10071,7 +10250,9 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
     report("storage", 96, "三路审阅一致，正在写入正式快照" if review_status == "aligned" else "审阅或采集未完整，仅保存受限快照")
     with db() as conn:
         snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
-            "platforms": platforms, "timeRange": time_range, "startDate": start_date, "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
+            "platforms": platforms, "timeRange": time_range, "startDate": start_date,
+            "endDate": end_date, "competitors": competitors, "thresholds": thresholds,
+            "centerType": body.get("centerType") or "social_trend",
         })
     result["snapshot"] = snapshot
     report("storage", 99, "快照已写入，正在刷新看板")
@@ -10095,6 +10276,9 @@ def _social_trend_job_request_key(body):
         "edition": (body or {}).get("edition") or "china",
         "pages": (body or {}).get("pages", 0),
         "count": (body or {}).get("count") or 20,
+        "centerType": (body or {}).get("centerType") or "social_trend",
+        "analysisOnly": bool((body or {}).get("analysisOnly")),
+        "snapshotKeyword": (body or {}).get("snapshotKeyword") or "",
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -13768,12 +13952,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 else:
                     competitors = [value.strip() for value in query.get("competitor", []) if value.strip()]
                     time_range = query.get("timeRange", [""])[0]
+                    center_type = str(query.get("centerType", [""])[0]).strip()
                     result = latest_social_trend_snapshot(
                         conn,
                         keyword,
                         auth.get("org_id", "local"),
                         edition,
-                        {"competitors": competitors, "timeRange": time_range} if competitors or time_range else None,
+                        {"competitors": competitors, "timeRange": time_range, "centerType": center_type}
+                        if competitors or time_range or center_type else None,
                     )
             self.send_json({"ok": True, "result": result})
             return

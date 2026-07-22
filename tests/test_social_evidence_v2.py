@@ -281,6 +281,28 @@ class SocialEvidenceV2Test(unittest.TestCase):
         self.assertIn("brandAssociations", brand)
         self.assertIn("public social evidence", brand["boundary"]["scope"])
 
+    def test_brand_mart_v3_persists_neutral_three_review_decision(self):
+        job = self.service.create_job(self.plan(
+            "brand_penetration", platforms=["douyin"], themes=[], scenes=[], issueTerms=[], eventTerms=[], competitors=[]
+        ))
+        decision = {
+            "schemaVersion": "brand-penetration-analysis-v3",
+            "validation": {"status": "aligned", "independentReviews": [
+                {"role": "独立复核A", "status": "completed"},
+                {"role": "独立复核B", "status": "completed"},
+                {"role": "独立复核C", "status": "completed"},
+            ]},
+            "brandConclusions": [], "pairwiseConclusions": [],
+        }
+        result = self.service.run_job(
+            job["jobId"], "org-a", FakeEvidenceAdapter(),
+            brand_analysis_runner=lambda _plan, _items: decision,
+        )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["mart"]["schemaVersion"], "brand-penetration-mart-v3")
+        self.assertEqual(result["mart"]["brandDecision"], decision)
+        self.assertNotIn("qwen", json.dumps(result["mart"], ensure_ascii=False).lower())
+
     def test_recovery_marks_interrupted_jobs_as_degraded_without_deleting_evidence(self):
         job = self.service.create_job(self.plan())
         self.repo.update_job(job["jobId"], "org-a", status="running", stage="collecting_discovery", progress=35)

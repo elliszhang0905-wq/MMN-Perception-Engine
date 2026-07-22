@@ -638,10 +638,10 @@ def _aggregate(items, keyword, sources, warnings, comment_rows=None, hot_lists=N
                    "threeFlagships": {"required": True, "status": "pending"}, "strategyOutput": "待三路独立审阅形成统一结论"}}
 
 
-def attach_competitor_rankings(result, competitor_results):
+def attach_competitor_rankings(result, competitor_results, limit=3):
     own_model = normalized_vehicle_label(result.get("keyword"))
     sanitized_models = sanitize_competitor_models(
-        own_model, [row.get("keyword") for row in competitor_results], limit=3,
+        own_model, [row.get("keyword") for row in competitor_results], limit=limit,
     )
     allowed = {vehicle_identity_key(model) for model in sanitized_models}
     distinct_competitors = []
@@ -654,7 +654,7 @@ def attach_competitor_rankings(result, competitor_results):
         distinct_competitors.append(competitor)
     competitor_results = distinct_competitors
     rankings = []
-    for competitor in competitor_results[:3]:
+    for competitor in competitor_results[:limit]:
         positive_items = [item for item in competitor.get("items", []) if item.get("sentiment") == "positive"]
         rankings.append({"model": competitor.get("keyword", ""),
                          "positiveHeat": round(sum(float(item.get("heat") or 0) for item in positive_items), 2),
@@ -921,11 +921,17 @@ def latest_snapshot(conn, keyword, org_id="local", edition="china", project_filt
         (org_id, edition, keyword),
     ).fetchall()
     expected = project_filters or {}
-    expected_competitors = sanitize_competitor_models(keyword, expected.get("competitors", []))
+    competitor_limit = 5 if expected.get("centerType") == "brand_penetration" else 3
+    expected_competitors = sanitize_competitor_models(
+        keyword, expected.get("competitors", []), limit=competitor_limit,
+    )
     expected_time_range = str(expected.get("timeRange") or "").strip()
     for row in rows:
         filters = json.loads(row["filters_json"] or "{}")
-        stored_competitors = sanitize_competitor_models(keyword, filters.get("competitors", []))
+        stored_limit = 5 if filters.get("centerType") == "brand_penetration" or competitor_limit == 5 else 3
+        stored_competitors = sanitize_competitor_models(
+            keyword, filters.get("competitors", []), limit=stored_limit,
+        )
         if expected_competitors and stored_competitors != expected_competitors:
             continue
         if expected_time_range and str(filters.get("timeRange") or "") != expected_time_range:
