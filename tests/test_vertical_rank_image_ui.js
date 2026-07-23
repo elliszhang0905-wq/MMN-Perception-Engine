@@ -16,6 +16,7 @@ assert.match(html, /id="vertical-image-review-dialog"/);
 assert.match(html, /id="vertical-image-original"/);
 assert.match(html, /id="vertical-image-own-model"/);
 assert.match(html, /id="vertical-image-own-confirmed"/);
+assert.match(html, /我已确认原图为懂车帝周榜，且本品车型与当前项目一致/);
 assert.match(html, /id="vertical-image-period-start"/);
 assert.match(html, /id="vertical-image-period-end"/);
 assert.match(html, /id="vertical-image-review-rows"/);
@@ -89,7 +90,7 @@ vm.runInNewContext(
 );
 context.confirmStateApi.updateVerticalImageConfirmState();
 assert.equal(button.disabled, true, "unchecked own-model confirmation must keep the action disabled");
-assert.match(message.textContent, /勾选“我已确认本品车型与当前项目一致”/);
+assert.match(message.textContent, /勾选“我已确认原图为懂车帝周榜，且本品车型与当前项目一致”/);
 assert.equal(classes.has("ready"), false);
 
 fields.confirmed.checked = true;

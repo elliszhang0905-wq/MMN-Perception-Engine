@@ -5556,7 +5556,7 @@ function verticalImageConfirmState(){
  const reasons=[];
  if(!verticalImagePreview)reasons.push("重新上传待确认图片");
  if(!own)reasons.push("填写本品车型");
- if(!confirmed)reasons.push("勾选“我已确认本品车型与当前项目一致”");
+ if(!confirmed)reasons.push("勾选“我已确认原图为懂车帝周榜，且本品车型与当前项目一致”");
  if(!start||!end)reasons.push("补全周期日期");
  else if(!validDates)reasons.push("将周期调整为连续7天");
  if(!completeRows)reasons.push("补全竞品名称和正反向排名");

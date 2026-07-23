@@ -249,7 +249,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260723-vertical-social-reliability-1"
+APP_VERSION_CODE = "beta-1.03-20260723-vertical-social-reliability-2"
 APP_RELEASE_DATE = "2026-07-23"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -8864,8 +8864,7 @@ def parse_vertical_rank_image_observations(observations, filename, own_model="")
     full_text = " ".join(item["text"] for item in cleaned)
     if "汽车之家" in full_text:
         raise ValueError("本项目仅采用懂车帝周榜，汽车之家图片不会纳入竞争格局")
-    if "懂车帝" not in full_text:
-        raise ValueError("未识别为懂车帝周榜，请上传包含平台名称和周周期的完整截图")
+    platform_recognized = "懂车帝" in full_text
 
     headers = {}
     for item in cleaned:
@@ -8931,6 +8930,10 @@ def parse_vertical_rank_image_observations(observations, filename, own_model="")
         warnings.append("正向排名未形成连续序列，请逐行核对")
     if any(row["warnings"] for row in rows):
         warnings.append("部分车型名称需要人工核对")
+    if not platform_recognized:
+        if not period_start or not period_end or len(rows) != 10 or positives != list(range(1, 11)):
+            raise ValueError("未识别为懂车帝周榜，请上传包含平台名称、周周期和完整Top 10的截图")
+        warnings.append("平台名称未被OCR可靠识别，请对照原图确认仅为懂车帝周榜")
     return {
         "status": "manual_required",
         "statusLabel": "图片已识别，确认后才会纳入竞争格局",
@@ -8954,13 +8957,14 @@ def _vertical_image_observations(data):
         details = pytesseract.image_to_data(
             Image.open(io.BytesIO(data)),
             lang="chi_sim+eng",
+            config="--psm 4",
             output_type=pytesseract.Output.DICT,
         )
         width, height = Image.open(io.BytesIO(data)).size
         grouped = {}
         for index, text in enumerate(details.get("text", [])):
             text = _vertical_image_text(text)
-            if not text:
+            if not text or re.fullmatch(r"[|¦│]+", text):
                 continue
             key = (
                 details["block_num"][index],
@@ -8970,19 +8974,39 @@ def _vertical_image_observations(data):
             grouped.setdefault(key, []).append(index)
         observations = []
         for indexes in grouped.values():
-            left = min(details["left"][index] for index in indexes)
-            top = min(details["top"][index] for index in indexes)
-            right = max(details["left"][index] + details["width"][index] for index in indexes)
-            bottom = max(details["top"][index] + details["height"][index] for index in indexes)
-            confidence_values = [float(details["conf"][index]) for index in indexes if float(details["conf"][index]) >= 0]
-            observations.append({
-                "text": " ".join(_vertical_image_text(details["text"][index]) for index in indexes),
-                "x": left / width,
-                "y": 1 - bottom / height,
-                "width": (right - left) / width,
-                "height": (bottom - top) / height,
-                "confidence": (sum(confidence_values) / len(confidence_values) / 100) if confidence_values else 0,
-            })
+            clusters = []
+            for index in sorted(indexes, key=lambda item: details["left"][item]):
+                left = details["left"][index]
+                if clusters and left - clusters[-1]["right"] <= max(24, width * 0.05):
+                    clusters[-1]["indexes"].append(index)
+                    clusters[-1]["right"] = max(
+                        clusters[-1]["right"],
+                        left + details["width"][index],
+                    )
+                else:
+                    clusters.append({
+                        "indexes": [index],
+                        "right": left + details["width"][index],
+                    })
+            for cluster in clusters:
+                cell_indexes = cluster["indexes"]
+                left = min(details["left"][index] for index in cell_indexes)
+                top = min(details["top"][index] for index in cell_indexes)
+                right = max(details["left"][index] + details["width"][index] for index in cell_indexes)
+                bottom = max(details["top"][index] + details["height"][index] for index in cell_indexes)
+                confidence_values = [float(details["conf"][index]) for index in cell_indexes if float(details["conf"][index]) >= 0]
+                observations.append({
+                    "text": re.sub(
+                        r"^[|¦│]+\s*|\s*[|¦│]+$",
+                        "",
+                        " ".join(_vertical_image_text(details["text"][index]) for index in cell_indexes),
+                    ),
+                    "x": left / width,
+                    "y": 1 - bottom / height,
+                    "width": (right - left) / width,
+                    "height": (bottom - top) / height,
+                    "confidence": (sum(confidence_values) / len(confidence_values) / 100) if confidence_values else 0,
+                })
         if observations:
             return observations
     except Exception:

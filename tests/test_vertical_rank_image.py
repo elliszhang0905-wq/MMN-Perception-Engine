@@ -111,6 +111,34 @@ class VerticalRankImageTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "本项目仅采用懂车帝周榜"):
             server.parse_vertical_rank_image_observations(observations, "汽车之家.png")
 
+    def test_complete_weekly_table_requires_manual_platform_confirmation_when_ocr_misses_brand(self):
+        observations = copy.deepcopy(dongchedi_observations())
+        observations[0]["text"] = "无法可靠识别的平台标题"
+
+        preview = server.parse_vertical_rank_image_observations(
+            observations,
+            "微信图片.png",
+            own_model="智己LS6",
+        )
+
+        self.assertEqual(len(preview["rows"]), 10)
+        self.assertIn(
+            "平台名称未被OCR可靠识别，请对照原图确认仅为懂车帝周榜",
+            preview["warnings"],
+        )
+
+    def test_incomplete_table_without_platform_name_is_rejected(self):
+        observations = copy.deepcopy(dongchedi_observations())
+        observations[0]["text"] = "无法可靠识别的平台标题"
+        observations = [
+            item
+            for item in observations
+            if not (item["text"] == "小鹏G7" or item["text"] == "10")
+        ]
+
+        with self.assertRaisesRegex(ValueError, "未识别为懂车帝周榜"):
+            server.parse_vertical_rank_image_observations(observations, "不完整图片.png")
+
     def test_preview_preserves_formal_vertical_tables(self):
         before = self.table_counts()
         preview = server.create_vertical_rank_image_preview(
