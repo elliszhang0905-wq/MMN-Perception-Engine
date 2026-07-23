@@ -7,7 +7,7 @@
 - Git应用基线：当前隔离开发基线为 `d3e84fe9ae6727d87ff8e2d19bf2980812ceeea2`；本状态只描述本地发布候选，尚未推送 GitHub、尚未部署 ECS。
 - 当前分支：`codex/social-evidence-routing-01`；与用户原工作区隔离，避免覆盖其并行未提交改动。
 - 生成时工作树状态：仅包含 TikHub/社媒助手证据分工、封面 Prompt 三路分析、相关测试与本状态包改动；未修改业务数据库、原始导入文件或用户数据。
-- 基线说明：本轮是本地发布候选。公开社媒证据 V2 生产开关和独立 Worker profile 尚未切换；未经真实流、影子运行和生产门禁核验，不得写成已上线。
+- 基线说明：本轮候选版本码为 `beta-1.03-20260723-social-routing-2`。公开社媒证据 V2、封面 Prompt 生产开关和独立 Worker profile 尚未切换；未经真实流、影子运行和生产门禁核验，不得写成已上线。
 - 当前未提交内容：`social_evidence.py`、`cover_prompt.py`、`server.py`、`douyin-hot-demo.js`、`douyin-hot-demo.css`、相关测试与本状态包。
 - 维护要求：以后每次更新本状态包时，必须同步刷新状态包版本、最后核验时间、短/完整 commit hash、当前分支、工作树状态和未提交修改路径。
 

@@ -248,7 +248,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260723-cockpit-social-brand-1"
+APP_VERSION_CODE = "beta-1.03-20260723-social-routing-2"
 APP_RELEASE_DATE = "2026-07-23"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
