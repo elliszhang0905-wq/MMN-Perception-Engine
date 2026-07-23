@@ -60,8 +60,38 @@ class SocialEvidenceV2ApiTest(unittest.TestCase):
         self.assertIn(r'/api/social-evidence/jobs/([^/]+)', source)
         self.assertIn('"/api/social-evidence/marts/latest"', source)
         self.assertIn('"/api/social-evidence/query-plans/preview"', source)
+        self.assertIn('"/api/social-evidence/imports"', source)
         self.assertIn('"/api/social-evidence/nsr-context"', source)
         self.assertIn(r'/api/social-evidence/jobs/([^/]+)/retry', source)
+
+    def test_social_assistant_export_builds_mart_without_external_adapter(self):
+        payload = {
+            **self.payload(),
+            "items": [{
+                "platform": "douyin", "platformItemId": "manual-one",
+                "sourceUrl": "https://www.douyin.com/video/manual-one",
+                "text": "AUDI E7X 用户公开讨论",
+                "publishedAt": "2026-07-21T00:00:00+00:00",
+                "nativeMetrics": {"likes": 3},
+            }],
+            "collectionMode": "file",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = SocialEvidenceRepository(Path(tmp) / "evidence.sqlite", Path(tmp) / "raw")
+            job = server.import_social_evidence_records(
+                payload, org_id="org-a", edition="china", repository=repo,
+                brand_analysis_runner=lambda *_: None,
+            )
+            with repo.connect() as conn:
+                observation = conn.execute(
+                    "select internal_source,collection_mode from content_observations"
+                ).fetchone()
+            mart = repo.get_mart(job["result"]["martId"], "org-a")
+        self.assertEqual(job["status"], "ready")
+        self.assertEqual(job["result"]["martId"], mart["martId"])
+        self.assertEqual((observation["internal_source"], observation["collection_mode"]),
+                         ("social_assistant", "file"))
+        self.assertNotIn("social_assistant", json.dumps(mart, ensure_ascii=False))
 
     def test_public_job_does_not_expose_internal_supplier_error(self):
         public = server.public_social_evidence_job({

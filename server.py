@@ -168,6 +168,13 @@ from douyin_video_insights import (
     strategy_messages as video_insight_strategy_messages,
     update_job as update_video_insight_job,
 )
+from cover_prompt import (
+    REVIEW_SLOTS as COVER_PROMPT_SLOTS,
+    build_cover_evidence_packet,
+    fuse_reviews as fuse_cover_prompt_reviews,
+    review_messages as cover_prompt_review_messages,
+    save_run as save_cover_prompt_run,
+)
 from douyin_hot_entities import (
     finalize_manual_review as finalize_douyin_hot_manual_review,
     init_schema as init_douyin_hot_entity_schema,
@@ -374,6 +381,10 @@ def _enabled_env(name, default="false"):
 
 def social_evidence_v2_enabled():
     return _enabled_env("MMN_SOCIAL_EVIDENCE_V2_ENABLED")
+
+
+def cover_prompt_enabled():
+    return _enabled_env("MMN_DOUYIN_COVER_PROMPT_ENABLED")
 
 
 def social_evidence_worker_enabled():
@@ -590,6 +601,30 @@ def start_social_evidence_v2_job(body, *, org_id="local", edition="china", repos
 
 def get_social_evidence_v2_job(job_id, org_id="local", repository=None):
     return public_social_evidence_job((repository or social_evidence_repository()).get_job(job_id, org_id))
+
+
+def import_social_evidence_records(body, *, org_id="local", edition="china", repository=None,
+                                   brand_analysis_runner=None):
+    """Import a bounded plugin export without invoking an external collection supplier."""
+    body = body if isinstance(body, dict) else {}
+    items = body.get("items") if isinstance(body.get("items"), list) else []
+    repository = repository or social_evidence_repository()
+    plan = preview_social_evidence_query_plan(body, org_id, edition)
+    import_fingerprint = hashlib.sha256(
+        json.dumps(items, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    plan["fingerprint"] = hashlib.sha256(
+        f"{plan['fingerprint']}|private-import|{import_fingerprint}".encode("utf-8")
+    ).hexdigest()
+    service = SocialEvidenceService(repository)
+    job = service.create_job(plan)
+    result = service.import_job(
+        job["jobId"], org_id, items,
+        internal_source="social_assistant",
+        collection_mode=str(body.get("collectionMode") or "file").strip(),
+        brand_analysis_runner=brand_analysis_runner or analyze_brand_penetration_mart,
+    )
+    return public_social_evidence_job(result)
 
 
 def retry_social_evidence_v2_job(job_id, *, org_id="local", repository=None, adapter=None, async_mode=True):
@@ -2356,6 +2391,54 @@ def run_video_insight_reviews(job_id, package, *, provider_runner=None, retry_sl
     return cross_validate_video_insights(package, outputs, errors)
 
 
+def run_cover_prompt_reviews(job_id, packet, *, provider_runner=None):
+    """Run three blind cover-prompt reviews against exactly one evidence fingerprint."""
+    messages = cover_prompt_review_messages(packet)
+    provider_by_slot = dict(zip(COVER_PROMPT_SLOTS, VIDEO_INSIGHT_PROVIDERS))
+
+    def run_one(slot):
+        provider = provider_by_slot[slot]
+        started_at = now()
+        try:
+            if provider_runner:
+                raw = provider_runner(provider, messages)
+            elif provider == "qwen":
+                raw = call_qwen(messages, temperature=.05, profile="deep", timeout=MMN_DEEP_MODEL_TIMEOUT,
+                                max_tokens=2600, enable_thinking=False)
+            elif provider == "deepseek":
+                raw = call_deepseek(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
+                                    max_tokens=3600, response_format={"type": "json_object"})
+            else:
+                raw = call_kimi(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=3000)
+            parsed = parse_json_object(raw)
+            with db() as conn:
+                save_cover_prompt_run(
+                    conn, job_id=job_id, provider=provider,
+                    evidence_fingerprint=packet["evidenceFingerprint"], status="completed",
+                    raw=parsed, started_at=started_at, completed_at=now(),
+                )
+            return slot, parsed, ""
+        except Exception as exc:
+            with db() as conn:
+                save_cover_prompt_run(
+                    conn, job_id=job_id, provider=provider,
+                    evidence_fingerprint=packet["evidenceFingerprint"], status="failed",
+                    error=str(exc), started_at=started_at, completed_at=now(),
+                )
+            return slot, None, str(exc)
+
+    outputs, errors = {}, {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(run_one, slot) for slot in COVER_PROMPT_SLOTS]
+        for future in futures:
+            slot, output, error = future.result()
+            if output is not None:
+                outputs[slot] = output
+            else:
+                errors[slot] = error
+    return fuse_cover_prompt_reviews(packet, outputs, errors)
+
+
 def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=None, provider_runner=None,
                               evidence_resolver=None, browser_runner=None):
     with VIDEO_INSIGHT_SEMAPHORE:
@@ -2444,6 +2527,17 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
                                              message="MMN三路独立分析正在读取同一证据包")
                 validation = run_video_insight_reviews(
                     job_id, package, provider_runner=provider_runner, retry_slot=str(request.get("retrySlot") or ""))
+            cover_prompt = None
+            if request.get("generateCoverPrompt") is True and cover_prompt_enabled():
+                cover_packet = build_cover_evidence_packet(
+                    package,
+                    {"imageUrl": item.get("coverUrl") or "", "evidenceRefs": []},
+                )
+                cover_prompt = (
+                    run_cover_prompt_reviews(job_id, cover_packet, provider_runner=provider_runner)
+                    if cover_packet.get("status") == "ready"
+                    else fuse_cover_prompt_reviews(cover_packet, {}, {})
+                )
             with db() as conn:
                 update_video_insight_job(conn, job_id, status="cross_validating", stage="cross_validating", progress=90,
                                          message="正在校验证据覆盖、一致判断与关键冲突")
@@ -2461,7 +2555,11 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
             with db() as conn:
                 update_video_insight_job(conn, job_id, status=final_status, stage=final_status, progress=100,
                                          message=message, retryable=retryable,
-                                         result={"validation": validation, "cacheHit": False})
+                                         result={
+                                             "validation": validation,
+                                             **({"coverPrompt": cover_prompt} if cover_prompt is not None else {}),
+                                             "cacheHit": False,
+                                         })
         except Exception as exc:
             with db() as conn:
                 update_video_insight_job(conn, job_id, status="failed", stage="failed", progress=100,
@@ -2484,6 +2582,7 @@ def start_video_insight_job(body, *, org_id="local", media_runner=None, provider
         "comments": body.get("comments") if isinstance(body.get("comments"), list) else [],
         "force": body.get("force") is True,
         "retrySlot": str(body.get("retrySlot") or ""),
+        "generateCoverPrompt": body.get("generateCoverPrompt") is True,
     }
     with db() as conn:
         if request["force"]:
@@ -15076,7 +15175,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 edition = edition_from(q.get("edition", ["china"])[0])
                 with db() as conn:
                     jobs = list_video_insight_jobs(conn, org_id=auth.get("org_id", "local"), edition=edition)
-                self.send_json({"ok": True, "result": {"jobs": jobs, "qualityLabel": "MMN三旗舰交叉分析"}})
+                self.send_json({"ok": True, "result": {
+                    "jobs": jobs, "qualityLabel": "MMN三旗舰交叉分析",
+                    "coverPromptEnabled": cover_prompt_enabled(),
+                }})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -15823,6 +15925,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 edition = edition_from(body.get("edition", "china"))
                 plan = preview_social_evidence_query_plan(body, auth.get("org_id", "local"), edition)
                 self.send_json({"ok": True, "plan": plan})
+            except StaleNsrSource as exc:
+                self.send_json({"ok": False, "error": str(exc), "code": "NSR_SOURCE_STALE"}, 409)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/social-evidence/imports":
+            if not social_evidence_v2_enabled():
+                self.send_json({"ok": False, "error": "公开社媒证据 V2 尚未启用"}, 409)
+                return
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                edition = edition_from(body.get("edition", "china"))
+                job = import_social_evidence_records(
+                    body, org_id=auth.get("org_id", "local"), edition=edition,
+                )
+                self.send_json({"ok": True, "job": job}, 201)
             except StaleNsrSource as exc:
                 self.send_json({"ok": False, "error": str(exc), "code": "NSR_SOURCE_STALE"}, 409)
             except Exception as exc:
