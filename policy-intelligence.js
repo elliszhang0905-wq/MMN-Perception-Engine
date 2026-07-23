@@ -23,7 +23,10 @@
   const priceOf = item => Number(item?.maxVerifiedBenefit || 0) > 0 ? item?.postPolicyReferencePrice : item?.postPolicyConditionalPrice;
   const priceBasisNote = item => Number(item?.profile?.baasDiscount || 0) > 0 ? `BaaS起售价 ${money(item.profile.price)}（含电池参考价 ${money(item.profile.listPrice)}，已减${money(item.profile.baasDiscount)}）` : "";
   const edition = () => { try { return activeEdition(); } catch (_) { return "china"; } };
-  const headers = () => { try { return authHeaders(); } catch (_) { return { "Content-Type": "application/json" }; } };
+  const headers = () => {
+    try { return authHeaders({ "Content-Type": "application/json" }); }
+    catch (_) { return { "Content-Type": "application/json" }; }
+  };
 
   async function jsonFetch(url, options = {}) {
     const response = await fetch(url, { ...options, headers: { ...headers(), ...(options.headers || {}) } });

@@ -17,10 +17,13 @@ import hashlib
 import time
 import base64
 import hmac
+import ipaddress
+import socket
 import html as html_lib
 import math
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from http.cookies import CookieError, SimpleCookie
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread, Timer, Semaphore
@@ -280,8 +283,22 @@ PUBLIC_STATIC_FILES = frozenset({
     "assets/mmn-logo-reverse-cropped.png",
     "assets/mmn-logo-reverse.png",
 })
+RAW_BODY_POST_PATHS = frozenset({
+    "/api/bf/documents",
+    "/api/blogger-skill/import-file",
+    "/api/content-capability-kb/import-file",
+    "/api/import-data-file",
+    "/api/import-rag-file",
+    "/api/import-vertical-xlsx",
+    "/api/import-video-xlsx",
+    "/api/import-xlsx",
+    "/api/opportunity-map/own-document",
+    "/api/product-whitepaper/analyze",
+    "/api/social-trends/import",
+    "/api/vertical-rank-image/preview",
+})
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260724-static-boundary-1"
+APP_VERSION_CODE = "beta-1.03-20260724-security-p1-1"
 APP_RELEASE_DATE = "2026-07-24"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -289,6 +306,12 @@ PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
 AUTO_OPEN_BROWSER = os.getenv("MMN_AUTO_OPEN_BROWSER", "true").lower() in {"1", "true", "yes", "on"}
 DESKTOP_BRIDGE_ENABLED = os.getenv("MMN_DESKTOP_BRIDGE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 CLOUD_LOGIN_REQUIRED = os.getenv("MMN_CLOUD_LOGIN_REQUIRED", "false").lower() in {"1", "true", "yes", "on"}
+MMN_MAX_JSON_BODY_BYTES = max(1024, int(os.getenv("MMN_MAX_JSON_BODY_BYTES", str(8 * 1024 * 1024))))
+MMN_REQUEST_BODY_TIMEOUT_SECONDS = max(1, int(os.getenv("MMN_REQUEST_BODY_TIMEOUT_SECONDS", "15")))
+MMN_LOGIN_MAX_FAILURES = max(3, int(os.getenv("MMN_LOGIN_MAX_FAILURES", "5")))
+MMN_LOGIN_FAILURE_WINDOW_SECONDS = max(30, int(os.getenv("MMN_LOGIN_FAILURE_WINDOW_SECONDS", "300")))
+MMN_LOGIN_BLOCK_SECONDS = max(30, int(os.getenv("MMN_LOGIN_BLOCK_SECONDS", "300")))
+MMN_LOGIN_RATE_LIMIT_MAX_KEYS = max(100, int(os.getenv("MMN_LOGIN_RATE_LIMIT_MAX_KEYS", "2000")))
 DATA_DIR = DATA_ROOT
 DB_PATH = Path(os.getenv("MMN_DB_PATH", str(DATA_DIR / "commercial_demo.db"))).expanduser().resolve()
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -342,6 +365,8 @@ DOUYIN_COLLECTOR_TASKS = {}
 DOUYIN_COLLECTOR_LAST_JOB = {}
 LEGACY_VERTICAL_CLAIM_LOCK = Lock()
 LEGACY_VERTICAL_CLAIM_CHECKED = set()
+LOGIN_RATE_LIMIT_LOCK = Lock()
+LOGIN_RATE_LIMITS = {}
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
@@ -3912,6 +3937,30 @@ def cloud_login_required():
     return os.getenv("MMN_CLOUD_LOGIN_REQUIRED", str(CLOUD_LOGIN_REQUIRED)).lower() in {"1", "true", "yes", "on"}
 
 
+def session_cookie_enabled():
+    configured = env_value("MMN_SESSION_COOKIE_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+    public_base_url = env_value("MMN_PUBLIC_BASE_URL").strip().lower()
+    return configured and public_base_url.startswith("https://")
+
+
+MMN_SESSION_COOKIE_NAME = "__Host-mmn_session"
+MMN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 12
+
+
+def session_cookie_header(token):
+    return (
+        f"{MMN_SESSION_COOKIE_NAME}={token}; Path=/; Max-Age={MMN_SESSION_MAX_AGE_SECONDS}; "
+        "HttpOnly; Secure; SameSite=Strict"
+    )
+
+
+def clear_session_cookie_header():
+    return (
+        f"{MMN_SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; "
+        "HttpOnly; Secure; SameSite=Strict"
+    )
+
+
 TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/ai/rag-strategy",
     "/api/ai/fusion-strategy",
@@ -3974,6 +4023,103 @@ def cloud_accounts():
             "permissions": ["view_demo", "run_strategy", "view_reports"]
         }
     }
+
+
+def public_session_payload(payload):
+    if not payload:
+        return None
+    account = cloud_accounts().get(payload.get("username")) or {}
+    username = str(payload.get("username") or "")
+    return {
+        "org_id": payload.get("org_id") or "",
+        "org": account.get("org") or "",
+        "user_id": payload.get("user_id") or "",
+        "email": f"{username.lower()}@mmn.local",
+        "name": account.get("name") or username,
+        "username": username,
+        "role": payload.get("role") or "",
+        "permissions": list(account.get("permissions") or []),
+    }
+
+
+def reset_login_rate_limits():
+    with LOGIN_RATE_LIMIT_LOCK:
+        LOGIN_RATE_LIMITS.clear()
+
+
+def _login_rate_limit_keys(source_ip, username):
+    source_key = f"source:{str(source_ip or 'unknown').strip() or 'unknown'}"
+    username_key = f"account:{str(username or '').strip().casefold() or 'missing'}"
+    return source_key, username_key
+
+
+def _prune_login_rate_limits(current_time):
+    expiry = current_time - MMN_LOGIN_FAILURE_WINDOW_SECONDS
+    stale = [
+        key for key, item in LOGIN_RATE_LIMITS.items()
+        if float(item.get("updated_at") or 0) < expiry
+        and float(item.get("blocked_until") or 0) <= current_time
+    ]
+    for key in stale:
+        LOGIN_RATE_LIMITS.pop(key, None)
+    overflow = len(LOGIN_RATE_LIMITS) - MMN_LOGIN_RATE_LIMIT_MAX_KEYS
+    if overflow > 0:
+        oldest = sorted(
+            LOGIN_RATE_LIMITS,
+            key=lambda key: float(LOGIN_RATE_LIMITS[key].get("updated_at") or 0),
+        )[:overflow]
+        for key in oldest:
+            LOGIN_RATE_LIMITS.pop(key, None)
+
+
+def login_rate_limit_status(source_ip, username, current_time=None):
+    current_time = float(time.time() if current_time is None else current_time)
+    retry_after = 0
+    with LOGIN_RATE_LIMIT_LOCK:
+        _prune_login_rate_limits(current_time)
+        for key in _login_rate_limit_keys(source_ip, username):
+            item = LOGIN_RATE_LIMITS.get(key) or {}
+            retry_after = max(
+                retry_after,
+                math.ceil(max(0, float(item.get("blocked_until") or 0) - current_time)),
+            )
+    return retry_after
+
+
+def record_login_failure(source_ip, username, current_time=None):
+    current_time = float(time.time() if current_time is None else current_time)
+    retry_after = 0
+    with LOGIN_RATE_LIMIT_LOCK:
+        _prune_login_rate_limits(current_time)
+        cutoff = current_time - MMN_LOGIN_FAILURE_WINDOW_SECONDS
+        for key in _login_rate_limit_keys(source_ip, username):
+            item = LOGIN_RATE_LIMITS.setdefault(key, {"failures": [], "blocked_until": 0, "updated_at": current_time})
+            failures = [stamp for stamp in item.get("failures", []) if stamp >= cutoff]
+            failures.append(current_time)
+            item["failures"] = failures
+            item["updated_at"] = current_time
+            if len(failures) >= MMN_LOGIN_MAX_FAILURES:
+                item["blocked_until"] = max(
+                    float(item.get("blocked_until") or 0),
+                    current_time + MMN_LOGIN_BLOCK_SECONDS,
+                )
+            elif len(failures) >= 3:
+                item["blocked_until"] = max(
+                    float(item.get("blocked_until") or 0),
+                    current_time + min(30, 2 ** (len(failures) - 3)),
+                )
+            retry_after = max(
+                retry_after,
+                math.ceil(max(0, float(item.get("blocked_until") or 0) - current_time)),
+            )
+        _prune_login_rate_limits(current_time)
+    return retry_after
+
+
+def clear_login_failures(source_ip, username):
+    with LOGIN_RATE_LIMIT_LOCK:
+        for key in _login_rate_limit_keys(source_ip, username):
+            LOGIN_RATE_LIMITS.pop(key, None)
 
 
 def resolve_cloud_auth_scope(username):
@@ -14297,14 +14443,25 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' "
+            "'sha256-NjgdjrAdMxFv7tkSt7BFruzxL1Uk/dSWzWUOD2nKvSs='; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; "
+            "media-src 'self' blob: https:; object-src 'none'; base-uri 'none'; "
+            "frame-src 'self'; frame-ancestors 'self'; form-action 'self'",
+        )
         super().end_headers()
 
-    def send_json(self, payload, status=200):
+    def send_json(self, payload, status=200, headers=None):
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
+            for key, value in (headers or {}).items():
+                self.send_header(str(key), str(value))
             self.end_headers()
             self.wfile.write(data)
             return True
@@ -14312,20 +14469,119 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.close_connection = True
             return False
 
+    def request_source_ip(self):
+        peer = str((self.client_address or ("unknown",))[0] or "unknown")
+        try:
+            peer_address = ipaddress.ip_address(peer)
+        except ValueError:
+            return "unknown"
+        if peer_address.is_loopback or peer_address.is_private:
+            candidate = str(self.headers.get("X-Real-IP") or "").strip()
+            try:
+                return str(ipaddress.ip_address(candidate)) if candidate else peer
+            except ValueError:
+                return peer
+        return peer
+
+    def prepare_json_request(self, path):
+        if path in RAW_BODY_POST_PATHS:
+            return True
+        if hasattr(self, "_json_body"):
+            return True
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "不支持分块请求体。"}, 400)
+            return False
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length or 0)
+        except (TypeError, ValueError):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "Content-Length无效。"}, 400)
+            return False
+        if length < 0:
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "Content-Length无效。"}, 400)
+            return False
+        if length > MMN_MAX_JSON_BODY_BYTES:
+            self.close_connection = True
+            self.send_json(
+                {"ok": False, "error": f"JSON请求体不能超过{MMN_MAX_JSON_BODY_BYTES}字节。"},
+                413,
+            )
+            return False
+        if length == 0:
+            self._json_body = {}
+            return True
+        content_type = str(self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json" and not (
+            content_type.startswith("application/") and content_type.endswith("+json")
+        ):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "该接口只接受JSON请求。"}, 415)
+            return False
+        previous_timeout = self.connection.gettimeout()
+        try:
+            self.connection.settimeout(MMN_REQUEST_BODY_TIMEOUT_SECONDS)
+            raw = self.rfile.read(length)
+        except (TimeoutError, socket.timeout):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "读取请求体超时。"}, 408)
+            return False
+        finally:
+            self.connection.settimeout(previous_timeout)
+        if len(raw) != length:
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "请求体不完整。"}, 400)
+            return False
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json({"ok": False, "error": "JSON格式无效。"}, 400)
+            return False
+        if not isinstance(body, dict):
+            self.send_json({"ok": False, "error": "JSON请求体必须是对象。"}, 400)
+            return False
+        self._json_body = body
+        return True
+
     def read_json(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        if not hasattr(self, "_json_body"):
+            if not self.prepare_json_request(urlparse(self.path).path):
+                return {}
+        return self._json_body
 
     def current_auth(self):
         auth = self.headers.get("Authorization", "")
-        if auth.lower().startswith("bearer "):
+        payload = None
+        self._auth_transport = ""
+        if auth:
+            if not auth.lower().startswith("bearer "):
+                return None
             payload = parse_auth_token(auth.split(" ", 1)[1].strip())
-            if payload and (not payload.get("org_id") or not payload.get("user_id")):
-                payload.update(resolve_cloud_auth_scope(payload.get("username")))
-            if payload and payload.get("role") == "admin" and payload.get("org_id"):
-                ensure_legacy_vertical_claim(payload["org_id"])
-            return payload
-        return None
+            self._auth_transport = "bearer" if payload else ""
+        elif session_cookie_enabled():
+            try:
+                cookies = SimpleCookie()
+                cookies.load(self.headers.get("Cookie", ""))
+                morsel = cookies.get(MMN_SESSION_COOKIE_NAME)
+                payload = parse_auth_token(morsel.value) if morsel else None
+                self._auth_transport = "cookie" if payload else ""
+            except (CookieError, ValueError):
+                payload = None
+        if payload and (not payload.get("org_id") or not payload.get("user_id")):
+            payload.update(resolve_cloud_auth_scope(payload.get("username")))
+        if payload and payload.get("role") == "admin" and payload.get("org_id"):
+            ensure_legacy_vertical_claim(payload["org_id"])
+        return payload
+
+    def valid_cookie_csrf(self):
+        if self.headers.get("X-MMN-CSRF") != "1":
+            return False
+        source = self.headers.get("Origin") or self.headers.get("Referer") or ""
+        parsed = urlparse(source)
+        request_host = str(self.headers.get("Host") or "").strip().lower()
+        return parsed.scheme in {"http", "https"} and parsed.netloc.lower() == request_host
 
     def require_cloud_auth(self, roles=None):
         if not cloud_login_required():
@@ -14333,6 +14589,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         payload = self.current_auth()
         if not payload:
             self.send_json({"ok": False, "error": "请先登录 MMN 云端演示系统。"}, 401)
+            return None
+        if (
+            self._auth_transport == "cookie"
+            and self.command in {"POST", "PUT", "PATCH", "DELETE"}
+            and not self.valid_cookie_csrf()
+        ):
+            self.send_json({"ok": False, "error": "请求来源校验失败，请刷新页面后重试。"}, 403)
             return None
         if roles and payload.get("role") not in roles:
             self.send_json({"ok": False, "error": "当前账号没有执行该操作的权限。"}, 403)
@@ -14389,6 +14652,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if self.headers.get("Content-Length") and not self.prepare_json_request(parsed.path):
+            return
         if parsed.path == "/api/health":
             active_jobs = active_local_job_summary()
             self.send_json({
@@ -14461,7 +14726,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_json({
                 "ok": True,
                 "loginRequired": cloud_login_required(),
-                "user": {"username": auth_payload.get("username"), "role": auth_payload.get("role")} if auth_payload else None
+                "sessionCookieEnabled": session_cookie_enabled(),
+                "user": {"username": auth_payload.get("username"), "role": auth_payload.get("role")} if auth_payload else None,
+                "session": public_session_payload(auth_payload),
             })
             return
         opportunity_run_match = re.fullmatch(r"/api/opportunity-map/runs/([^/]+)", parsed.path)
@@ -15379,16 +15646,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if not self.prepare_json_request(parsed.path):
+            return
         if parsed.path == "/api/login":
             try:
                 body = self.read_json()
                 if cloud_login_required() and body.get("username"):
                     username = str(body.get("username") or "").strip()
                     password = str(body.get("password") or "")
+                    source_ip = self.request_source_ip()
+                    retry_after = login_rate_limit_status(source_ip, username)
+                    if retry_after:
+                        self.send_json(
+                            {"ok": False, "error": "登录尝试过于频繁，请稍后再试。"},
+                            429,
+                            {"Retry-After": retry_after},
+                        )
+                        return
                     accounts = cloud_accounts()
                     account = accounts.get(username)
                     if not account or not account.get("password") or not hmac.compare_digest(password, account["password"]):
-                        raise ValueError("用户名或密码不正确。")
+                        retry_after = record_login_failure(source_ip, username)
+                        if retry_after:
+                            self.send_json(
+                                {"ok": False, "error": "登录尝试过于频繁，请稍后再试。"},
+                                429,
+                                {"Retry-After": retry_after},
+                            )
+                        else:
+                            self.send_json({"ok": False, "error": "账号或密码不正确。"}, 400)
+                        return
                     created = now()
                     org_name = account["org"]
                     email = f"{username.lower()}@mmn.local"
@@ -15415,7 +15702,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         seed_policy_mvp(conn, org_id=org_id, edition="china")
                     if account["role"] == "admin":
                         ensure_legacy_vertical_claim(org_id)
-                    self.send_json({"ok": True, "session": {
+                    clear_login_failures(source_ip, username)
+                    token = make_auth_token(username, account["role"], org_id, user_id)
+                    session_payload = {
                         "org_id": org_id,
                         "org": org_name,
                         "user_id": user_id,
@@ -15424,8 +15713,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         "username": username,
                         "role": account["role"],
                         "permissions": account["permissions"],
-                        "token": make_auth_token(username, account["role"], org_id, user_id)
-                    }})
+                    }
+                    response_headers = None
+                    if session_cookie_enabled():
+                        response_headers = {"Set-Cookie": session_cookie_header(token)}
+                    else:
+                        session_payload["token"] = token
+                    self.send_json(
+                        {"ok": True, "session": session_payload},
+                        headers=response_headers,
+                    )
                     return
                 if cloud_login_required():
                     raise ValueError("云端演示环境请使用用户名和密码登录。")
@@ -15452,6 +15749,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": True, "session": {"org_id": org_id, "org": org_name, "user_id": user_id, "email": email, "name": name}})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/logout":
+            if cloud_login_required() and not self.require_cloud_auth():
+                return
+            self.send_json(
+                {"ok": True},
+                headers={"Set-Cookie": clear_session_cookie_header()},
+            )
             return
         scheduled_refresh_paths = {
             "/api/group-dashboard/refresh-weekly",

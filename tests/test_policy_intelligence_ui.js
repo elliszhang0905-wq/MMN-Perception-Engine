@@ -17,6 +17,10 @@ assert(app.includes('id==="policyintelligence"'), "进入页面时应触发政�
 const policyJs = path.join(root, "policy-intelligence.js");
 assert(fs.existsSync(policyJs), "应实现政策智能前端模块");
 const source = fs.readFileSync(policyJs, "utf8");
+assert(
+  source.includes('authHeaders({ "Content-Type": "application/json" })'),
+  "政策分析 POST 请求应明确声明 JSON 内容类型"
+);
 for (const contract of [
   "/api/policy-intelligence/dashboard",
   "/api/policy-intelligence/analyze",

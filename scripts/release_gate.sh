@@ -54,6 +54,10 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 "$NODE_BIN" tests/test_ensure_local_mmn.js
 "$NODE_BIN" tests/test_public_vendor_names.js
+"$NODE_BIN" tests/test_frontend_lifecycle_scope.js
+"$NODE_BIN" tests/test_policy_intelligence_ui.js
+"$NODE_BIN" tests/test_data_drill_xss.js
+"$NODE_BIN" tests/test_global_xss_boundaries.js
 python3 -m py_compile server.py group_dashboard.py product_whitepaper.py attribution_reasoning.py selling_point_advisory.py strategy_report_package.py vehicle_decision.py bf_factory/*.py
 python3 -m unittest \
   tests.test_product_whitepaper \
@@ -71,6 +75,8 @@ python3 -m unittest \
   tests.test_cloud_demo_release_consistency \
   tests.test_http_disconnects \
   tests.test_static_file_boundary \
+  tests.test_security_request_boundaries \
+  tests.test_session_cookie_security \
   tests.test_all_surfaces_release_gate -v
 
 echo "MMN release gate:研发档案检查"

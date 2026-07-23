@@ -131,6 +131,16 @@ assert.doesNotMatch(app, /\nrender\(\);\s*\ninitCloudLoginGate\(\)/, "protected 
 assert.match(douyinHot, /if\(window\.mmnAuthReady\)start\(\);\s*else window\.addEventListener\("mmn:auth-ready",start,\{once:true\}\)/);
 assert.match(app, /function storageKey\([\s\S]*?scope\.canMigrateLegacy/);
 assert.match(app, /function saveSession\([\s\S]*?loadEditionData\(\{syncServer:false\}\)[\s\S]*?resetBrowserScopeTransientState\(\)/);
+assert.match(app, /sessionCookieMode=data\.sessionCookieEnabled===true/);
+assert.match(app, /function saveSession\(s,persist=!sessionCookieMode\)/);
+assert.match(app, /else localStorage\.removeItem\("mmnCommercialSession"\)/);
+assert.match(app, /"X-MMN-CSRF":"1"/);
+assert.match(app, /credentials:"same-origin"/);
+assert.match(app, /async function logoutSession\(\)[\s\S]*?\/api\/logout/);
+assert.doesNotMatch(app, /MMN_PUBLIC_API_ORIGIN/, "the authenticated API client must not retry against a cleartext cross-origin IP");
+assert.doesNotMatch(app, /shouldRetryPublicApi/, "API failures must remain on the current trusted origin");
+assert.doesNotMatch(app, /http:\/\/121\.40\.60\.90/, "customer-facing recovery must not direct credentials to a cleartext IP");
+assert.match(app, /async function api\(path,options=\{\}\)\{[\s\S]*?fetch\(path,/);
 assert.match(app, /function setEdition\([\s\S]*?verticalAssetRestoreTried=false;[\s\S]*?resetOpportunityContextState\(\);[\s\S]*?restoreOpportunityContext\(\)/);
 assert.match(app, /function applyModelSelection\([\s\S]*?resetOpportunityContextState\(\);\s*restoreOpportunityContext\(\)/);
 assert.match(app, /contextKey!==opportunityCacheContext\(\)\.key/);
