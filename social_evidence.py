@@ -23,6 +23,8 @@ from zoneinfo import ZoneInfo
 SCHEMA_VERSION = "social-evidence-query-v2"
 ALLOWED_CENTERS = {"social_trend", "brand_penetration", "nsr_validation"}
 ALLOWED_PLATFORMS = {"douyin", "xiaohongshu", "weibo", "bilibili", "wechat", "kuaishou"}
+INTERNAL_SOURCES = {"tikhub", "social_assistant"}
+COLLECTION_MODES = {"api", "rpa", "file"}
 TERMINAL_STATUSES = {"ready", "degraded", "manual_required", "failed"}
 ACTIVE_STATUSES = {"queued", "planning", "budget_check", "running", "collecting_discovery", "normalizing", "admission", "building_evidence", "validating"}
 INTERRUPTED_STATUSES = ACTIVE_STATUSES - {"queued"}
@@ -50,6 +52,48 @@ def _unique_strings(values, limit=40):
         if len(result) >= limit:
             break
     return result
+
+
+def normalize_observation(item, *, internal_source, collection_mode, observed_at=None):
+    """Normalize one private acquisition observation without changing public evidence semantics."""
+    if internal_source not in INTERNAL_SOURCES:
+        raise ValueError("internalSource不受支持")
+    if collection_mode not in COLLECTION_MODES:
+        raise ValueError("collectionMode不受支持")
+    item = item if isinstance(item, dict) else {}
+    platform = str(item.get("platform") or "").strip().lower()
+    if platform not in ALLOWED_PLATFORMS:
+        raise ValueError("platform不受支持")
+    platform_item_id = str(item.get("platformItemId") or item.get("id") or "").strip()
+    source_url = str(item.get("sourceUrl") or "").strip()
+    text = str(item.get("text") or item.get("title") or "").strip()
+    if not platform_item_id or not text or not _valid_public_url(source_url):
+        raise ValueError("采集记录缺少平台内容ID、正文或公开链接")
+    media_refs = item.get("mediaRefs") if isinstance(item.get("mediaRefs"), list) else []
+    normalized = {
+        **item,
+        "platform": platform,
+        "platformItemId": platform_item_id,
+        "sourceUrl": source_url,
+        "text": text,
+        "author": str(item.get("author") or "").strip(),
+        "authorId": str(item.get("authorId") or "").strip(),
+        "publishedAt": str(item.get("publishedAt") or "").strip(),
+        "nativeMetrics": dict(item.get("nativeMetrics") or {}),
+        "sourceRole": str(item.get("sourceRole") or "user_or_unknown").strip(),
+        "mediaRefs": [row for row in media_refs if isinstance(row, dict)][:20],
+        "internalSource": internal_source,
+        "collectionMode": collection_mode,
+        "observedAt": str(observed_at or item.get("observedAt") or utcnow()),
+        "rawArchiveRef": str(item.get("rawArchiveRef") or "").strip(),
+        "status": str(item.get("status") or "observed").strip(),
+        "limitations": _unique_strings(item.get("limitations"), 20),
+    }
+    normalized["sourceFingerprint"] = _stable_id(
+        platform, platform_item_id, source_url, text,
+        json.dumps(normalized["mediaRefs"], ensure_ascii=False, sort_keys=True),
+    )
+    return normalized
 
 
 def _safe_date(value, field):
@@ -270,6 +314,17 @@ class TikHubEvidenceAdapter:
                 "sourceRole": self._source_role(normalized),
                 "coverUrl": normalized.get("coverUrl") or "",
                 "dynamicCoverUrl": normalized.get("dynamicCoverUrl") or "",
+                "authorId": normalized.get("authorId") or normalized.get("uid") or "",
+                "mediaRefs": [
+                    {"type": "cover", "url": normalized.get("coverUrl")}
+                    for _ in [0] if normalized.get("coverUrl")
+                ] + [
+                    {"type": "dynamic_cover", "url": normalized.get("dynamicCoverUrl")}
+                    for _ in [0] if normalized.get("dynamicCoverUrl")
+                ],
+                "internalSource": "tikhub",
+                "collectionMode": "api",
+                "observedAt": fetched_at,
             })
         return {
             "items": items,
@@ -338,6 +393,18 @@ class SocialEvidenceRepository:
                     FOREIGN KEY(job_id) REFERENCES evidence_jobs(job_id),
                     FOREIGN KEY(canonical_id) REFERENCES canonical_contents(canonical_id)
                 );
+                CREATE TABLE IF NOT EXISTS content_observations (
+                    observation_id TEXT PRIMARY KEY, canonical_id TEXT NOT NULL, job_id TEXT NOT NULL,
+                    org_id TEXT NOT NULL, edition TEXT NOT NULL, internal_source TEXT NOT NULL,
+                    collection_mode TEXT NOT NULL, platform_item_key TEXT NOT NULL,
+                    observed_at TEXT NOT NULL, source_fingerprint TEXT NOT NULL,
+                    raw_request_id TEXT NOT NULL, observation_json TEXT NOT NULL,
+                    UNIQUE(org_id, edition, internal_source, platform_item_key, source_fingerprint),
+                    FOREIGN KEY(job_id) REFERENCES evidence_jobs(job_id),
+                    FOREIGN KEY(canonical_id) REFERENCES canonical_contents(canonical_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_se_observations_content
+                    ON content_observations(canonical_id, observed_at DESC);
                 CREATE TABLE IF NOT EXISTS evidence_marts (
                     mart_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, org_id TEXT NOT NULL, edition TEXT NOT NULL,
                     project_id TEXT NOT NULL, mart_type TEXT NOT NULL, schema_version TEXT NOT NULL,
@@ -526,22 +593,69 @@ class SocialEvidenceRepository:
         return request_id
 
     def upsert_content(self, job, item, raw_request_id):
-        platform = str(item.get("platform") or "").strip()
-        platform_item_id = str(item.get("platformItemId") or item.get("id") or "").strip()
-        text = str(item.get("text") or "").strip()
+        internal_source = str(item.get("internalSource") or "tikhub").strip()
+        collection_mode = str(item.get("collectionMode") or ("api" if internal_source == "tikhub" else "file")).strip()
+        item = normalize_observation(
+            item, internal_source=internal_source, collection_mode=collection_mode,
+            observed_at=item.get("observedAt"),
+        )
+        platform = item["platform"]
+        platform_item_id = item["platformItemId"]
+        text = item["text"]
         fingerprint = _stable_id(platform, text)
-        canonical_id = _stable_id(job["orgId"], job["edition"], platform, platform_item_id, fingerprint)
+        canonical_id = _stable_id(job["orgId"], job["edition"], platform, platform_item_id)
         content = {**item, "canonicalContentId": canonical_id, "contentFingerprint": fingerprint,
                    "rawRecordIds": [raw_request_id], "collectedAt": utcnow(), "verificationStatus": "platform_observation"}
+        platform_item_key = f"{platform}:{platform_item_id}"
+        observation_id = _stable_id(
+            job["orgId"], job["edition"], internal_source, platform_item_key,
+            item["sourceFingerprint"], item["observedAt"],
+        )
         with self._lock, self.connect() as conn:
-            conn.execute("""INSERT OR IGNORE INTO canonical_contents
+            conn.execute("""INSERT INTO canonical_contents
                 (canonical_id,job_id,org_id,edition,platform,platform_item_id,source_url,content_fingerprint,content_json,collected_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(canonical_id) DO UPDATE SET
+                    job_id=excluded.job_id, source_url=excluded.source_url,
+                    content_fingerprint=excluded.content_fingerprint,
+                    content_json=excluded.content_json, collected_at=excluded.collected_at""", (
                 canonical_id, job["jobId"], job["orgId"], job["edition"], platform, platform_item_id,
                 item.get("sourceUrl") or "", fingerprint, json.dumps(content, ensure_ascii=False), utcnow(),
             ))
+            conn.execute("""INSERT OR IGNORE INTO content_observations
+                (observation_id,canonical_id,job_id,org_id,edition,internal_source,collection_mode,
+                 observed_at,source_fingerprint,raw_request_id,observation_json,platform_item_key)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                observation_id, canonical_id, job["jobId"], job["orgId"], job["edition"],
+                internal_source, collection_mode, item["observedAt"], item["sourceFingerprint"],
+                raw_request_id, json.dumps(item, ensure_ascii=False), platform_item_key,
+            ))
             conn.execute("INSERT OR IGNORE INTO job_contents VALUES(?,?,?)", (job["jobId"], canonical_id, raw_request_id))
         return content
+
+    def import_observations(self, job, items, *, internal_source="social_assistant", collection_mode="file"):
+        """Persist a bounded plugin export through the same raw/canonical/observation chain."""
+        items = items if isinstance(items, list) else []
+        if not items or len(items) > 500:
+            raise ValueError("导入记录必须为1至500条")
+        normalized = [
+            normalize_observation(
+                item, internal_source=internal_source, collection_mode=collection_mode,
+                observed_at=(item or {}).get("observedAt") if isinstance(item, dict) else None,
+            )
+            for item in items
+        ]
+        response = {
+            "raw": {"recordCount": len(normalized), "source": "private_plugin_export"},
+            "items": normalized,
+            "nextCursor": "",
+            "requestMeta": {"endpoint": "private-import", "status": 200, "cost": 0, "paginationMode": "none"},
+        }
+        raw_id = self.save_raw_request(
+            job, "mixed" if len({row["platform"] for row in normalized}) > 1 else normalized[0]["platform"],
+            "private-import", 1, response,
+        )
+        return [self.upsert_content(job, item, raw_id) for item in normalized]
 
     def list_contents(self, job_id, org_id):
         with self.connect() as conn:
@@ -751,6 +865,47 @@ class SocialEvidenceService:
 
     def create_job(self, plan):
         return self.repository.create_job(plan)
+
+    def import_job(self, job_id, org_id, items, *, internal_source="social_assistant", collection_mode="file",
+                   brand_analysis_runner=None):
+        """Build a task mart from an explicitly supplied, bounded plugin export."""
+        job = self.repository.get_job(job_id, org_id)
+        if not job:
+            raise KeyError("任务不存在或无权访问")
+        plan = self.repository.get_plan(job["planId"], org_id)
+        self.repository.update_job(
+            job_id, org_id, status="running", stage="normalizing", progress=35,
+            message="正在校验并归一化公开社媒导入记录",
+        )
+        self.repository.import_observations(
+            job, items, internal_source=internal_source, collection_mode=collection_mode,
+        )
+        evidence = apply_evidence_sampling(self.repository.list_contents(job_id, org_id), plan)
+        previous = self.repository.latest_mart(
+            plan["projectId"], org_id, plan["edition"], plan["centerType"],
+        )
+        if plan["centerType"] == "social_trend":
+            mart = build_social_trend_mart(plan, evidence, previous)
+        elif plan["centerType"] == "brand_penetration":
+            mart = build_brand_penetration_mart(plan, evidence, previous)
+            if brand_analysis_runner:
+                mart["brandDecision"] = brand_analysis_runner(plan, evidence)
+                mart["schemaVersion"] = "brand-penetration-mart-v3"
+        else:
+            mart = build_nsr_validation_mart(plan, evidence, previous)
+        mart["collectionCoverage"] = [{
+            "platform": platform,
+            "effectiveCount": sum(row.get("platform") == platform for row in evidence),
+            "stopReason": "bounded_import",
+        } for platform in plan["platforms"]]
+        mart["coverageStatus"] = "bounded_complete" if evidence else "no_admitted_evidence"
+        mart = self.repository.save_mart(job, mart)
+        status = "ready" if evidence else "degraded"
+        return self.repository.update_job(
+            job_id, org_id, status=status, stage="ready" if evidence else "admission", progress=100,
+            retryable=not bool(evidence), result={"martId": mart["martId"]},
+            message="导入证据集已就绪" if evidence else "导入记录未通过证据准入规则",
+        ) | {"mart": mart}
 
     def run_job(self, job_id, org_id, adapter, brand_analysis_runner=None):
         job = self.repository.get_job(job_id, org_id)

@@ -13,6 +13,7 @@ from social_evidence import (
     _within_date_window,
     build_nsr_validation_mart,
     build_query_plan,
+    normalize_observation,
 )
 
 
@@ -263,6 +264,46 @@ class SocialEvidenceV2Test(unittest.TestCase):
         raw_text = raw[0].read_text(encoding="utf-8")
         self.assertNotIn("must-not-persist", raw_text)
         self.assertNotIn("authorization", raw_text.lower())
+
+    def test_dual_source_observations_share_one_stable_canonical_content(self):
+        plan = self.plan(platforms=["douyin"], themes=[], scenes=[], issueTerms=[], eventTerms=[], competitors=[])
+        job = self.service.create_job(plan)
+        first = {
+            "platform": "douyin", "platformItemId": "same-video",
+            "sourceUrl": "https://www.douyin.com/video/same-video",
+            "text": "第一版文案", "publishedAt": "2026-07-21T10:00:00+00:00",
+            "internalSource": "tikhub", "collectionMode": "api",
+        }
+        raw_a = self.repo.save_raw_request(
+            job, "douyin", "manual-test", 1,
+            {"items": [first], "raw": {}, "requestMeta": {"status": 200}},
+        )
+        stored_a = self.repo.upsert_content(job, first, raw_a)
+        imported = self.repo.import_observations(job, [{
+            **first, "text": "第二版文案", "observedAt": "2026-07-22T10:00:00+00:00",
+        }])
+        self.assertEqual(imported[0]["canonicalContentId"], stored_a["canonicalContentId"])
+        with self.repo.connect() as conn:
+            self.assertEqual(conn.execute("select count(*) from canonical_contents").fetchone()[0], 1)
+            rows = conn.execute(
+                "select internal_source,collection_mode from content_observations order by internal_source"
+            ).fetchall()
+        self.assertEqual(
+            [(row["internal_source"], row["collection_mode"]) for row in rows],
+            [("social_assistant", "file"), ("tikhub", "api")],
+        )
+
+    def test_observation_contract_rejects_private_or_incomplete_source_records(self):
+        with self.assertRaises(ValueError):
+            normalize_observation(
+                {"platform": "douyin", "platformItemId": "1", "sourceUrl": "file:///private", "text": "x"},
+                internal_source="social_assistant", collection_mode="file",
+            )
+        with self.assertRaises(ValueError):
+            normalize_observation(
+                {"platform": "douyin", "platformItemId": "1", "sourceUrl": "https://example.test/1", "text": "x"},
+                internal_source="unknown", collection_mode="file",
+            )
 
     def test_tenant_scope_blocks_cross_org_job_and_mart_reads(self):
         job = self.service.create_job(self.plan())
