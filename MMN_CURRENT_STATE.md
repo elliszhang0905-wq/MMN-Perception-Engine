@@ -2,13 +2,13 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.18-social-routing-candidate`
+- 状态包版本：`v2.18-social-routing-production`
 - 最后核验时间：`2026-07-23`（Asia/Shanghai）
-- Git应用基线：当前隔离开发基线为 `d3e84fe9ae6727d87ff8e2d19bf2980812ceeea2`；本状态只描述本地发布候选，尚未推送 GitHub、尚未部署 ECS。
+- Git应用基线：生产代码基线为 `103cb3757546e0182e4e489d6dd8bdbea1874ecf`，已推送 GitHub `main` 并以标签 `beta-1.03-20260723-social-routing-2` 发布到 ECS。
 - 当前分支：`codex/social-evidence-routing-01`；与用户原工作区隔离，避免覆盖其并行未提交改动。
-- 生成时工作树状态：仅包含 TikHub/社媒助手证据分工、封面 Prompt 三路分析、相关测试与本状态包改动；未修改业务数据库、原始导入文件或用户数据。
-- 基线说明：本轮候选版本码为 `beta-1.03-20260723-social-routing-2`。公开社媒证据 V2、封面 Prompt 生产开关和独立 Worker profile 尚未切换；未经真实流、影子运行和生产门禁核验，不得写成已上线。
-- 当前未提交内容：`social_evidence.py`、`cover_prompt.py`、`server.py`、`douyin-hot-demo.js`、`douyin-hot-demo.css`、相关测试与本状态包。
+- 生成时工作树状态：生产代码已提交；本次只追加发布核验状态，不修改业务数据库、原始导入文件或用户数据。
+- 基线说明：版本码为 `beta-1.03-20260723-social-routing-2`。证据路由与封面 Prompt 代码已部署，但公开社媒证据 V2、封面 Prompt、影子模式和独立 Worker profile 仍默认关闭；在真实插件影子导入与真实三旗舰成本/质量验收前，不得写成已启用。
+- 当前未提交内容：无；状态档案收口后单独形成文档提交。
 - 维护要求：以后每次更新本状态包时，必须同步刷新状态包版本、最后核验时间、短/完整 commit hash、当前分支、工作树状态和未提交修改路径。
 
 > 应用版本常量：`beta 1.03`
@@ -110,11 +110,11 @@
 | 声量与认知 | 用户 XLSX → `/api/import-vertical-xlsx` → 前端行数据/项目快照 → NSR 与认知看板 | 车型、平台、赛道、认知标签、情绪、用户身份、购买意向、有效评论、Impact/Growth/Competition；导入校验失败不得沿用错误旧结果 | `server.py`、`app.js`、`nsr-map.js` |
 | 社媒趋势 | 外部公开数据服务或用户文件 → 车型别名查询/分页穷尽 → 本品竞品互斥/跨别名去重 → 相关、热门、风险三池 → 三路独立审阅/唯一统一洞察 → `/api/social-trends/jobs`、`/import` → `social_trend_snapshots` | `org_id`、`edition`、车型/别名、平台、时间窗、分页停止原因、结构化标题/描述/话题、采集完整性、分析覆盖率与证据 ID；全量仅指接口可访问范围；热门门槛不影响内容量和风险；本品不得进入竞品集合；传播证据不是成交证明 | `social_trends.py`、`server.py`、`app.js` |
 | 品牌传播三路结论 | 已验证品牌快照或品牌传播 Mart → 唯一冻结证据指纹 → 三路独立复核 → 逐品牌/逐竞品确定性融合 → 同快照持久化 → 品牌穿透中心 | 每个品牌和“本品 × 每个竞品”独立判定；三路共同证据、枚举方向和最低置信度同时过门槛才发布。单项失败只拦截该项，整路失败不降为两路结论；传播判断不外推市场渗透、购买意愿或销售因果 | `brand_penetration_analysis.py`、`server.py`、`social_evidence.py`、`demo-brand-weekly-radar.html`、`app.js` |
-| 公开社媒证据 V2（本地发布候选、默认关闭） | 版本化 QueryPlan → 持久化队列/独立 Worker或受控插件文件导入 → 原始响应归档 → 稳定 CanonicalContent＋多次 Observation → 三类 Evidence Mart | TikHub 负责 API 结构化采集，社媒助手只通过 `file`/`rpa` 兼容入口补充公开记录；两者按平台内容 ID 合并为稳定资产，采集来源/方式仅保留在内部 Observation，客户 Mart 不暴露插件名。组织/版本/项目隔离、预算、重启恢复和传播证据边界不变；生产开关与 Worker profile 尚未切换 | `social_evidence.py`、`scripts/run_social_evidence_worker.py`、`docker-compose.yml`、`server.py`、`app.js` |
+| 公开社媒证据 V2（代码已部署、默认关闭） | 版本化 QueryPlan → 持久化队列/独立 Worker或受控插件文件导入 → 原始响应归档 → 稳定 CanonicalContent＋多次 Observation → 三类 Evidence Mart | TikHub 负责 API 结构化采集，社媒助手只通过 `file`/`rpa` 兼容入口补充公开记录；两者按平台内容 ID 合并为稳定资产，采集来源/方式仅保留在内部 Observation，客户 Mart 不暴露插件名。组织/版本/项目隔离、预算、重启恢复和传播证据边界不变；生产开关、影子模式与 Worker profile 均未切换 | `social_evidence.py`、`scripts/run_social_evidence_worker.py`、`docker-compose.yml`、`server.py`、`app.js` |
 | NSR 公开讨论验证（本地、默认关闭） | 决策驾驶舱当前车型 → 同车型真实属性 NSR → 冻结 7/30 天计划 → 三平台候选 → 车型与属性专属词双重准入 → 人工裁决 → 新决策快照 | 不重算 NSR；不跨车型借数；泛化情绪词不能单独归因属性；仅带原文证据且人工确认支持的裁决可进入以后新建的决策快照，历史快照不回填 | `vehicle-decision.js`、`vehicle-decision.css`、`social_evidence.py`、`vehicle_decision.py`、`server.py` |
 | 管理层周度车市扫描 | 乘联分会固定“周度分析 / 车市扫描”列表 → 最新文章识别与确定性事实抽取 → 三路旗舰模型独立复核 → 管理层摘要 | 只读取官网列表中的最新一期；锁定零售、批发、新能源零售与渗透率事实后再复核；三路全部通过才发布摘要，最新一期解析失败时保留上期并明确告警 | `weekly_market_refresh.py`、`server.py`、`group-dashboard.js`、`group-dashboard.css` |
 | 抖音热点实体 | 榜单/采集器 → 规则与模型识别 → 人工复核 → 排名快照 | 车型实体、关系、证据类型、fingerprint、双路审计、复核状态；不完整识别进入人工队列 | `douyin_hot_entities.py`、`douyin-hot-demo.js`、`server.py` |
-| 抖音逐视频洞察/内容防线/封面 Prompt（封面能力为本地发布候选） | 用户单条点击 → 原页验证与多模态证据包 → 视频洞察及封面 Prompt 分别三路盲审 → 确定性校验 → 持久化洞察/运行留痕/降级/人工复核 | 仅用户手动点击触发；封面 Prompt 与视频洞察锁定同一视频证据版本，三路未齐、证据不足或关键字段三方冲突时不发布统一 Prompt；客户侧只显示中性槽位。播放量变化不触发重分析，无可读画面时不声称已看封面或视频 | `douyin_video_insights.py`、`cover_prompt.py`、`douyin_browser_evidence.py`、`content_defense.py`、`creator_distillation/media_processing.py`、`server.py`、`douyin-hot-demo.js` |
+| 抖音逐视频洞察/内容防线/封面 Prompt（封面代码已部署、默认关闭） | 用户单条点击 → 原页验证与多模态证据包 → 视频洞察及封面 Prompt 分别三路盲审 → 确定性校验 → 持久化洞察/运行留痕/降级/人工复核 | 仅用户手动点击触发；封面 Prompt 与视频洞察锁定同一视频证据版本，三路未齐、证据不足或关键字段三方冲突时不发布统一 Prompt；客户侧只显示中性槽位。播放量变化不触发重分析，无可读画面时不声称已看封面或视频。生产环境未启用封面开关，因此当前不会调用三旗舰或产生新增模型费用 | `douyin_video_insights.py`、`cover_prompt.py`、`douyin_browser_evidence.py`、`content_defense.py`、`creator_distillation/media_processing.py`、`server.py`、`douyin-hot-demo.js` |
 | 销量预警 | 懂车帝销量文件、CPCA/已导入市场数据 → 月度历史与预警计算 → 驾驶舱 | 细分市场、车型、上市时间、月销量、市场容量、阈值与观察周期；当前规则和数据源以 `group_dashboard.py`、`sales_warning_*` 文件为准 | `group_dashboard.py`、`data/dongchedi_sales/`、`server.py` |
 | 销量预警—T周期联动 | `/api/group-dashboard-demo.salesWarningCycles` 已核验记录 → 周期上下文适配 → 车型选择事件 → 下方T周期/卖点决策/传播阶段 | 依次使用服务端已核验记录、本地已核验缓存、具有完整日期证据的数据库记录；仅有阶段文字不生成日期；权威T0禁止在下方覆盖 | `sales-warning-cycle-context.js`、`group-dashboard.js`、`app.js`、`t-cycle.js` |
 | 决策执行周期 | 驾驶舱输入/策略 → `/api/cockpit/execution-cycles` → 项目周期与监测状态 | T0、阶段、建议、状态、监测窗口；用于策略执行与复盘，不扩展为线索/到店/成交归因 | `cockpit_decision_loop.py`、`server.py`、`app.js`、`t-cycle.js` |
@@ -196,11 +196,11 @@
 - 2026-07-23：社媒趋势中心由固定页数热门样本改为车型别名逐词持续分页，抖音续传 cursor/search_id/backtrace；新增标题、描述、话题和命中字段，跨别名按平台内容 ID 去重。相关内容量、正文情感与风险改用无热度门槛的相关池，热门门槛只控制排行榜；删除样本量“置信度”，显示采集完整性和分析覆盖率。三路独立审阅在 KPI 后发布唯一中性本竞品洞察，采集部分或任一路不完整时条件发布/暂缓发布。已随 `b4e75cf` 发布本地、GitHub 与 ECS。
 - 2026-07-23：发布门禁发现 390px 新样式会隐藏十五个非核心导航入口及管理层开关；现改为完整横向滚动导航并保留紧凑管理层入口。19 个客户页面与 8 个管理视图在桌面/390px 均可达，页面级横向溢出为 0。
 - 2026-07-22：生产首轮全表面验收发现管理看板缓存重绘会再次广播同车型事件，导致 `Maximum call stack size exceeded`。现已增加 `changed` 门禁：只有车型真正变化时才触发E7X产品评价补载，同车型缓存重绘不再进入递归链；版本递增为 `product-evaluation-catalog-2` 以强制浏览器更新脚本。
-- 2026-07-23：在隔离分支实现 TikHub 与社媒助手的内部证据分工：CanonicalContent 改为按组织、版本、平台和平台内容 ID 稳定标识，新增多次 Observation 留存采集来源、方式、时间、证据指纹和原始归档关联；新增社媒助手 `file`/`rpa` 受控导入接口，客户 Mart 不暴露插件名。同步为逐视频任务增加可选封面 Prompt 三路盲审、确定性融合、失败/分歧门禁和私有运行留痕；尚未推送、未部署、生产开关未切换。
+- 2026-07-23：在隔离分支实现并发布 TikHub 与社媒助手的内部证据分工：CanonicalContent 改为按组织、版本、平台和平台内容 ID 稳定标识，新增多次 Observation 留存采集来源、方式、时间、证据指纹和原始归档关联；新增社媒助手 `file`/`rpa` 受控导入接口，客户 Mart 不暴露插件名。同步为逐视频任务增加可选封面 Prompt 三路盲审、确定性融合、失败/分歧门禁和私有运行留痕；代码已进入 GitHub `main` 与 ECS，生产开关未切换。
 
 ## 9. 验证状态
 
-- 2026-07-23 本地发布候选验证：双来源证据、社媒导入 API、封面 Prompt、逐视频洞察、内容防线和达人孵化聚焦回归 `98/98` 通过；`git diff --check`、`node --check douyin-hot-demo.js`、Python 编译和完整 `npm run release:gate` 通过。门禁使用从真实业务 SQLite 生成的隔离副本，161 项后端子集、数据优先浏览器流、19 个客户入口、8 个管理视图、桌面与 390px 均为 `failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`；原业务数据库未写入。尚未完成外部模型真实调用、真实插件导入、影子 Worker 和生产零漂移验证，因此当前只属于本地发布候选。
+- 2026-07-23 生产发布验证：双来源证据、社媒导入 API、封面 Prompt、逐视频洞察、内容防线和达人孵化聚焦回归 `98/98` 通过；完整 `npm run release:gate` 通过，包含 161 项后端子集、数据优先业务流、19 个客户入口、8 个管理视图、桌面与 390px，均为 `failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。生产端 6 个服务运行正常，5 个带健康检查的服务均为 healthy；本地、服务器与容器的 6 个关键文件哈希一致，健康接口返回版本码 `beta-1.03-20260723-social-routing-2`。生产真实浏览器再次通过全部入口与双端视口；验收触发的 4 张懒加载表副作用已按主键精确回滚，最终 76 张表与发布前备份逐表逻辑内容一致且 `quick_check=ok`。尚未执行真实插件影子导入和真实三旗舰质量/成本验证，因此能力代码已部署但保持关闭。
 - 状态包事实来源：本轮已审查 `README.md`、`README_DEPLOY.md`、`AGENTS.md`、`package.json`、`Dockerfile`、`docker-compose.yml`、`index.html`、`app.js`、`server.py`、`mmn_data.py`、模块 repository/schema、路由知识图谱与目录结构。
 - 状态检查命令：`npm run check:mmn-state`。检查业务源码、页面/组件、接口、schema、依赖与部署配置；测试、普通文档、锁文件及 `data/`、`output/`、`tmp/`、`backups/`、`logs/` 运行数据/产物不触发状态同步要求。
 - 2026-07-21 beta 1.03 新鲜验证：完整 Python 回归 `467/467` 通过，逐视频洞察与媒体专项 `48/48` 通过，内容防线、启动器和状态包脚本测试通过；本地与生产健康接口均返回 `beta-1.03-20260721-douyin-content-defense-1`。生产全表面桌面/390px 检查无失败、运行时错误或失败响应；真实点击视频任务 `afecda8b179142a19cd96638f8717818` 形成 full 证据、三路独立完成并达到 `verified`，刷新后两端均显示“洞察已完成”，无页面溢出、控制台错误、失败请求、内部错误文案或证据哈希串。服务器另对第二条 117.5 秒视频取得 6 个时间点关键帧，证明取证不依赖固定样本。
