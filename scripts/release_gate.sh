@@ -48,6 +48,8 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_social_positive_benchmark.js
 "$NODE_BIN" tests/test_social_risk_popover.js
 "$NODE_BIN" tests/test_vertical_trend_label_layout.js
+"$NODE_BIN" tests/test_vertical_state_persistence.js
+"$NODE_BIN" tests/test_vertical_rank_image_ui.js
 "$NODE_BIN" tests/test_douyin_creator_collector.js
 "$NODE_BIN" tests/test_xhs_content_ranking_demo.js
 "$NODE_BIN" tests/test_ensure_local_mmn.js
@@ -65,6 +67,7 @@ python3 -m unittest \
   tests.test_douyin_hot_entities \
   tests.test_social_trend_jobs \
   tests.test_social_trends \
+  tests.test_vertical_rank_image \
   tests.test_cloud_demo_release_consistency \
   tests.test_http_disconnects \
   tests.test_all_surfaces_release_gate -v

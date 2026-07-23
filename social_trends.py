@@ -95,15 +95,33 @@ VEHICLE_BRAND_ALIASES = {
     "特斯拉": "Tesla", "沃尔沃": "Volvo", "凯迪拉克": "Cadillac", "雷克萨斯": "Lexus",
 }
 
+VEHICLE_SEARCH_ALIAS_OVERRIDES = {
+    vehicle_identity_key("奔驰GLC EV"): (
+        "奔驰GLC EV",
+        "奔驰纯电GLC",
+        "全新奔驰纯电GLC",
+        "奔驰全新纯电GLC",
+        "奔驰GLC纯电",
+        "纯电GLC",
+        "Mercedes-Benz GLC EV",
+        "GLC EV",
+        "GLCEV",
+    ),
+}
+
 
 def vehicle_search_aliases(keyword, supplied=None):
     """Build deterministic public-search aliases without inventing model names."""
     canonical = normalized_vehicle_label(keyword)
     aliases = []
-    for value in [canonical, *(supplied or [])]:
+    reviewed = VEHICLE_SEARCH_ALIAS_OVERRIDES.get(vehicle_identity_key(canonical), ())
+    for value in [canonical, *(supplied or []), *reviewed]:
         label = normalized_vehicle_label(value)
-        if label and vehicle_identity_key(label) not in {vehicle_identity_key(x) for x in aliases}:
+        query_key = label.casefold()
+        if label and query_key not in {x.casefold() for x in aliases}:
             aliases.append(label)
+    if reviewed:
+        return aliases
     compact = re.sub(r"\s+", "", canonical)
     for chinese_brand, english_brand in VEHICLE_BRAND_ALIASES.items():
         if not compact.startswith(chinese_brand):
@@ -117,6 +135,52 @@ def vehicle_search_aliases(keyword, supplied=None):
                 aliases.append(model)
         break
     return aliases
+
+
+def vehicle_alias_coverage(keyword, aliases):
+    """Describe whether a query plan covers reviewed real-world vehicle wording."""
+    canonical = normalized_vehicle_label(keyword)
+    identity = vehicle_identity_key(canonical)
+    reviewed = VEHICLE_SEARCH_ALIAS_OVERRIDES.get(identity, ())
+    if reviewed:
+        return {
+            "status": "verified",
+            "source": "vehicle_identity_catalog",
+            "aliasCount": len(aliases),
+            "reason": "",
+        }
+    energy_wording_unverified = bool(re.search(r"(?i)(?:^|[\s_-])EV(?:$|[\s_-])", canonical))
+    return {
+        "status": "partial" if energy_wording_unverified else "generated",
+        "source": "deterministic_name_expansion",
+        "aliasCount": len(aliases),
+        "reason": "能源形式中文表达尚未完成车型目录复核" if energy_wording_unverified else "",
+    }
+
+
+def vehicle_relevance_evidence(keyword, text, aliases):
+    """Return deterministic evidence that the content belongs to the selected vehicle."""
+    text_key = vehicle_identity_key(text)
+    direct_aliases = [
+        alias for alias in aliases
+        if vehicle_identity_key(alias) and vehicle_identity_key(alias) in text_key
+    ]
+    if direct_aliases:
+        return {
+            "matched": True,
+            "method": "reviewed_alias",
+            "matchedExpressions": direct_aliases,
+        }
+    if vehicle_identity_key(keyword) == vehicle_identity_key("奔驰GLC EV"):
+        model_match = "glc" in text_key
+        electric_match = "纯电" in text_key or bool(re.search(r"(?:glc.*ev|ev.*glc)", text_key, re.IGNORECASE))
+        if model_match and electric_match:
+            return {
+                "matched": True,
+                "method": "brand_model_energy",
+                "matchedExpressions": ["GLC", "纯电/EV"],
+            }
+    return {"matched": False, "method": "no_vehicle_match", "matchedExpressions": []}
 
 
 def _comparison_evidence_identity(item, fallback_model=""):
@@ -681,6 +745,7 @@ def attach_competitor_rankings(result, competitor_results, limit=3):
             "analysisCoverage": dataset.get("analysisCoverage", {}),
             "collection": {
                 "admission": dataset.get("admission", {}),
+                "hotAdmission": dataset.get("hotAdmission", {}),
                 "warnings": dataset.get("warnings", []),
                 "sources": [source for source in dataset.get("sources", []) if not source.get("capability")],
             },
@@ -727,6 +792,7 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
     collected_at = datetime.now(timezone.utc)
     start, end, end_exclusive, search_time_range = resolve_date_window(time_range, start_date, end_date, collected_at)
     query_aliases = vehicle_search_aliases(keyword, aliases)
+    alias_coverage = vehicle_alias_coverage(keyword, query_aliases)
     requested_pages = int(pages or 0)
     safety_limit = max(1, int(_backend_env("MMN_SOCIAL_MAX_PAGES", "100")))
     page_limit = min(requested_pages, safety_limit) if requested_pages > 0 else safety_limit
@@ -779,11 +845,11 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
         current["matchedAliases"] = list(dict.fromkeys([*current.get("matchedAliases", []), *item.get("matchedAliases", [])]))
         current["matchedFields"] = list(dict.fromkeys([*current.get("matchedFields", []), *item.get("matchedFields", [])]))
     admitted, rejected = [], []
-    alias_keys = [vehicle_identity_key(alias) for alias in query_aliases]
     for item in unique_items.values():
         published = _parse_import_date(item.get("publishedAt")); reason = ""
+        relevance = vehicle_relevance_evidence(keyword, item.get("text", ""), query_aliases)
         if passenger_vehicle_scope_exclusion_reason(item): reason = "commercial_vehicle_entity"
-        elif not any(alias_key and alias_key in vehicle_identity_key(item.get("text", "")) for alias_key in alias_keys): reason = "model_not_relevant"
+        elif not relevance["matched"]: reason = "model_not_relevant"
         elif not published: reason = "publish_time_unverified"
         elif outside_date_window(published, start, end, end_exclusive): reason = "outside_time_range"
         rejection = {"id": item["id"], "platform": item["platform"], "title": item["text"], "likes": item["metrics"]["likes"], "reason": reason}
@@ -791,6 +857,8 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
             rejected.append(rejection)
         else:
             item["evidence"]["verificationStatus"] = "tikhub_search_observation"
+            item["evidence"]["relevance"] = relevance
+            item["matchedVehicleExpressions"] = relevance["matchedExpressions"]
             admitted.append(item)
     hot_items = [item for item in admitted if like_thresholds is None or item["metrics"]["likes"] >= like_thresholds[item["platform"]]]
     admission = {"inputCount": len(unique_items), "admittedCount": len(admitted), "rejectedCount": len(rejected), "duplicateCount": duplicate_count,
@@ -803,10 +871,15 @@ def collect(keyword, platforms=None, pages=1, count=20, time_range="30d", includ
     hot_admission = {"thresholds": like_thresholds, "qualifiedCount": len(hot_items),
                      "belowThresholdCount": len(admitted) - len(hot_items),
                      "purpose": "仅用于热门内容排行，不影响内容量、情感和风险分析"}
-    collection_complete = bool(diagnostics) and all(row["status"] == "complete" for row in diagnostics)
+    collection_complete = (
+        bool(diagnostics)
+        and all(row["status"] == "complete" for row in diagnostics)
+        and alias_coverage["status"] != "partial"
+    )
     collection_status = {"status": "complete" if collection_complete else "partial",
                          "scope": "所选平台公开搜索接口在所选时间窗和查询词下可返回的结果",
-                         "queries": diagnostics, "reason": "" if collection_complete else "存在未采尽或失败的查询"}
+                         "queries": diagnostics, "aliasCoverage": alias_coverage,
+                         "reason": "" if collection_complete else alias_coverage["reason"] or "存在未完成或失败的查询"}
     if progress_callback:
         progress_callback("admission", 67, f"已完成相关性与时间窗校验，相关内容{len(admitted)}条")
     comment_rows, hot_lists = [], []

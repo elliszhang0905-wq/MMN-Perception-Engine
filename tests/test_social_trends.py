@@ -12,6 +12,19 @@ class SocialTrendsTest(unittest.TestCase):
     def test_vehicle_search_aliases_cover_chinese_english_brand_and_short_model(self):
         self.assertEqual(vehicle_search_aliases("奥迪E7X"), ["奥迪E7X", "AUDI E7X", "E7X"])
 
+    def test_vehicle_search_aliases_cover_reviewed_chinese_electric_glc_wording(self):
+        self.assertEqual(vehicle_search_aliases("奔驰GLC EV"), [
+            "奔驰GLC EV",
+            "奔驰纯电GLC",
+            "全新奔驰纯电GLC",
+            "奔驰全新纯电GLC",
+            "奔驰GLC纯电",
+            "纯电GLC",
+            "Mercedes-Benz GLC EV",
+            "GLC EV",
+            "GLCEV",
+        ])
+
     def test_vehicle_identity_normalization_excludes_own_and_duplicate_competitors(self):
         self.assertEqual(vehicle_identity_key(" 奥迪 E7x "), vehicle_identity_key("奥迪E7X"))
         self.assertEqual(
@@ -24,7 +37,7 @@ class SocialTrendsTest(unittest.TestCase):
             "视频ID": "7631825727737892130", "视频链接": "https://www.douyin.com/video/7631825727737892130",
             "视频描述": "第一时间带你看看奥迪E7X内饰", "点赞量": 35079, "收藏量": 846,
             "评论量": 740, "分享量": 2246, "发布时间": 46136.45887731481, "达人昵称": "秋晨同学",
-        }], "奥迪E7X", ["douyin"], {"douyin": 8000}, "90d")
+        }], "奥迪E7X", ["douyin"], {"douyin": 8000}, "custom", "2026-04-24", "2026-04-24")
         self.assertEqual(result["admission"]["admittedCount"], 1)
         self.assertEqual(result["items"][0]["metrics"]["likes"], 35079)
 
@@ -78,6 +91,46 @@ class SocialTrendsTest(unittest.TestCase):
         self.assertEqual(result["admission"]["rejectedReasons"], {
             "model_not_relevant": 1, "outside_time_range": 1, "publish_time_unverified": 1,
         })
+
+    def test_collect_accepts_reviewed_electric_glc_wording_without_absorbing_fuel_glc(self):
+        now = int((datetime.now(timezone.utc) - timedelta(days=1)).timestamp())
+        relevant_titles = [
+            "全新纯电GLC依然很奔驰 #奔驰纯电GLC",
+            "纯电GLC：奔驰电车这次终于行了吗",
+            "奔驰纯电GLC到底值不值 #奔驰GLC纯电",
+            "纯电GLC再交付，三电续航扎实",
+            "全新奔驰纯电GLC现车到店",
+            "奔驰认真了，纯电GLC惊喜真不少",
+            "奔驰全新纯电GLC上市发售",
+            "奔驰纯电GLC外观展示",
+            "首台奔驰纯电GLC交付 #奔驰glc纯电",
+            "全新奔驰纯电GLC三电硬核答疑",
+            "实测分享，带你了解奔驰纯电GLC优缺点",
+        ]
+        payload = {"data": [
+            *[
+                {"aweme_id": f"ev-{index}", "desc": title, "create_time": now}
+                for index, title in enumerate(relevant_titles, 1)
+            ],
+            {"aweme_id": "fuel-1", "desc": "奔驰GLC燃油版长测", "create_time": now},
+            {"aweme_id": "brand-only", "desc": "奔驰纯电旗舰车型发布", "create_time": now},
+        ]}
+        with patch.object(TikHubClient, "search", return_value=(payload, {"endpoint": "test", "status": 200})):
+            result = collect("奔驰GLC EV", platforms=["douyin"], time_range="7d", include_enrichment=False)
+        self.assertEqual(
+            {item["platformItemId"] for item in result["items"]},
+            {f"ev-{index}" for index in range(1, 12)},
+        )
+        self.assertEqual(result["admission"]["rejectedReasons"], {"model_not_relevant": 2})
+        self.assertEqual(result["collectionStatus"]["aliasCoverage"]["status"], "verified")
+        self.assertTrue(all(item["evidence"]["relevance"]["matched"] for item in result["items"]))
+
+    def test_collection_is_partial_when_ev_wording_has_no_reviewed_alias_coverage(self):
+        with patch.object(TikHubClient, "search", return_value=({"data": []}, {"endpoint": "test", "status": 200})):
+            result = collect("示例X EV", platforms=["douyin"], time_range="7d", include_enrichment=False)
+        self.assertEqual(result["collectionStatus"]["status"], "partial")
+        self.assertEqual(result["collectionStatus"]["aliasCoverage"]["status"], "partial")
+        self.assertIn("中文表达", result["collectionStatus"]["reason"])
 
     def test_collect_rejects_future_publish_time(self):
         future = int((datetime.now(timezone.utc) + timedelta(days=2)).timestamp())
@@ -340,11 +393,13 @@ class SocialTrendsTest(unittest.TestCase):
         own = _aggregate([], "奥迪E7X", [], [])
         competitor = _aggregate([], "Model Y", [{"platform": "douyin", "itemCount": 4}], [{"platform": "xiaohongshu", "message": "upstream failed"}], selected_platforms=["douyin", "xiaohongshu"])
         competitor["admission"] = {"rejectedByPlatform": {"douyin": {"below_like_threshold": 4}, "xiaohongshu": {}}}
+        competitor["hotAdmission"] = {"qualifiedCount": 0, "belowThresholdCount": 4}
         result = attach_competitor_rankings(own, [competitor])
         collection = result["modelComparisons"][1]["collection"]
         self.assertEqual(collection["sources"][0]["itemCount"], 4)
         self.assertEqual(collection["warnings"][0]["platform"], "xiaohongshu")
         self.assertEqual(collection["admission"]["rejectedByPlatform"]["douyin"]["below_like_threshold"], 4)
+        self.assertEqual(collection["hotAdmission"]["qualifiedCount"], 0)
 
     def test_comparison_drops_a_legacy_own_model_competitor_and_duplicate_evidence(self):
         own_item = normalize_item("weibo", {"mid": "same", "text": "奥迪E7X 推荐", "attitudes_count": 100}, "奥迪E7X", "now")

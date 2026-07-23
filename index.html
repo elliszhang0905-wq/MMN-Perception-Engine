@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>中国汽车营销引擎</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=beta-1.03-20260723-cockpit-social-brand-1">
-  <link rel="stylesheet" href="vehicle-decision.css?v=beta-1.03-20260723-cockpit-social-brand-1">
-  <link rel="stylesheet" href="knowhow.css?v=beta-1.03-20260723-cockpit-social-brand-1">
-  <link rel="stylesheet" href="douyin-hot-demo.css?v=beta-1.03-20260723-cockpit-social-brand-1">
-  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.03-20260723-cockpit-social-brand-1">
-  <link rel="stylesheet" href="lead-dashboard.css?v=beta-1.03-20260723-cockpit-social-brand-1">
+  <link rel="stylesheet" href="style.css?v=beta-1.03-20260723-vertical-social-reliability-1">
+  <link rel="stylesheet" href="vehicle-decision.css?v=beta-1.03-20260723-vertical-social-reliability-1">
+  <link rel="stylesheet" href="knowhow.css?v=beta-1.03-20260723-vertical-social-reliability-1">
+  <link rel="stylesheet" href="douyin-hot-demo.css?v=beta-1.03-20260723-vertical-social-reliability-1">
+  <link rel="stylesheet" href="group-dashboard.css?v=beta-1.03-20260723-vertical-social-reliability-1">
+  <link rel="stylesheet" href="lead-dashboard.css?v=beta-1.03-20260723-vertical-social-reliability-1">
   <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.02-20260718-overnight-iteration-1">
   <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.02-20260718-ui-health-2">
 </head>
@@ -342,11 +342,11 @@
     <section class="page" id="brandpenetration">
       <div class="section-intro brand-penetration-intro">
         <div><p class="eyebrow">BRAND COMMUNICATION PENETRATION</p><h2>品牌传播穿透中心</h2><p>以客户项目为边界，观察本品与竞品近30天的品牌关联、来源角色与平台传播证据。</p></div>
-        <div class="brand-penetration-status"><span id="brand-penetration-snapshot-state">正在读取真实快照</span><b>上汽奥迪 × 5个竞品</b><small id="brand-penetration-snapshot-meta">MMN 三平台 · 数据库快照</small></div>
+        <div class="brand-penetration-status"><span id="brand-penetration-snapshot-state">正在读取真实快照</span><b id="brand-penetration-project-summary">上汽奥迪 × 5个竞品</b><small id="brand-penetration-snapshot-meta">MMN 三平台 · 数据库快照</small></div>
       </div>
       <article class="panel brand-penetration-frame-panel">
-        <div class="brand-penetration-frame-head"><div><span>项目快照</span><b>上汽奥迪近30天竞争传播验证</b></div><p>真实快照只增不覆盖；平台原文可下钻，事件分类仍保留人工复核标记。</p></div>
-        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html?v=beta-1.03-20260723-cockpit-social-brand-1" title="品牌穿透中心真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <div class="brand-penetration-frame-head"><div><span>项目快照</span><b id="brand-penetration-project-title">上汽奥迪近30天竞争传播验证</b></div><p>真实快照只增不覆盖；平台原文可下钻，事件分类仍保留人工复核标记。</p></div>
+        <iframe class="brand-penetration-frame" id="brand-penetration-frame" src="demo-brand-weekly-radar.html?v=beta-1.03-20260723-vertical-social-reliability-1" title="品牌穿透中心真实项目快照" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"></iframe>
       </article>
     </section>
 
@@ -440,11 +440,12 @@
       <div class="toolbar">
         <div>
           <button type="button" class="primary file-button" data-file-target="vertical-xlsx-file">导入</button><input class="file-input-hidden" id="vertical-xlsx-file" type="file" accept=".xlsx">
+          <button type="button" class="secondary file-button" data-file-target="vertical-image-file">导入懂车帝周榜图片</button><input class="file-input-hidden" id="vertical-image-file" type="file" accept="image/png,image/jpeg,image/webp">
           <button class="ghost" id="clear-vertical-data">清空垂媒数据</button>
         </div>
         <div class="search"><input id="vertical-search" placeholder="筛选车型 / 竞品 / 平台 / 文件"></div>
       </div>
-      <div class="notice" id="vertical-source-note" hidden>支持汽车之家、懂车帝正反向排名 Excel。导入后可查看本品和竞品竞争格局，以及时间轴趋势变化。</div>
+      <div class="notice" id="vertical-source-note" hidden>支持正反向排名 Excel，以及懂车帝周榜图片。图片必须先核对确认，才会进入正式竞争格局。</div>
       <div id="vertical-ai-learning" class="qwen-result"></div>
       <div class="vertical-controls">
         <div class="field"><label>数据来源</label><select id="vertical-platform"></select></div>
@@ -1260,24 +1261,57 @@
       <button type="button" id="opportunity-review-done">完成</button>
     </div>
   </dialog>
+  <dialog id="vertical-image-review-dialog" class="wide-dialog vertical-image-review-dialog" aria-labelledby="vertical-image-review-title">
+    <div class="dialog-head">
+      <div><span>懂车帝周榜图片</span><h2 id="vertical-image-review-title">确认后纳入竞争格局</h2></div>
+      <button type="button" id="vertical-image-review-close" aria-label="关闭图片确认">×</button>
+    </div>
+    <p class="vertical-image-review-note">图片识别结果尚未写入正式竞争格局。请对照原图确认本品、周期和全部排名。</p>
+    <div class="vertical-image-review-layout">
+      <section class="vertical-image-original-panel" aria-label="原始懂车帝周榜图片">
+        <img id="vertical-image-original" alt="待确认的懂车帝周榜原图">
+        <div id="vertical-image-review-warnings" class="vertical-image-review-warnings" aria-live="polite"></div>
+      </section>
+      <section class="vertical-image-data-panel" aria-label="识别结果确认表">
+        <div class="vertical-image-meta">
+          <label>数据来源<input value="懂车帝" readonly></label>
+          <label>本品车型<input id="vertical-image-own-model" autocomplete="off"></label>
+          <label>周期开始<input id="vertical-image-period-start" type="date"></label>
+          <label>周期结束<input id="vertical-image-period-end" type="date"></label>
+        </div>
+        <label class="vertical-image-own-confirm"><input id="vertical-image-own-confirmed" type="checkbox">我已确认本品车型与当前项目一致</label>
+        <div class="table-wrap vertical-image-table-wrap">
+          <table>
+            <thead><tr><th>竞品</th><th>正向排名</th><th>反向排名</th><th>核对</th></tr></thead>
+            <tbody id="vertical-image-review-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+    <div class="dialog-actions">
+      <span id="vertical-image-review-message" role="status" aria-live="polite">还需完成：勾选“我已确认本品车型与当前项目一致”</span>
+      <button type="button" class="ghost" id="vertical-image-review-cancel">取消</button>
+      <button type="button" class="primary" id="vertical-image-confirm" aria-describedby="vertical-image-review-message" disabled>确认纳入竞争格局</button>
+    </div>
+  </dialog>
   <div id="toast"></div>
   <button type="button" id="app-home-button" class="app-home-button" aria-label="返回首页顶部">
     <span aria-hidden="true">⌂</span><b>首页</b>
   </button>
   <script src="data_20260608.js?v=beta-1.01"></script>
-  <script src="legacy-product-evaluation.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
+  <script src="legacy-product-evaluation.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
   <script src="opportunity-source-parser.js?v=beta-1.02-system-iteration-1"></script>
   <script src="opportunity-job-ui.js?v=beta-1.02-system-iteration-1"></script>
   <script src="nsr-map.js?v=beta-1.02-system-iteration-1"></script>
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
   <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
-  <script src="sales-warning-cycle-context.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
-  <script src="app.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
-  <script src="vehicle-decision.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
-  <script src="group-dashboard.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
-  <script src="lead-dashboard.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
+  <script src="sales-warning-cycle-context.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
+  <script src="app.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
+  <script src="vehicle-decision.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
+  <script src="group-dashboard.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
+  <script src="lead-dashboard.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
   <script src="policy-intelligence.js?v=beta-1.02-20260718-ui-health-2"></script>
-  <script src="douyin-hot-demo.js?v=beta-1.03-20260723-cockpit-social-brand-1"></script>
+  <script src="douyin-hot-demo.js?v=beta-1.03-20260723-vertical-social-reliability-1"></script>
   <script src="bf-factory.js?v=beta-1.01-bf-ui-2"></script>
 </body>
 </html>

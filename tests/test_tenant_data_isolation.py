@@ -129,6 +129,37 @@ class TenantDataIsolationTest(unittest.TestCase):
         self.assertEqual(missing["items"], [])
         self.assertEqual(missing["assetSummary"]["relationCount"], 0)
 
+    def test_vertical_assets_payload_pages_without_silent_truncation(self):
+        dataset = copy.deepcopy(vertical_fixture(0.11))
+        dataset["models"].append("问界M7")
+        dataset["items"].append({
+            **dataset["items"][0],
+            "competitor": "问界M7",
+            "positiveRank": 2,
+            "negativeRank": 3,
+        })
+        server.remember_vertical_dataset(
+            b"paged-source",
+            "paged-weekly.xlsx",
+            dataset,
+            org_id="org-a",
+            edition="china",
+        )
+
+        first = server.vertical_assets_payload("汽车之家", limit=1, org_id="org-a", edition="china")
+        second = server.vertical_assets_payload("汽车之家", limit=1, org_id="org-a", edition="china", offset=first["nextOffset"])
+
+        self.assertEqual(first["total"], 2)
+        self.assertTrue(first["hasMore"])
+        self.assertEqual(first["nextOffset"], 1)
+        self.assertEqual(second["total"], 2)
+        self.assertFalse(second["hasMore"])
+        self.assertIsNone(second["nextOffset"])
+        self.assertEqual(
+            {first["items"][0]["competitor"], second["items"][0]["competitor"]},
+            {"小米YU7", "问界M7"},
+        )
+
     def test_opportunity_job_cannot_be_read_from_another_org(self):
         with server.OPPORTUNITY_JOB_LOCK:
             server.OPPORTUNITY_JOB_TASKS["job-a"] = {

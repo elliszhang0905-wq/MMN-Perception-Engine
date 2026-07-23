@@ -66,7 +66,7 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         app = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("mmn-brand-penetration-project-request',config:projectConfig", demo)
         self.assertIn("runBrandPenetrationProject", app)
-        self.assertIn('event.data?.type==="mmn-brand-penetration-project-request"', app)
+        self.assertIn('if(event.data?.type==="mmn-brand-penetration-project-save")loadBrandPenetrationSnapshot();else runBrandPenetrationProject(config)', app)
         self.assertIn('event.source!==frame?.contentWindow', app)
         self.assertIn('Array.isArray(config)', app)
 
@@ -125,8 +125,9 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         self.assertIn("row.status==='aligned'", demo)
         self.assertIn("结论已拦截，不展示推测性建议", demo)
         self.assertIn('centerType:"brand_penetration"', app)
-        self.assertIn("analysisOnly:isOfficial", app)
-        self.assertIn('snapshotKeyword:isOfficial?"上汽奥迪品牌传播穿透":""', app)
+        self.assertIn("analysisOnly:reuseExisting", app)
+        self.assertIn('snapshotKeyword:reuseExisting?(isOfficial?"上汽奥迪品牌传播穿透":config.ownBrand):""', app)
+        self.assertIn("brandPenetrationLoadedProjectFingerprint===brandPenetrationProjectFingerprint(config)", app)
         self.assertNotIn("MMN双模型验证", demo)
         self.assertNotIn("双模型共同证据", demo)
 
@@ -139,6 +140,18 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         self.assertEqual(app.count(config_post), 1)
         self.assertIn("品牌穿透中心</h1>", demo)
         self.assertNotIn("<h1>上汽奥迪与竞品", demo)
+
+    def test_legacy_project_cache_is_versioned_without_overwriting_the_project(self):
+        app = (ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertIn('BRAND_PENETRATION_PROJECT_SCHEMA="brand-penetration-project-v2"', app)
+        self.assertIn("return{schemaVersion:BRAND_PENETRATION_PROJECT_SCHEMA,name,ownBrand,competitors,range}", app)
+        self.assertIn("renderBrandPenetrationProjectContext(config)", app)
+        self.assertIn('summary.textContent=`${project.ownBrand} × ${project.competitors.length}个竞品`', app)
+        self.assertIn("if(title)title.textContent=project.name", app)
+        self.assertIn("const loadToken=++brandPenetrationLoadToken", app)
+        self.assertIn("if(loadToken!==brandPenetrationLoadToken)return", app)
+        self.assertIn("brandPenetrationLoadToken++;", app)
+        self.assertIn("normalizeBrandPenetrationProject(rawConfig)", app)
 
     def test_snapshot_query_and_result_are_scoped_to_the_current_brand_set(self):
         app = (ROOT / "app.js").read_text(encoding="utf-8")

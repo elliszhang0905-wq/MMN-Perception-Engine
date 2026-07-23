@@ -31,6 +31,7 @@ import urllib.robotparser as robotparser
 import xml.etree.ElementTree as ET
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 from mmn_data import DATA_ROOT
 
@@ -241,7 +242,7 @@ except Exception:
 
 ROOT = Path(__file__).resolve().parent
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260723-cockpit-social-brand-1"
+APP_VERSION_CODE = "beta-1.03-20260723-vertical-social-reliability-1"
 APP_RELEASE_DATE = "2026-07-23"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -892,6 +893,26 @@ def init_db():
             parser_version text not null,
             unique(org_id, edition, platform, file_hash)
         );
+        create table if not exists vertical_image_reviews (
+            id text primary key,
+            org_id text not null default 'local',
+            edition text not null default 'china',
+            status text not null default 'draft',
+            platform text not null,
+            filename text not null,
+            file_hash text not null,
+            evidence_path text not null,
+            own_model text,
+            period_start text,
+            period_end text,
+            extracted_json text not null,
+            corrected_json text,
+            warnings_json text not null default '[]',
+            created_at text not null,
+            confirmed_at text
+        );
+        create index if not exists idx_vertical_image_reviews_scope
+        on vertical_image_reviews(org_id, edition, created_at desc);
         create table if not exists vehicle_assets (
             id text primary key,
             org_id text not null default 'local',
@@ -8541,22 +8562,29 @@ def summarize_vertical_assets(platform, org_id="local", edition="china"):
         "topBrands": [dict(x) for x in brands]
     }
 
-def vertical_assets_payload(platform="all", limit=5000, org_id="local", edition="china"):
+def vertical_assets_payload(platform="all", limit=5000, org_id="local", edition="china", offset=0):
     edition = edition_from(edition)
+    limit = max(1, min(int(limit or 5000), 5000))
+    offset = max(0, int(offset or 0))
     platforms = VERTICAL_PLATFORMS if platform in ("", "all", "全部来源") else [platform]
     summaries = [summarize_vertical_assets(p, org_id, edition) for p in platforms if p in VERTICAL_PLATFORMS]
     with db() as conn:
         placeholders = ",".join("?" for _ in platforms if _ in VERTICAL_PLATFORMS)
         if not placeholders:
-            return {"platform": platform, "assetSummary": {"platform": platform, "brandCount": 0, "modelCount": 0, "relationCount": 0, "periodCount": 0, "topBrands": []}, "items": [], "sources": []}
+            return {"platform": platform, "assetSummary": {"platform": platform, "brandCount": 0, "modelCount": 0, "relationCount": 0, "periodCount": 0, "topBrands": []}, "items": [], "sources": [], "total": 0, "offset": offset, "hasMore": False, "nextOffset": None}
+        total = int(conn.execute(f"""
+            select count(*)
+            from vertical_rank_assets
+            where org_id=? and edition=? and platform in ({placeholders})
+        """, (org_id, edition, *[p for p in platforms if p in VERTICAL_PLATFORMS])).fetchone()[0] or 0)
         rows = conn.execute(f"""
             select platform, period, own_model, competitor_model, positive_rank, negative_rank,
                    compare_share, source_file, sheet, parse_mode, updated_at
             from vertical_rank_assets
             where org_id=? and edition=? and platform in ({placeholders})
             order by platform, period, own_model, coalesce(positive_rank, 999), coalesce(negative_rank, 999), competitor_model
-            limit ?
-        """, (org_id, edition, *[p for p in platforms if p in VERTICAL_PLATFORMS], int(limit or 5000))).fetchall()
+            limit ? offset ?
+        """, (org_id, edition, *[p for p in platforms if p in VERTICAL_PLATFORMS], limit, offset)).fetchall()
     items = [{
         "source": row["source_file"] or "vertical_rank_assets",
         "platform": row["platform"],
@@ -8587,7 +8615,11 @@ def vertical_assets_payload(platform="all", limit=5000, org_id="local", edition=
             "topBrands": [b for x in summaries for b in x.get("topBrands", [])][:12]
         },
         "items": items,
-        "sources": list(source_map.values())
+        "sources": list(source_map.values()),
+        "total": total,
+        "offset": offset,
+        "hasMore": offset + len(items) < total,
+        "nextOffset": offset + len(items) if offset + len(items) < total else None
     }
 
 
@@ -8641,9 +8673,409 @@ def build_opportunity_vertical_evidence(own_model, competitors, org_id="local", 
         })
     return output
 
-def remember_vertical_dataset(data, filename, dataset, org_id="local", edition="china"):
-    validate_vertical_platform(dataset)
+def _vertical_image_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _vertical_image_date_range(observations):
+    text = " ".join(_vertical_image_text(item.get("text")) for item in observations)
+    match = re.search(
+        r"(20\d{2})[./年-](\d{1,2})[./月-](\d{1,2})日?\s*(?:到|至|~|—|–)\s*"
+        r"(20\d{2})[./年-](\d{1,2})[./月-](\d{1,2})日?",
+        text,
+    )
+    if not match:
+        return "", ""
+    start = f"{int(match.group(1)):04d}-{int(match.group(2)):02d}-{int(match.group(3)):02d}"
+    end = f"{int(match.group(4)):04d}-{int(match.group(5)):02d}-{int(match.group(6)):02d}"
+    return start, end
+
+
+def _vertical_image_int(value):
+    match = re.fullmatch(r"\s*(\d{1,3})\s*", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _vertical_image_model_alias(value):
+    raw = _vertical_image_text(value)
+    aliases = {
+        "ZEEKR 7X": "极氪7X",
+        "ZEEKR7X": "极氪7X",
+        "阿维塔 07": "阿维塔07",
+    }
+    return aliases.get(raw, clean_model_name(raw))
+
+
+def _vertical_image_confirmation_errors(own_model, period_start, period_end, rows):
+    errors = []
+    own_model = clean_model_name(own_model)
+    if not own_model:
+        errors.append("请确认本品车型")
+    try:
+        start = datetime.strptime(str(period_start or ""), "%Y-%m-%d").date()
+        end = datetime.strptime(str(period_end or ""), "%Y-%m-%d").date()
+        if (end - start).days != 6:
+            errors.append("懂车帝周榜周期必须是连续7个自然日")
+    except ValueError:
+        errors.append("请确认懂车帝周榜起止日期")
+    if not isinstance(rows, list) or not rows:
+        errors.append("未识别到可确认的竞品排名")
+        return errors
+
+    competitors = []
+    positives = []
+    for index, row in enumerate(rows, 1):
+        competitor = clean_model_name(row.get("normalizedModel") or row.get("rawModel"))
+        positive = _vertical_image_int(row.get("positiveRank"))
+        negative = _vertical_image_int(row.get("negativeRank"))
+        if not competitor:
+            errors.append(f"第{index}行缺少竞品车型")
+        elif competitor == own_model:
+            errors.append("竞品不能与本品车型相同")
+        competitors.append(competitor)
+        if positive is None or positive <= 0:
+            errors.append(f"第{index}行正向排名无效")
+        else:
+            positives.append(positive)
+        if negative is None or negative <= 0:
+            errors.append(f"第{index}行反向排名无效")
+    if len([item for item in competitors if item]) != len(set(item for item in competitors if item)):
+        errors.append("竞品车型不能重复")
+    if len(positives) != len(set(positives)):
+        errors.append("正向排名不能重复")
+    if positives and sorted(positives) != list(range(1, len(positives) + 1)):
+        errors.append(f"正向排名应连续覆盖1至{len(positives)}")
+    return list(dict.fromkeys(errors))
+
+
+def parse_vertical_rank_image_observations(observations, filename, own_model=""):
+    cleaned = []
+    for item in observations or []:
+        text = _vertical_image_text(item.get("text"))
+        if not text:
+            continue
+        cleaned.append({
+            "text": text,
+            "x": float(item.get("x") or 0),
+            "y": float(item.get("y") or 0),
+            "width": float(item.get("width") or 0),
+            "height": float(item.get("height") or 0),
+            "confidence": max(0.0, min(1.0, float(item.get("confidence") or 0))),
+        })
+    full_text = " ".join(item["text"] for item in cleaned)
+    if "汽车之家" in full_text:
+        raise ValueError("本项目仅采用懂车帝周榜，汽车之家图片不会纳入竞争格局")
+    if "懂车帝" not in full_text:
+        raise ValueError("未识别为懂车帝周榜，请上传包含平台名称和周周期的完整截图")
+
+    headers = {}
+    for item in cleaned:
+        compact = item["text"].replace(" ", "")
+        if compact == "竞品":
+            headers["model"] = item
+        elif "正向排名" in compact:
+            headers["positive"] = item
+        elif "反向排名" in compact:
+            headers["negative"] = item
+    if set(headers) != {"model", "positive", "negative"}:
+        raise ValueError("未完整识别竞品、正向排名、反向排名表头")
+
+    period_start, period_end = _vertical_image_date_range(cleaned)
+    model_center = headers["model"]["x"] + headers["model"]["width"] / 2
+    positive_center = headers["positive"]["x"] + headers["positive"]["width"] / 2
+    negative_center = headers["negative"]["x"] + headers["negative"]["width"] / 2
+    model_positive_boundary = (model_center + positive_center) / 2
+    positive_negative_boundary = (positive_center + negative_center) / 2
+    header_y = min(item["y"] for item in headers.values())
+
+    model_cells = []
+    positive_cells = []
+    negative_cells = []
+    for item in cleaned:
+        if item["y"] >= header_y - 0.01:
+            continue
+        center = item["x"] + item["width"] / 2
+        number = _vertical_image_int(item["text"])
+        if center < model_positive_boundary and number is None:
+            model_cells.append(item)
+        elif model_positive_boundary <= center < positive_negative_boundary and number is not None:
+            positive_cells.append({**item, "number": number})
+        elif center >= positive_negative_boundary and number is not None:
+            negative_cells.append({**item, "number": number})
+
+    rows = []
+    for model_cell in sorted(model_cells, key=lambda item: item["y"], reverse=True):
+        positive = min(positive_cells, key=lambda item: abs(item["y"] - model_cell["y"]), default=None)
+        negative = min(negative_cells, key=lambda item: abs(item["y"] - model_cell["y"]), default=None)
+        if not positive or not negative:
+            continue
+        if abs(positive["y"] - model_cell["y"]) > 0.04 or abs(negative["y"] - model_cell["y"]) > 0.04:
+            continue
+        confidence = min(model_cell["confidence"], positive["confidence"], negative["confidence"])
+        warnings = ["请核对车型名称"] if confidence < 0.75 else []
+        rows.append({
+            "rawModel": model_cell["text"],
+            "normalizedModel": _vertical_image_model_alias(model_cell["text"]),
+            "positiveRank": positive["number"],
+            "negativeRank": negative["number"],
+            "confidence": round(confidence, 3),
+            "warnings": warnings,
+        })
+    rows.sort(key=lambda row: row["positiveRank"])
+    warnings = []
+    if not period_start or not period_end:
+        warnings.append("请确认懂车帝周榜起止日期")
+    if len(rows) != 10:
+        warnings.append(f"当前识别到{len(rows)}条，懂车帝Top 10应为10条")
+    positives = [row["positiveRank"] for row in rows]
+    if positives != list(range(1, len(rows) + 1)):
+        warnings.append("正向排名未形成连续序列，请逐行核对")
+    if any(row["warnings"] for row in rows):
+        warnings.append("部分车型名称需要人工核对")
+    return {
+        "status": "manual_required",
+        "statusLabel": "图片已识别，确认后才会纳入竞争格局",
+        "sourceKind": "image",
+        "platform": "懂车帝",
+        "filename": filename,
+        "ownModel": clean_model_name(own_model),
+        "ownModelConfirmed": False,
+        "periodStart": period_start,
+        "periodEnd": period_end,
+        "rows": rows,
+        "warnings": list(dict.fromkeys(warnings)),
+    }
+
+
+def _vertical_image_observations(data):
+    try:
+        from PIL import Image
+        import pytesseract
+
+        details = pytesseract.image_to_data(
+            Image.open(io.BytesIO(data)),
+            lang="chi_sim+eng",
+            output_type=pytesseract.Output.DICT,
+        )
+        width, height = Image.open(io.BytesIO(data)).size
+        grouped = {}
+        for index, text in enumerate(details.get("text", [])):
+            text = _vertical_image_text(text)
+            if not text:
+                continue
+            key = (
+                details["block_num"][index],
+                details["par_num"][index],
+                details["line_num"][index],
+            )
+            grouped.setdefault(key, []).append(index)
+        observations = []
+        for indexes in grouped.values():
+            left = min(details["left"][index] for index in indexes)
+            top = min(details["top"][index] for index in indexes)
+            right = max(details["left"][index] + details["width"][index] for index in indexes)
+            bottom = max(details["top"][index] + details["height"][index] for index in indexes)
+            confidence_values = [float(details["conf"][index]) for index in indexes if float(details["conf"][index]) >= 0]
+            observations.append({
+                "text": " ".join(_vertical_image_text(details["text"][index]) for index in indexes),
+                "x": left / width,
+                "y": 1 - bottom / height,
+                "width": (right - left) / width,
+                "height": (bottom - top) / height,
+                "confidence": (sum(confidence_values) / len(confidence_values) / 100) if confidence_values else 0,
+            })
+        if observations:
+            return observations
+    except Exception:
+        pass
+
+    helper = ROOT / "scripts" / "vertical_image_ocr.swift"
+    swift = shutil.which("swift")
+    if swift and helper.is_file():
+        suffix = ".png"
+        if data.startswith(b"\xff\xd8\xff"):
+            suffix = ".jpg"
+        elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+            suffix = ".webp"
+        with tempfile.NamedTemporaryFile(suffix=suffix) as image_file:
+            image_file.write(data)
+            image_file.flush()
+            result = subprocess.run(
+                [swift, str(helper), image_file.name],
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+        if result.returncode == 0:
+            try:
+                observations = json.loads(result.stdout)
+                if isinstance(observations, list) and observations:
+                    return observations
+            except json.JSONDecodeError:
+                pass
+    raise ValueError("图片识别暂时不可用，请稍后重试或继续使用Excel导入")
+
+
+def create_vertical_rank_image_preview(data, filename, own_model="", org_id="local", edition="china", observations=None):
+    info = validate_upload(filename, data)
+    if info["extension"] not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise ValueError("懂车帝周榜图片仅支持 PNG、JPG、JPEG 和 WebP")
+    preview = parse_vertical_rank_image_observations(
+        observations if observations is not None else _vertical_image_observations(data),
+        info["filename"],
+        own_model=own_model,
+    )
     init_db()
+    edition = edition_from(edition)
+    digest = file_hash(data)
+    safe_org = re.sub(r"[^A-Za-z0-9._-]+", "_", str(org_id or "local"))
+    evidence_dir = DB_PATH.parent / "vertical_evidence" / safe_org / edition
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    evidence_path = evidence_dir / f"{digest}{info['extension']}"
+    if not evidence_path.exists():
+        evidence_path.write_bytes(data)
+    preview_id = stable_id(
+        "vertical-image-preview",
+        org_id,
+        edition,
+        digest,
+        preview.get("ownModel"),
+        preview.get("periodStart"),
+        preview.get("periodEnd"),
+    )
+    created_at = now()
+    with db() as conn:
+        conn.execute(
+            """
+            insert into vertical_image_reviews
+            (id, org_id, edition, status, platform, filename, file_hash, evidence_path, own_model,
+             period_start, period_end, extracted_json, corrected_json, warnings_json, created_at, confirmed_at)
+            values (?, ?, ?, 'draft', '懂车帝', ?, ?, ?, ?, ?, ?, ?, null, ?, ?, null)
+            on conflict(id) do update set
+              filename=excluded.filename,
+              evidence_path=excluded.evidence_path,
+              extracted_json=excluded.extracted_json,
+              warnings_json=excluded.warnings_json
+            """,
+            (
+                preview_id,
+                org_id,
+                edition,
+                info["filename"],
+                digest,
+                str(evidence_path),
+                preview.get("ownModel") or "",
+                preview.get("periodStart") or "",
+                preview.get("periodEnd") or "",
+                json.dumps(preview, ensure_ascii=False),
+                json.dumps(preview.get("warnings") or [], ensure_ascii=False),
+                created_at,
+            ),
+        )
+    return {
+        **preview,
+        "previewId": preview_id,
+        "fileHash": digest,
+        "evidenceStored": True,
+    }
+
+
+def _vertical_image_dataset(filename, own_model, period_start, period_end, rows):
+    period = f"{period_start}至{period_end}"
+    items = []
+    for row in rows:
+        competitor = clean_model_name(row.get("normalizedModel") or row.get("rawModel"))
+        items.append({
+            "source": filename,
+            "platform": "懂车帝",
+            "period": period,
+            "periodOrder": period_start,
+            "ownModel": clean_model_name(own_model),
+            "competitor": competitor,
+            "positiveRank": _vertical_image_int(row.get("positiveRank")),
+            "negativeRank": _vertical_image_int(row.get("negativeRank")),
+            "share": None,
+            "sheet": period,
+            "parseMode": "image-reviewed",
+        })
+    return {
+        "source": filename,
+        "platform": "懂车帝",
+        "periods": [period],
+        "models": sorted({clean_model_name(own_model), *[item["competitor"] for item in items]}),
+        "items": items,
+        "count": len(items),
+    }
+
+
+def confirm_vertical_rank_image_preview(payload, org_id="local", edition="china"):
+    preview_id = str(payload.get("previewId") or "").strip()
+    if not preview_id:
+        raise ValueError("缺少图片确认记录")
+    init_db()
+    edition = edition_from(edition)
+    with db() as conn:
+        review = conn.execute(
+            "select * from vertical_image_reviews where id=? and org_id=? and edition=?",
+            (preview_id, org_id, edition),
+        ).fetchone()
+    if not review:
+        raise ValueError("图片确认记录不存在或不属于当前客户空间")
+    if payload.get("ownModelConfirmed") is not True:
+        raise ValueError("请人工确认本品车型与当前项目一致")
+
+    own_model = clean_model_name(payload.get("ownModel"))
+    period_start = str(payload.get("periodStart") or "").strip()
+    period_end = str(payload.get("periodEnd") or "").strip()
+    rows = payload.get("rows") or []
+    errors = _vertical_image_confirmation_errors(own_model, period_start, period_end, rows)
+    if errors:
+        raise ValueError("；".join(errors))
+    corrected = {
+        "ownModel": own_model,
+        "periodStart": period_start,
+        "periodEnd": period_end,
+        "rows": rows,
+    }
+    corrected_json = json.dumps(corrected, ensure_ascii=False, sort_keys=True)
+    dataset = _vertical_image_dataset(review["filename"], own_model, period_start, period_end, rows)
+    if review["status"] == "confirmed" and review["corrected_json"] == corrected_json:
+        dataset["assetSummary"] = summarize_vertical_assets("懂车帝", org_id, edition)
+        dataset["knowledgeItems"] = build_vertical_knowledge_items(dataset, review["filename"], limit=120)
+        return {"ok": True, "idempotent": True, "dataset": dataset}
+
+    evidence_path = Path(review["evidence_path"])
+    if not evidence_path.is_file() or file_hash(evidence_path.read_bytes()) != review["file_hash"]:
+        raise ValueError("原始图片证据缺失或校验失败，不能写入正式竞争格局")
+    data = evidence_path.read_bytes()
+    confirmed_at = now()
+    with db() as conn:
+        dataset = remember_vertical_dataset(
+            data,
+            review["filename"],
+            dataset,
+            org_id=org_id,
+            edition=edition,
+            connection=conn,
+        )
+        conn.execute(
+            """
+            update vertical_image_reviews
+            set status='confirmed', own_model=?, period_start=?, period_end=?,
+                corrected_json=?, confirmed_at=?
+            where id=? and org_id=? and edition=?
+            """,
+            (own_model, period_start, period_end, corrected_json, confirmed_at, preview_id, org_id, edition),
+        )
+    dataset["assetSummary"] = summarize_vertical_assets("懂车帝", org_id, edition)
+    return {"ok": True, "idempotent": False, "dataset": dataset}
+
+
+def remember_vertical_dataset(data, filename, dataset, org_id="local", edition="china", connection=None):
+    validate_vertical_platform(dataset)
+    if connection is None:
+        init_db()
     imported_at = now()
     h = file_hash(data)
     platform = dataset["platform"]
@@ -8656,7 +9088,7 @@ def remember_vertical_dataset(data, filename, dataset, org_id="local", edition="
         if item.get("competitor"):
             models.add(item["competitor"])
 
-    with db() as conn:
+    with (db() if connection is None else nullcontext(connection)) as conn:
         # A file import is a snapshot. Re-importing the same named source must
         # retract rows that disappeared after parser fixes or source updates.
         conn.execute(
@@ -8763,7 +9195,7 @@ def remember_vertical_dataset(data, filename, dataset, org_id="local", edition="
                 imported_at,
                 imported_at
             ))
-    dataset["assetSummary"] = summarize_vertical_assets(platform, org_id, edition)
+    dataset["assetSummary"] = summarize_vertical_assets(platform, org_id, edition) if connection is None else None
     dataset["remembered"] = {
         "platform": platform,
         "orgId": org_id,
@@ -14572,10 +15004,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": "正反向车型资产只支持汽车之家和懂车帝"}, 400)
                 return
             limit = int(q.get("limit", ["5000"])[0] or 5000)
+            offset = int(q.get("offset", ["0"])[0] or 0)
             auth = self.require_cloud_auth()
             if not auth:
                 return
-            self.send_json({"ok": True, **vertical_assets_payload(platform, limit, auth.get("org_id", "local"), q.get("edition", ["china"])[0])})
+            self.send_json({"ok": True, **vertical_assets_payload(platform, limit, auth.get("org_id", "local"), q.get("edition", ["china"])[0], offset)})
             return
         if parsed.path == "/api/learnings":
             q = parse_qs(parsed.query)
@@ -15958,6 +16391,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 data = self.rfile.read(length)
                 result = build_video_dataset_from_workbook(data, filename)
                 self.send_json({"ok": True, "dataset": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vertical-rank-image/preview":
+            query = parse_qs(parsed.query)
+            length = int(self.headers.get("Content-Length", "0"))
+            filename = query.get("filename", ["懂车帝周榜.png"])[0]
+            if length > MAX_UPLOAD_BYTES:
+                self.send_json({"ok": False, "error": f"图片超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制"}, 400)
+                return
+            try:
+                data = self.rfile.read(length)
+                auth = self.current_auth() or {}
+                preview = create_vertical_rank_image_preview(
+                    data,
+                    filename,
+                    own_model=query.get("ownModel", [""])[0],
+                    org_id=auth.get("org_id", "local"),
+                    edition=query.get("edition", ["china"])[0],
+                )
+                self.send_json({"ok": True, "preview": preview})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/vertical-rank-image/confirm":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                result = confirm_vertical_rank_image_preview(
+                    body,
+                    org_id=auth.get("org_id", "local"),
+                    edition=body.get("edition", "china"),
+                )
+                self.send_json(result)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
