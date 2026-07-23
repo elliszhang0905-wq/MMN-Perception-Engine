@@ -70,6 +70,7 @@ python3 -m unittest \
   tests.test_vertical_rank_image \
   tests.test_cloud_demo_release_consistency \
   tests.test_http_disconnects \
+  tests.test_static_file_boundary \
   tests.test_all_surfaces_release_gate -v
 
 echo "MMN release gate:研发档案检查"

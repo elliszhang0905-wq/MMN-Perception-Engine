@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread, Timer, Semaphore
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import HTTPError, URLError
 import urllib.robotparser as robotparser
@@ -248,9 +248,41 @@ except Exception:
     enqueue_distillation = None
 
 ROOT = Path(__file__).resolve().parent
+PUBLIC_STATIC_FILES = frozenset({
+    "index.html",
+    "app.js",
+    "bf-factory.js",
+    "data_20260608.js",
+    "demo-brand-weekly-radar.html",
+    "douyin-hot-demo.css",
+    "douyin-hot-demo.js",
+    "group-dashboard-charts.css",
+    "group-dashboard.css",
+    "group-dashboard.js",
+    "knowhow.css",
+    "lead-dashboard.css",
+    "lead-dashboard.js",
+    "legacy-product-evaluation.js",
+    "nsr-map.js",
+    "opportunity-job-ui.js",
+    "opportunity-source-parser.js",
+    "policy-intelligence.css",
+    "policy-intelligence.js",
+    "sales-warning-cycle-context.js",
+    "style.css",
+    "t-cycle.js",
+    "vehicle-decision.css",
+    "vehicle-decision.js",
+    "xhs-content-ranking-demo.js",
+    "assets/favicon.svg",
+    "assets/mmn-logo-cn-line-cropped.png",
+    "assets/mmn-logo-cn-line.png",
+    "assets/mmn-logo-reverse-cropped.png",
+    "assets/mmn-logo-reverse.png",
+})
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260723-vertical-social-reliability-2"
-APP_RELEASE_DATE = "2026-07-23"
+APP_VERSION_CODE = "beta-1.03-20260724-static-boundary-1"
+APP_RELEASE_DATE = "2026-07-24"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -14234,10 +14266,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def public_static_file(self):
+        path = urlparse(self.path).path or "/"
+        for _ in range(3):
+            decoded = unquote(path)
+            if decoded == path:
+                break
+            path = decoded
+        path = path.replace("\\", "/")
+        if "\x00" in path:
+            return None
+        parts = path.split("/")
+        if any(part in {".", ".."} for part in parts):
+            return None
+        relative_path = "/".join(part for part in parts if part)
+        if not relative_path:
+            relative_path = "index.html"
+        return relative_path if relative_path in PUBLIC_STATIC_FILES else None
+
+    def send_head(self):
+        if self.public_static_file() is None:
+            self.send_error(404)
+            return None
+        return super().send_head()
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
         super().end_headers()
 
     def send_json(self, payload, status=200):
