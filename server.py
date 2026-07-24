@@ -304,8 +304,8 @@ SCHEDULER_POST_PATHS = frozenset({
     "/api/blogger-skill/scan-imports",
 })
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260724-security-boundary-2"
-APP_RELEASE_DATE = "2026-07-24"
+APP_VERSION_CODE = "beta-1.03-20260725-video-insight-retry-1"
+APP_RELEASE_DATE = "2026-07-25"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
