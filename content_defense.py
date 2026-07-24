@@ -35,8 +35,20 @@ def _text(value, limit=1600):
 def public_failure_reason(value):
     """Keep acquisition failures useful without exposing implementation vendors."""
     text = _text(value, 500)
+    if "AllocationQuota.FreeTierOnly" in text:
+        return (
+            "当前分析能力的可用额度已耗尽，且仅允许使用免费额度；"
+            "请联系管理员补充额度或调整额度策略后重试。"
+        )
     return re.sub(
-        r"(?i)(?:qwen|deepseek|kimi|tikhub|playwright|dashscope|provider|通义千问|千问|百炼)",
+        (
+            r"(?i)(?:"
+            r"qwen(?:[/_-]?[a-z0-9.]+)*|"
+            r"deepseek(?:[/_-]?[a-z0-9.]+)*|"
+            r"kimi(?:[/_-]?[a-z0-9.]+)*|"
+            r"tikhub|playwright|dashscope|provider|通义千问|千问|百炼"
+            r")"
+        ),
         "证据能力",
         text,
     )

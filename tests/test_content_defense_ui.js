@@ -28,6 +28,9 @@ assert.match(js,/原网页可播放，但后台尚未取得可直接分析的画
 assert.match(js,/jobStatus==="limited_analysis"&&!row\.output&&!row\.error\)return "未启动"/);
 assert.match(js,/查看完整洞察/);
 assert.match(js,/人工复核入口/);
+assert.match(js,/douyin-video-failure-reasons/);
+assert.match(js,/失败原因/);
+assert.match(js,/failedRuns=runs\.filter\(row=>row\.status==="failed"&&row\.error\)/);
 assert.match(js,/video-insights\/jobs\/\$\{encodeURIComponent\(jobId\)\}\/review/);
 assert.doesNotMatch(js,/互动率约/,"互动率模板不得继续冒充逐视频洞察");
 assert.doesNotMatch(js,/function signal\(/,"视频卡不得再依赖旧的走红信号模板");

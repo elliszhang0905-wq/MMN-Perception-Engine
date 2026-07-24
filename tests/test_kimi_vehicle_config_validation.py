@@ -1,4 +1,7 @@
+import json
 import unittest
+from io import BytesIO
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 import server
@@ -27,6 +30,35 @@ class KimiVehicleConfigValidationTest(unittest.TestCase):
         self.assertTrue(config["configured"])
         self.assertEqual(config["model"], "kimi-flagship")
         self.assertEqual(config["base_url"], "https://example.test/v1")
+
+    def test_kimi_deep_default_tracks_current_flagship(self):
+        with patch.dict(
+            server.os.environ,
+            {"KIMI_API_KEY": "test-key", "KIMI_MODEL": "", "KIMI_DEEP_MODEL": ""},
+            clear=False,
+        ):
+            self.assertEqual(server.kimi_model_for("deep"), "kimi-k2.6")
+
+    def test_kimi_free_tier_rejection_exposes_actual_model_and_action(self):
+        payload = json.dumps({"error": {
+            "code": "AllocationQuota.FreeTierOnly",
+            "message": "Free quota exhausted",
+        }}).encode("utf-8")
+        rejection = HTTPError("https://dashscope.test/chat/completions", 403, "Forbidden", {}, BytesIO(payload))
+        config = {
+            "configured": True,
+            "base_url": "https://dashscope.test",
+            "model": "kimi-flagship",
+        }
+
+        with patch.object(server, "kimi_config", return_value=config), \
+             patch.object(server, "env_value", return_value="test-key"), \
+             patch.object(server, "urlopen", side_effect=rejection):
+            with self.assertRaisesRegex(
+                ValueError,
+                "AllocationQuota.FreeTierOnly.*kimi-flagship.*仅使用免费额度",
+            ):
+                server.call_kimi([{"role": "user", "content": "test"}], profile="deep")
 
     def test_vehicle_configuration_requires_all_three_models_on_common_evidence(self):
         outputs = {
