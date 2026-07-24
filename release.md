@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-24｜beta 1.03 E7X线索One-Page本地交付
+
+- 功能提交：`6011904`；随本条日志同步GitHub当前分支`codex/social-evidence-v2`。本轮不合并`main`、不创建版本标签、不部署ECS。
+- E7X线索看板改为分块式One-Page结构：四阶段线索/订单达成双轨图、100%目标基准、当前阶段进度、6月下半月表现背离和7月进行中状态集中呈现。
+- 证据边界保持不变：页面明确标注“车型总体线索｜暂未分平台”，缺少线索订单关联时不能认定为真实转化率下降；非E7X车型继续显示真实缺失状态。
+- 本地部署：`scripts/ensure_local_mmn.sh`确认`127.0.0.1:8765`可用，健康接口持久化检查为`ok`；静态资源已返回新看板结构。运行版本仍保持`beta-1.03-20260724-security-p1-1`，本次前端增量不冒充新的生产版本。
+- 发布门禁：完整`npm run release:gate`通过，覆盖全部前端合同、189项后端专项、19个客户入口、8个管理视图、1440px与390px；`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。
+- 本地真实流程：管理层版进入销量预警并选择奥迪E7X后，展示4个阶段图组、表现背离、进行中说明和证据边界；390px页面`scrollWidth=clientWidth=390`，控制台错误和警告均为0。
+- 数据保护：门禁前备份`tmp/e7x-lead-onepage-release-20260724/commercial_demo_before_gate.db`；浏览器验收触发的车型身份时间字段和E7X目录时间戳已按明确主键恢复。最终77张表与备份逐表、逐主键、逐字段逻辑对比无差异，`quick_check=ok`。
+- 回滚：代码执行`git revert 6011904`并重新运行本地守护脚本；本次无数据库迁移或业务数据变更。
+
 ## 2026-07-23｜beta 1.03 竞品格局与社媒可靠性发布
 
 - 最终版本码：`beta-1.03-20260723-vertical-social-reliability-2`；应用提交 `f3b35738e2327026e65fe1e6d944325c54210844` 已同步 GitHub `codex/social-evidence-v2`、`main` 和同名标签，并部署 ECS。首轮 `-1` 部署在真实 Linux 图片门禁发现 OCR 差异后未作完成结论，修复后升级为 `-2`。
