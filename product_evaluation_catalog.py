@@ -85,6 +85,21 @@ def save_dataset(conn, *, org_id, edition, dataset, user_id=""):
     if edition not in VALID_EDITIONS:
         raise ValueError("产品评价数据版本范围无效。")
     normalized, source_model, dataset_version, fingerprint, raw = validate_dataset(dataset)
+    existing = conn.execute(
+        """
+        select updated_at from product_evaluation_datasets
+        where org_id=? and edition=? and source_model=? and fingerprint=?
+        """,
+        (org_id, edition, source_model, fingerprint),
+    ).fetchone()
+    if existing:
+        return {
+            "sourceModel": source_model,
+            "datasetVersion": dataset_version,
+            "fingerprint": fingerprint,
+            "dataset": normalized,
+            "updatedAt": existing["updated_at"] if hasattr(existing, "keys") else existing[0],
+        }
     timestamp = _now()
     conn.execute(
         """

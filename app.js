@@ -656,12 +656,12 @@ function canonicalModelLabel(model){
  const family=id.model_family||id.normalized_name||model;
  return energy&&energy!=="UNKNOWN"?`${family} · ${energy}`:family;
 }
-async function ensureModelIdentities(models=[]){
+async function ensureModelIdentities(models=[],{persistToServer=false}={}){
  let localChanged=false;
  models.filter(Boolean).forEach(m=>{const local=localStandardIdentity(m);if(local&&!modelIdentityFor(m)){modelIdentities.items[m]={raw_name:m,...local,confidence:"local-standard",qwen_checked:0,qwen_reason:"MMN本地车型资产规则"};localChanged=true}});
  if(localChanged){modelIdentities.updatedAt=new Date().toISOString();saveModelIdentities()}
  const missing=[...new Set(models.filter(Boolean))].filter(m=>!modelIdentityFor(m)||isBadBrandName(modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName,m)||((modelIdentityFor(m)?.brand_name||modelIdentityFor(m)?.brandName)==="待确认品牌"&&!modelIdentityFor(m)?.qwen_checked&&!modelIdentityFor(m)?.qwenChecked));
- if(!missing.length||modelIdentitySyncing)return;
+ if(!persistToServer||!missing.length||modelIdentitySyncing)return;
  modelIdentitySyncing=true;
  try{
   const data=await api("/api/ai/model-identities",{method:"POST",body:JSON.stringify({edition:activeEdition(),models:missing.slice(0,80)})});
@@ -5494,7 +5494,7 @@ async function importDataFile(file,{merge=false}={}){
    state.config.competitor=[...comps].filter(x=>x!==state.config.model).join(" / ");
   }
   nsrMapSelectedModels=[];nsrMapSelectionInitialized=false;
-  ensureModelIdentities(state.models||[]);
+  ensureModelIdentities(state.models||[],{persistToServer:true});
   if(previousOpportunityContext!==opportunityCacheContext().key){resetOpportunityContextState();restoreOpportunityContext()}
   save();render();showPage("dashboard");
   toast(`已导入 ${dataset.sourceRowCount||incomingRows.length} 条原始记录，聚合为 ${incomingRows.length} 组，结果已刷新`);
@@ -5512,7 +5512,7 @@ async function importDataFile(file,{merge=false}={}){
  summaryDashboardModels=[...(state.models||[])];
  nsrMapSelectedModels=[];nsrMapSelectionInitialized=false;
  if(previousOpportunityContext!==opportunityCacheContext().key){resetOpportunityContextState();restoreOpportunityContext()}
- ensureModelIdentities(state.models||[]);save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
+ ensureModelIdentities(state.models||[],{persistToServer:true});save();render();showPage("dashboard");toast(`已导入 ${state.rows.length} 行，结果已刷新`);
 }
 document.querySelector("#xlsx-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await importDataFile(file,{merge:/\.csv$/i.test(file.name)})}catch(err){toast(`数据导入失败：${err.message}`)}finally{e.target.value=""}};
 async function applyVerticalImportedDataset(dataset,{activePageId=document.querySelector(".page.active")?.id||"vertical",previousCompetitionSnapshotId=dashboardCompetitionSnapshot().snapshotId,successVerb="已导入"}={}){

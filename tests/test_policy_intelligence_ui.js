@@ -52,6 +52,8 @@ for (const model of ["Qwen 3.7 Max", "DeepSeek V4 Pro", "Kimi K2.5"]) {
 }
 assert(source.includes('select[name="region"]'), "切换区域后应自动触发区域政策和三模型策略刷新");
 assert(source.includes("strategyValidation"), "前端应展示后端三模型交叉验证状态");
+assert(source.includes("persist: force"), "自动预览不得保存政策分析，只有人工重新运行才允许持久化");
+assert(!source.includes("void startEvaluation();"), "打开政策看板不得自动写入分析记录");
 assert(source.includes('["aligned", "manual_required"].includes(validation?.status)'), "只有一致或明确进入人工裁决的结果才能开放Policy Eval");
 assert(source.includes("loadRequest"), "区域快速切换必须使用请求序号阻止旧响应覆盖新选择");
 assert(source.includes("MMN模型输出策略"), "区域策略结论必须使用MMN既定输出措辞");
@@ -65,6 +67,8 @@ assert(source.includes('target.dataset.submitting === "true" || target.dataset.s
 assert(source.includes('button.textContent = "评分提交中…"'), "Policy Eval点击后必须立即提供提交中反馈");
 assert(source.includes("评分已保存但未通过"), "未通过的Policy Eval必须明确说明保存结果与知识版本状态");
 assert(source.includes("当前结果未进入可用知识版本"), "Policy Eval未通过时不得让用户误以为已发布结论");
+assert(app.includes("async function ensureModelIdentities(models=[],{persistToServer=false}={})"), "车型标准化必须显式区分只读浏览与导入持久化");
+assert(app.includes("ensureModelIdentities(state.models||[],{persistToServer:true})"), "数据导入后才允许把车型标准化结果写入服务端");
 
 const groupSource = fs.readFileSync(path.join(root, "group-dashboard.js"), "utf8");
 assert(groupSource.includes("policy.ownModelOptions"), "管理看板本品选择器必须来自销量预警监测车型清单");
