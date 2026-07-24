@@ -210,6 +210,7 @@ def acquire_video_evidence(item, *, adapter=None, comment_limit=12):
         detail_resolved = bool(detail)
         video = detail.get("video") if isinstance(detail.get("video"), dict) else {}
         music = detail.get("music") if isinstance(detail.get("music"), dict) else {}
+        author = detail.get("author") if isinstance(detail.get("author"), dict) else {}
         media_url = adapter.first_media_url(video.get("play_addr") or video.get("download_addr")) or ""
         audio_url = adapter.first_media_url(music.get("play_url") or video.get("audio")) or ""
         cover_url = adapter.first_media_url(video.get("cover")) or enriched.get("coverUrl") or ""
@@ -219,6 +220,10 @@ def acquire_video_evidence(item, *, adapter=None, comment_limit=12):
             enriched["audioUrl"] = audio_url
         if cover_url:
             enriched["coverUrl"] = cover_url
+        if detail.get("desc"):
+            enriched["title"] = _text(detail.get("desc"), 1200)
+        if author.get("nickname"):
+            enriched["author"] = _text(author.get("nickname"), 200)
         if detail.get("duration"):
             enriched["duration"] = _number(detail.get("duration")) / 1000
         fetched_at = _text((audit or {}).get("fetchedAt"), 80) or fetched_at

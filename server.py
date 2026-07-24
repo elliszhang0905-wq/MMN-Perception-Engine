@@ -139,6 +139,7 @@ from creator_script_generation import (
     validate_human_tone,
 )
 from creator_distillation import CreatorDistillationService
+from creator_distillation.adapters import DouyinAdapter
 from creator_distillation.service import api_error as creator_distillation_api_error
 from creator_distillation.media_processing import process_representative_media
 from douyin_browser_evidence import extract_browser_video_evidence
@@ -170,6 +171,19 @@ from douyin_video_insights import (
     save_run as save_video_insight_run,
     strategy_messages as video_insight_strategy_messages,
     update_job as update_video_insight_job,
+)
+from douyin_video_creation import (
+    CREATABLE_INSIGHT_STATUSES as VIDEO_CREATION_ALLOWED_INSIGHT_STATUSES,
+    create_plan as create_douyin_video_creation_plan,
+    direction_source_context as video_creation_direction_source_context,
+    draft_messages as video_creation_draft_messages,
+    final_messages as video_creation_final_messages,
+    get_plan as get_douyin_video_creation_plan,
+    init_schema as init_douyin_video_creation_schema,
+    list_plans as list_douyin_video_creation_plans,
+    normalize_result as normalize_douyin_video_creation_result,
+    review_messages as video_creation_review_messages,
+    update_plan as update_douyin_video_creation_plan,
 )
 from cover_prompt import (
     REVIEW_SLOTS as COVER_PROMPT_SLOTS,
@@ -298,7 +312,7 @@ RAW_BODY_POST_PATHS = frozenset({
     "/api/vertical-rank-image/preview",
 })
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260724-security-p1-1"
+APP_VERSION_CODE = "beta-1.03-20260724-douyin-video-creation-1"
 APP_RELEASE_DATE = "2026-07-24"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -347,6 +361,9 @@ CONTENT_DEFENSE_THREADS = {}
 VIDEO_INSIGHT_JOB_LOCK = Lock()
 VIDEO_INSIGHT_THREADS = {}
 VIDEO_INSIGHT_SEMAPHORE = Semaphore(max(1, int(os.getenv("MMN_DOUYIN_VIDEO_INSIGHT_CONCURRENCY", "2"))))
+VIDEO_CREATION_JOB_LOCK = Lock()
+VIDEO_CREATION_THREADS = {}
+VIDEO_CREATION_SEMAPHORE = Semaphore(max(1, int(os.getenv("MMN_DOUYIN_VIDEO_CREATION_CONCURRENCY", "2"))))
 SOCIAL_TREND_JOB_LOCK = Lock()
 SOCIAL_TREND_JOB_TASKS = {}
 SOCIAL_TREND_JOB_LIMIT = 100
@@ -1467,11 +1484,18 @@ def init_db():
         init_douyin_hot_entity_schema(conn)
         init_content_defense_schema(conn)
         init_video_insight_schema(conn)
+        init_douyin_video_creation_schema(conn)
         conn.execute("""
           update douyin_video_insight_jobs
           set status='incomplete',stage='incomplete',progress=min(progress,95),retryable=1,
               message='服务重启中断了本轮分析，已保留证据与已完成结果，可安全重试。',updated_at=?
           where status in ('resolving_video','extracting_media','transcribing','building_evidence','analyzing','cross_validating')
+        """, (now(),))
+        conn.execute("""
+          update douyin_video_creation_plans
+          set status='failed',stage='failed',progress=min(progress,95),retryable=1,
+              message='服务重启中断了本轮创作方向生成，可安全重试。',error='创作方向生成中断，请重试。',updated_at=?
+          where status in ('drafting','reviewing','finalizing')
         """, (now(),))
         conn.commit()
 
@@ -2663,6 +2687,355 @@ def start_video_insight_job(body, *, org_id="local", media_runner=None, provider
             VIDEO_INSIGHT_THREADS[job["jobId"]] = thread
         thread.start()
     return job
+
+
+def resolve_external_douyin_video_item(source_url, *, adapter=None):
+    adapter = adapter or DouyinAdapter()
+    parsed = adapter.parse_link(source_url)
+    resolved = (
+        adapter.resolve_public_url(parsed["url"])
+        if parsed.get("requiresResolution")
+        else parsed["url"]
+    )
+    resolved_url = urlparse(resolved)
+    path_match = re.search(r"/(?:share/)?video/(\d{10,})", resolved_url.path)
+    query = parse_qs(resolved_url.query)
+    item_id = (path_match.group(1) if path_match else "") or (
+        query.get("modal_id") or query.get("aweme_id") or [""]
+    )[0]
+    if not re.fullmatch(r"\d{10,}", str(item_id or "")):
+        raise ValueError("抖音链接中没有可识别的视频ID，请使用具体视频分享链接。")
+    return {
+        "itemId": str(item_id),
+        "title": f"外部视频 {str(item_id)[-8:]}",
+        "author": "待视频证据确认",
+        "tags": [],
+        "sourceUrl": f"https://www.douyin.com/video/{item_id}",
+    }
+
+
+def start_external_video_insight_job(
+    body,
+    *,
+    org_id="local",
+    media_runner=None,
+    provider_runner=None,
+    adapter=None,
+    start_worker=True,
+):
+    body = dict(body or {})
+    edition = edition_from(body.get("edition") or "china")
+    item = resolve_external_douyin_video_item(body.get("sourceUrl"), adapter=adapter)
+    request = {
+        "item": item,
+        "comments": [],
+        "force": False,
+        "retrySlot": "",
+        "generateCoverPrompt": body.get("generateCoverPrompt") is True,
+        "origin": "external_link",
+    }
+    with db() as conn:
+        job, created = create_video_insight_job(
+            conn,
+            org_id=org_id,
+            edition=edition,
+            view="videos",
+            range_key="external",
+            item=item,
+            request=request,
+            force=False,
+        )
+    if created and start_worker:
+        thread = Thread(
+            target=execute_video_insight_job,
+            args=(job["jobId"], org_id, edition, request),
+            kwargs={
+                "media_runner": media_runner,
+                "provider_runner": provider_runner,
+            },
+            daemon=True,
+            name=f"douyin-video-insight-{job['jobId'][:8]}",
+        )
+        with VIDEO_INSIGHT_JOB_LOCK:
+            VIDEO_INSIGHT_THREADS[job["jobId"]] = thread
+        thread.start()
+    return job
+
+
+def retry_external_video_insight_job(
+    job_id, *, org_id="local", media_runner=None, provider_runner=None
+):
+    with db() as conn:
+        row = conn.execute(
+            """
+            select edition,view_key,range_key,request_json
+            from douyin_video_insight_jobs where id=? and org_id=?
+            """,
+            (job_id, org_id),
+        ).fetchone()
+        if not row or row["range_key"] != "external":
+            raise ValueError("排行榜外视频任务不存在。")
+        retry_count = conn.execute(
+            "select count(*) from douyin_video_insight_retry_log where job_id=?",
+            (job_id,),
+        ).fetchone()[0]
+        if retry_count >= 3:
+            raise ValueError("该视频已达到本版本的安全重试上限，请等待证据或分析版本更新。")
+        request = json.loads(row["request_json"] or "{}")
+        item = request.get("item") if isinstance(request.get("item"), dict) else {}
+        job, _ = create_video_insight_job(
+            conn,
+            org_id=org_id,
+            edition=row["edition"],
+            view="videos",
+            range_key="external",
+            item=item,
+            request=request,
+            force=True,
+        )
+        log_video_insight_retry(conn, job_id, "", "排行榜外视频安全重试")
+    thread = Thread(
+        target=execute_video_insight_job,
+        args=(job_id, org_id, row["edition"], request),
+        kwargs={
+            "media_runner": media_runner,
+            "provider_runner": provider_runner,
+        },
+        daemon=True,
+        name=f"douyin-video-insight-{job_id[:8]}",
+    )
+    with VIDEO_INSIGHT_JOB_LOCK:
+        VIDEO_INSIGHT_THREADS[job_id] = thread
+    thread.start()
+    return job
+
+
+def _video_creation_insight(conn, insight_job_id, org_id):
+    insight = get_video_insight_job(conn, insight_job_id, org_id)
+    if not insight:
+        raise ValueError("来源视频洞察不存在或不属于当前组织。")
+    validation = (insight.get("result") or {}).get("validation") or {}
+    if insight.get("status") != "completed" or validation.get("status") not in VIDEO_CREATION_ALLOWED_INSIGHT_STATUSES:
+        raise ValueError("当前视频证据尚未通过MMN校验，不能生成可执行创作方向。")
+    evidence = insight.get("evidencePackage") or {}
+    if evidence.get("evidenceCoverage") not in {"full", "partial"} or not evidence.get("evidenceRefs"):
+        raise ValueError("当前视频证据不足，不能生成可执行创作方向。")
+    if not validation.get("finalInsight"):
+        raise ValueError("当前视频尚未形成可发布洞察。")
+    return insight
+
+
+def default_video_creation_runner(stage, messages):
+    return default_creator_script_model_runner(stage, messages)
+
+
+def run_video_creation_plan(plan_id, runner=None):
+    with VIDEO_CREATION_SEMAPHORE:
+        try:
+            with db() as conn:
+                row = conn.execute(
+                    "select org_id,insight_job_id from douyin_video_creation_plans where id=?",
+                    (plan_id,),
+                ).fetchone()
+                if not row:
+                    raise ValueError("创作方向任务不存在。")
+                plan = get_douyin_video_creation_plan(conn, plan_id, row["org_id"])
+                insight = _video_creation_insight(conn, row["insight_job_id"], row["org_id"])
+                update_douyin_video_creation_plan(
+                    conn,
+                    plan_id,
+                    status="drafting",
+                    stage="drafting",
+                    progress=18,
+                    message="正在把视频机制转写为原创创作方向。",
+                    error="",
+                    retryable=False,
+                )
+            model_runner = runner or default_video_creation_runner
+            draft = model_runner(
+                "draft", video_creation_draft_messages(insight, plan["request"])
+            )
+            with db() as conn:
+                update_douyin_video_creation_plan(
+                    conn,
+                    plan_id,
+                    status="reviewing",
+                    stage="reviewing",
+                    progress=52,
+                    message="正在检查事实边界、照搬风险与方向差异。",
+                )
+            review = model_runner(
+                "review",
+                video_creation_review_messages(
+                    insight, plan["request"], draft
+                ),
+            )
+            with db() as conn:
+                update_douyin_video_creation_plan(
+                    conn,
+                    plan_id,
+                    status="finalizing",
+                    stage="finalizing",
+                    progress=82,
+                    message="正在形成三条可拍摄创作方向。",
+                    review=review,
+                )
+            final = model_runner(
+                "final",
+                video_creation_final_messages(
+                    insight, plan["request"], draft, review
+                ),
+            )
+            result = normalize_douyin_video_creation_result(
+                final, insight.get("evidencePackage") or {}
+            )
+            with db() as conn:
+                return update_douyin_video_creation_plan(
+                    conn,
+                    plan_id,
+                    status="completed",
+                    stage="completed",
+                    progress=100,
+                    message="三条原创创作方向已完成。",
+                    error="",
+                    retryable=False,
+                    result=result,
+                    review=review,
+                )
+        except Exception as exc:
+            public_error = public_creator_script_error(exc)
+            with db() as conn:
+                if conn.execute(
+                    "select 1 from douyin_video_creation_plans where id=?", (plan_id,)
+                ).fetchone():
+                    return update_douyin_video_creation_plan(
+                        conn,
+                        plan_id,
+                        status="failed",
+                        stage="failed",
+                        progress=100,
+                        message="创作方向生成失败，可安全重试。",
+                        error=public_error,
+                        retryable=True,
+                    )
+            raise
+        finally:
+            with VIDEO_CREATION_JOB_LOCK:
+                VIDEO_CREATION_THREADS.pop(plan_id, None)
+
+
+def _start_video_creation_thread(plan_id, runner=None):
+    thread = Thread(
+        target=run_video_creation_plan,
+        args=(plan_id, runner),
+        daemon=True,
+        name=f"douyin-video-creation-{plan_id[-8:]}",
+    )
+    with VIDEO_CREATION_JOB_LOCK:
+        VIDEO_CREATION_THREADS[plan_id] = thread
+    thread.start()
+    return thread
+
+
+def create_video_creation_plan(body, *, org_id="local", start_worker=True, runner=None):
+    body = dict(body or {})
+    edition = edition_from(body.get("edition") or "china")
+    insight_job_id = str(body.get("insightJobId") or "").strip()
+    with db() as conn:
+        insight = _video_creation_insight(conn, insight_job_id, org_id)
+        plan, created = create_douyin_video_creation_plan(
+            conn,
+            org_id=org_id,
+            edition=edition,
+            insight_job=insight,
+            request=body,
+        )
+    if created and start_worker:
+        _start_video_creation_thread(plan["id"], runner)
+    return plan
+
+
+def retry_video_creation_plan(plan_id, *, org_id="local", runner=None):
+    with db() as conn:
+        plan = get_douyin_video_creation_plan(conn, plan_id, org_id)
+        if not plan:
+            raise ValueError("创作方向任务不存在。")
+        if plan["status"] in {"queued", "drafting", "reviewing", "finalizing"}:
+            return plan
+        _video_creation_insight(conn, plan["insightJobId"], org_id)
+        plan = update_douyin_video_creation_plan(
+            conn,
+            plan_id,
+            status="queued",
+            stage="queued",
+            progress=0,
+            message="重试已提交，等待读取已验证的视频洞察。",
+            error="",
+            retryable=False,
+        )
+    _start_video_creation_thread(plan_id, runner)
+    return plan
+
+
+def set_video_creation_favorite(plan_id, favorite, *, org_id="local"):
+    with db() as conn:
+        plan = get_douyin_video_creation_plan(conn, plan_id, org_id)
+        if not plan:
+            raise ValueError("创作方向任务不存在。")
+        return update_douyin_video_creation_plan(
+            conn, plan_id, favorite=bool(favorite)
+        )
+
+
+def create_script_from_video_creation_plan(
+    plan_id, body, *, org_id="local", start_worker=True, runner=None
+):
+    body = dict(body or {})
+    direction_id = str(body.get("directionId") or "").strip()
+    creator_asset_id = str(body.get("creatorAssetId") or "").strip()
+    if not direction_id:
+        raise ValueError("请选择一个创作方向。")
+    if not creator_asset_id:
+        raise ValueError("请选择用于生成脚本的达人方法资产。")
+    with db() as conn:
+        plan = get_douyin_video_creation_plan(conn, plan_id, org_id)
+    if not plan or plan.get("status") != "completed":
+        raise ValueError("创作方向尚未完成，不能继续生成脚本。")
+    direction = next(
+        (
+            row
+            for row in ((plan.get("result") or {}).get("directions") or [])
+            if str(row.get("id") or "") == direction_id
+        ),
+        None,
+    )
+    if not direction:
+        raise ValueError("所选创作方向不存在。")
+    request = plan.get("request") or {}
+    script_body = {
+        "edition": plan.get("edition") or "china",
+        "creatorAssetId": creator_asset_id,
+        "platform": body.get("platform") or "douyin",
+        "brand": request.get("brand") or "",
+        "model": request.get("model") or "",
+        "focus": f"{request.get('marketingTask') or ''}；采用方向：{direction.get('title') or ''}",
+        "title": direction.get("title") or "",
+        "sourceContext": video_creation_direction_source_context(plan, direction),
+    }
+    script_job = create_creator_script_job(
+        script_body,
+        org_id=org_id,
+        start_worker=start_worker,
+        runner=runner,
+    )
+    with db() as conn:
+        return update_douyin_video_creation_plan(
+            conn,
+            plan_id,
+            selected_direction_id=direction_id,
+            script_job_id=script_job.get("id") or "",
+            message="已进入完整脚本生成任务。",
+        )
 
 
 def get_douyin_collector_job(job_id, org_id=""):
@@ -13753,6 +14126,11 @@ def create_creator_script_job(body, *, org_id="local", start_worker=True, runner
         "model": str(body.get("model") if "model" in body else base_request.get("model") or "").strip(),
         "focus": str(body.get("focus") if "focus" in body else base_request.get("focus") or "").strip(),
         "title": str(body.get("title") if "title" in body else base_request.get("title") or "").strip(),
+        "sourceContext": str(
+            body.get("sourceContext")
+            if "sourceContext" in body
+            else base_request.get("sourceContext") or ""
+        ).strip()[:16000],
         "revisionRequest": str(body.get("revisionRequest") or "").strip(),
     }
     for key, label in (("brand", "品牌"), ("model", "车型"), ("focus", "传播重点")):
@@ -15532,6 +15910,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/douyin-hot/creation-plans":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                edition = edition_from(q.get("edition", ["china"])[0])
+                with db() as conn:
+                    plans = list_douyin_video_creation_plans(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition,
+                    )
+                self.send_json({"ok": True, "result": {"plans": plans}})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        creation_plan_match = re.fullmatch(
+            r"/api/douyin-hot/creation-plans/([^/]+)", parsed.path
+        )
+        if creation_plan_match:
+            auth = self.current_auth() or {}
+            with db() as conn:
+                plan = get_douyin_video_creation_plan(
+                    conn,
+                    creation_plan_match.group(1),
+                    auth.get("org_id", "local"),
+                )
+            if not plan:
+                self.send_json({"ok": False, "error": "创作方向任务不存在"}, 404)
+            else:
+                self.send_json({"ok": True, "plan": plan})
+            return
         video_insight_job_match = re.fullmatch(r"/api/douyin-hot/video-insights/jobs/([^/]+)", parsed.path)
         if video_insight_job_match:
             auth = self.current_auth() or {}
@@ -16216,6 +16625,86 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 auth = self.current_auth() or {}
                 job = start_video_insight_job(self.read_json(), org_id=auth.get("org_id", "local"))
                 self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/video-insights/external":
+            try:
+                auth = self.current_auth() or {}
+                job = start_external_video_insight_job(
+                    self.read_json(), org_id=auth.get("org_id", "local")
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        external_video_retry_match = re.fullmatch(
+            r"/api/douyin-hot/video-insights/jobs/([^/]+)/external-retry",
+            parsed.path,
+        )
+        if external_video_retry_match:
+            try:
+                auth = self.current_auth() or {}
+                job = retry_external_video_insight_job(
+                    external_video_retry_match.group(1),
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        if parsed.path == "/api/douyin-hot/creation-plans":
+            try:
+                auth = self.current_auth() or {}
+                plan = create_video_creation_plan(
+                    self.read_json(), org_id=auth.get("org_id", "local")
+                )
+                self.send_json({"ok": True, "plan": plan}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        creation_plan_retry_match = re.fullmatch(
+            r"/api/douyin-hot/creation-plans/([^/]+)/retry", parsed.path
+        )
+        if creation_plan_retry_match:
+            try:
+                auth = self.current_auth() or {}
+                plan = retry_video_creation_plan(
+                    creation_plan_retry_match.group(1),
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "plan": plan}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        creation_plan_script_match = re.fullmatch(
+            r"/api/douyin-hot/creation-plans/([^/]+)/script", parsed.path
+        )
+        if creation_plan_script_match:
+            try:
+                auth = self.current_auth() or {}
+                plan = create_script_from_video_creation_plan(
+                    creation_plan_script_match.group(1),
+                    self.read_json(),
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "plan": plan}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        creation_plan_favorite_match = re.fullmatch(
+            r"/api/douyin-hot/creation-plans/([^/]+)/favorite", parsed.path
+        )
+        if creation_plan_favorite_match:
+            try:
+                auth = self.current_auth() or {}
+                body = self.read_json()
+                plan = set_video_creation_favorite(
+                    creation_plan_favorite_match.group(1),
+                    body.get("favorite") is True,
+                    org_id=auth.get("org_id", "local"),
+                )
+                self.send_json({"ok": True, "plan": plan})
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return

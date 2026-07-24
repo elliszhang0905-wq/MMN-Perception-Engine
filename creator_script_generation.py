@@ -71,6 +71,7 @@ def draft_prompt(request_payload, creator_asset, evidence):
                 f"平台写法：{rule['playbook']}\n"
                 f"任务：品牌={request_payload.get('brand') or '未限定'}；车型={request_payload.get('model') or '未限定'}；"
                 f"传播重点={request_payload.get('focus') or ''}；用户标题/主题={request_payload.get('title') or '由你生成'}。\n"
+                f"已选创作结构（仅作方法与拍摄结构参考，不是产品事实）：{request_payload.get('sourceContext') or '未提供'}\n"
                 f"达人方法论资产：{_compact(creator_asset, 7000)}\n"
                 f"可用证据摘要：{_compact(evidence, 5000)}\n"
                 "写出原创、可直接拍摄的中文脚本。口播要像一个懂车的人在对具体用户说话：允许自然停顿、长短句变化和克制的个人判断；"
@@ -98,6 +99,7 @@ def review_prompt(request_payload, creator_asset, evidence, draft):
             "role": "user",
             "content": (
                 f"平台规则：{rule['playbook']}\n任务：{_compact(request_payload, 2500)}\n"
+                f"已选创作结构：{_compact(request_payload.get('sourceContext') or {}, 5000)}\n"
                 f"达人方法论边界：{creator_asset.get('transfer_boundary') or ''}\n"
                 f"证据：{_compact(evidence, 5000)}\n初稿：{_compact(draft, 10000)}\n"
                 "返回字段：verdict（pass或revise）、issues字符串数组、factualRisks字符串数组、"
@@ -125,6 +127,7 @@ def final_prompt(request_payload, creator_asset, evidence, draft, review):
             "role": "user",
             "content": (
                 f"平台写法：{rule['playbook']}\n任务：{_compact(request_payload, 2500)}\n"
+                f"已选创作结构：{_compact(request_payload.get('sourceContext') or {}, 5000)}\n"
                 f"本轮修改要求：{revision or '无，按审校意见优化'}\n"
                 f"方法论资产：{_compact(creator_asset, 5000)}\n证据：{_compact(evidence, 4500)}\n"
                 f"初稿：{_compact(draft, 10000)}\n审校：{_compact(review, 5000)}\n"
