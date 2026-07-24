@@ -792,3 +792,17 @@ beta 1.01｜整体平台NSR与属性NSR拆分
 - 生产验收新增20条项目快照，旧记录未删除、未修改；按明确主键精确清理后，77张业务表与发布前逐表、逐主键、逐字段一致，变化表为0，`quick_check=ok`。
 - 六个Compose服务运行正常；应用Traceback和HTTP 5xx为0；关键文件与本地提交SHA-256一致。
 - 回滚点：`backups/releases/security_boundary_20260724_132441/code_before_eeb881f.tar.gz`、同目录环境备份、`backups/mmn_backup_20260724_132455.tar.gz`和`backups/mmn_backup_20260724_132546.tar.gz`。
+
+---
+
+## 2026-07-25｜抖音视频第三路独立分析安全重试发布
+
+- 生产版本：`beta-1.03-20260725-video-insight-retry-1`；应用提交：`70d17d501d289683555a4227f1ba47f4f08de197`。
+- 修复第三路分析在免费额度权限恢复后的错误映射、冻结证据包丢失、全槽位误重跑和90秒通用超时问题；恢复时只运行失败槽位。
+- 客户页面继续使用“MMN独立分析 1/2/3”，不显示供应商、模型、密钥、原始错误或证据哈希。
+- 本地完整 Python 测试 639 项、32 个 JavaScript 契约文件、197 项发布子集、数据优先与全表面浏览器门禁均通过；桌面与390px无失败、运行时错误或失败响应。
+- 生产最小真实调用确认 `kimi-k2.6` 可用；持久任务 `afecda8b179142a19cd96638f8717818` 保持 `completed / verified`，三路同一证据指纹。
+- 生产桌面与390px真实登录链路均显示“洞察已完成”，三路独立分析齐全，无内部名称泄漏、横向溢出、控制台错误或失败请求。
+- 验收新增的2条项目快照已按明确主键精确清理；最终77张表、21,763行与发布前逻辑指纹完全一致，`quick_check=ok`。
+- 六个 Compose 服务运行正常；应用错误与真实 HTTP 5xx 均为0；源码目录、容器和本地提交的关键文件 SHA-256 一致。
+- 回滚点：`backups/code_before_video_insight_retry_20260725_014848.tar.gz`、`backups/env_before_video_insight_retry_20260725_014848`、`backups/mmn_backup_20260725_014848.tar.gz`和`backups/mmn_backup_20260725_014910.tar.gz`。
