@@ -569,11 +569,26 @@ def create_job(conn, *, org_id, edition, view, range_key, item, request=None, fo
     job_id = row["id"] if row else uuid.uuid4().hex
     request_value = {**(request or {}), "item": item}
     if row:
+        preserve_frozen_evidence = bool(
+            _text(request_value.get("retrySlot"), 10)
+            and row["evidence_fingerprint"]
+            and _json(row["evidence_json"], {}).get("evidenceFingerprint") == row["evidence_fingerprint"]
+        )
         conn.execute("""
           update douyin_video_insight_jobs set view_key=?,range_key=?,request_json=?,status='queued',stage='queued',
-            progress=0,message='已进入逐视频证据分析队列',error='',retryable=0,evidence_fingerprint='',
-            evidence_json='{}',result_json='{}',updated_at=?,completed_at=null where id=?
-        """, (view, range_key, json.dumps(request_value, ensure_ascii=False), stamp, job_id))
+            progress=0,message=?,error='',retryable=0,evidence_fingerprint=?,
+            evidence_json=?,result_json=?,updated_at=?,completed_at=null where id=?
+        """, (
+            view,
+            range_key,
+            json.dumps(request_value, ensure_ascii=False),
+            "已进入失败项安全重试队列" if preserve_frozen_evidence else "已进入逐视频证据分析队列",
+            row["evidence_fingerprint"] if preserve_frozen_evidence else "",
+            row["evidence_json"] if preserve_frozen_evidence else "{}",
+            row["result_json"] if preserve_frozen_evidence else "{}",
+            stamp,
+            job_id,
+        ))
     else:
         conn.execute("""
           insert into douyin_video_insight_jobs

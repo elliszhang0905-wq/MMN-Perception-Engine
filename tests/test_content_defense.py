@@ -12,6 +12,7 @@ from content_defense import (
     get_job,
     init_schema,
     load_media_cache,
+    public_failure_reason,
     save_media_cache,
 )
 import server
@@ -46,6 +47,15 @@ class ContentDefenseTest(unittest.TestCase):
                   "leads": [], "model": "奥迪E7X"}
         values.update(overrides)
         return build_evidence_package(self.item, **values)
+
+    def test_public_failure_reason_keeps_quota_action_without_provider_leak(self):
+        reason = public_failure_reason(
+            "Kimi 额度被拒绝（AllocationQuota.FreeTierOnly，模型 kimi-k2.6）："
+            "免费额度已耗尽且开启了仅使用免费额度。"
+        )
+        self.assertIn("可用额度已耗尽", reason)
+        self.assertIn("调整额度策略", reason)
+        self.assertNotRegex(reason, r"(?i)kimi|百炼|k2\\.6")
 
     def reviews(self, package, *, judgement="strong_defense", attribute="动力与操控", ids=None):
         ids = ids or [row["evidenceId"] for row in package["evidence"] if row["status"] == "available"]

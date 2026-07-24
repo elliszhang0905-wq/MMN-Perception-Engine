@@ -334,7 +334,7 @@ DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
 DEEPSEEK_DEFAULT_DEEP_MODEL = "deepseek-v4-pro"
 KIMI_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 KIMI_DEFAULT_MODEL = "kimi-k2.5"
-KIMI_DEFAULT_DEEP_MODEL = "kimi-k2.5"
+KIMI_DEFAULT_DEEP_MODEL = "kimi-k2.6"
 VEHICLE_CONFIG_VALIDATION_PROVIDERS = ("qwen", "deepseek", "kimi")
 MMN_ROUTER_CACHE_TTL = int(os.getenv("MMN_ROUTER_CACHE_TTL", "1800"))
 MMN_FAST_MODEL_TIMEOUT = int(os.getenv("MMN_FAST_MODEL_TIMEOUT", "35"))
@@ -343,6 +343,7 @@ BRAND_PENETRATION_MODEL_TIMEOUT = max(
     MMN_DEEP_MODEL_TIMEOUT, int(os.getenv("MMN_BRAND_PENETRATION_MODEL_TIMEOUT", "180")),
 )
 MMN_CRITIC_TIMEOUT = int(os.getenv("MMN_CRITIC_TIMEOUT", "90"))
+MMN_VIDEO_INSIGHT_KIMI_TIMEOUT = int(os.getenv("MMN_VIDEO_INSIGHT_KIMI_TIMEOUT", "180"))
 BF_MODELS_ENABLED = os.getenv("MMN_BF_MODELS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
 ROUTER_RESPONSE_CACHE = {}
 ROUTER_CACHE_LOCK = Lock()
@@ -2432,7 +2433,13 @@ def run_video_insight_reviews(job_id, package, *, provider_runner=None, retry_sl
                 raw = call_deepseek(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT,
                                     max_tokens=5200, response_format={"type": "json_object"})
             else:
-                raw = call_kimi(messages, temperature=.05, profile="deep", timeout=MMN_CRITIC_TIMEOUT, max_tokens=4200)
+                raw = call_kimi(
+                    messages,
+                    temperature=.05,
+                    profile="deep",
+                    timeout=max(MMN_CRITIC_TIMEOUT, MMN_VIDEO_INSIGHT_KIMI_TIMEOUT),
+                    max_tokens=4200,
+                )
             parsed = parse_json_object(raw)
             with db() as conn:
                 save_video_insight_run(conn, job_id=job_id, provider=provider,
@@ -2456,6 +2463,38 @@ def run_video_insight_reviews(job_id, package, *, provider_runner=None, retry_sl
             else:
                 errors[provider] = error
     return cross_validate_video_insights(package, outputs, errors)
+
+
+def persist_video_insight_validation(job_id, validation, *, cover_prompt=None):
+    with db() as conn:
+        update_video_insight_job(conn, job_id, status="cross_validating", stage="cross_validating", progress=90,
+                                 message="正在校验证据覆盖、一致判断与关键冲突")
+    quality = validation.get("status")
+    if quality in {"verified", "majority_aligned"}:
+        final_status, message, retryable = "completed", "MMN三旗舰交叉分析已完成", False
+    elif quality == "limited_analysis":
+        final_status, message, retryable = "limited_analysis", "当前仅形成有限分析，缺失证据已明确标注", True
+    elif quality == "manual_required":
+        final_status, message, retryable = "manual_required", "核心判断存在冲突，等待人工复核", True
+    elif quality == "incomplete":
+        final_status, message, retryable = "incomplete", "三路分析未完整返回，可安全重试失败项", True
+    else:
+        final_status, message, retryable = "failed", "当前没有可用内容证据", True
+    with db() as conn:
+        return update_video_insight_job(
+            conn,
+            job_id,
+            status=final_status,
+            stage=final_status,
+            progress=100,
+            message=message,
+            retryable=retryable,
+            result={
+                "validation": validation,
+                **({"coverPrompt": cover_prompt} if cover_prompt is not None else {}),
+                "cacheHit": False,
+            },
+        )
 
 
 def run_cover_prompt_reviews(job_id, packet, *, provider_runner=None):
@@ -2510,12 +2549,46 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
                               evidence_resolver=None, browser_runner=None):
     with VIDEO_INSIGHT_SEMAPHORE:
         try:
+            retry_slot = str(request.get("retrySlot") or "")
+            retry_package = None
+            prior_result = {}
             with db() as conn:
                 job = get_video_insight_job(conn, job_id, org_id)
                 if not job:
                     return
-                update_video_insight_job(conn, job_id, status="resolving_video", stage="resolving_video", progress=8,
-                                         message="正在核对原视频页面与后台媒体可用性")
+                if retry_slot:
+                    package = job.get("evidencePackage") if isinstance(job.get("evidencePackage"), dict) else {}
+                    if (
+                        not package.get("evidenceFingerprint")
+                        or package.get("evidenceFingerprint") != job.get("evidenceFingerprint")
+                    ):
+                        raise ValueError("失败项重试缺少一致的冻结证据包，未启动模型分析。")
+                    update_video_insight_job(
+                        conn,
+                        job_id,
+                        status="analyzing",
+                        stage="analyzing",
+                        progress=62,
+                        message=f"正在复用冻结证据包重试MMN独立分析 {retry_slot}",
+                    )
+                    retry_package = package
+                    prior_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+                else:
+                    update_video_insight_job(conn, job_id, status="resolving_video", stage="resolving_video", progress=8,
+                                             message="正在核对原视频页面与后台媒体可用性")
+            if retry_package is not None:
+                validation = run_video_insight_reviews(
+                    job_id,
+                    retry_package,
+                    provider_runner=provider_runner,
+                    retry_slot=retry_slot,
+                )
+                persist_video_insight_validation(
+                    job_id,
+                    validation,
+                    cover_prompt=prior_result.get("coverPrompt"),
+                )
+                return
             item = content_defense_item(org_id, edition, "videos", job["range"], job["itemId"])
             if not item:
                 request_item = request.get("item") if isinstance(request.get("item"), dict) else None
@@ -2605,28 +2678,7 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
                     if cover_packet.get("status") == "ready"
                     else fuse_cover_prompt_reviews(cover_packet, {}, {})
                 )
-            with db() as conn:
-                update_video_insight_job(conn, job_id, status="cross_validating", stage="cross_validating", progress=90,
-                                         message="正在校验证据覆盖、一致判断与关键冲突")
-            quality = validation.get("status")
-            if quality in {"verified", "majority_aligned"}:
-                final_status, message, retryable = "completed", "MMN三旗舰交叉分析已完成", False
-            elif quality == "limited_analysis":
-                final_status, message, retryable = "limited_analysis", "当前仅形成有限分析，缺失证据已明确标注", True
-            elif quality == "manual_required":
-                final_status, message, retryable = "manual_required", "核心判断存在冲突，等待人工复核", True
-            elif quality == "incomplete":
-                final_status, message, retryable = "incomplete", "三路分析未完整返回，可安全重试失败项", True
-            else:
-                final_status, message, retryable = "failed", "当前没有可用内容证据", True
-            with db() as conn:
-                update_video_insight_job(conn, job_id, status=final_status, stage=final_status, progress=100,
-                                         message=message, retryable=retryable,
-                                         result={
-                                             "validation": validation,
-                                             **({"coverPrompt": cover_prompt} if cover_prompt is not None else {}),
-                                             "cacheHit": False,
-                                         })
+            persist_video_insight_validation(job_id, validation, cover_prompt=cover_prompt)
         except Exception as exc:
             with db() as conn:
                 update_video_insight_job(conn, job_id, status="failed", stage="failed", progress=100,
@@ -2654,11 +2706,23 @@ def start_video_insight_job(body, *, org_id="local", media_runner=None, provider
     with db() as conn:
         if request["force"]:
             existing = conn.execute("""
-              select id from douyin_video_insight_jobs where org_id=? and edition=? and item_id=?
+              select id,evidence_fingerprint from douyin_video_insight_jobs where org_id=? and edition=? and item_id=?
               order by updated_at desc limit 1
             """, (org_id, edition, str(item.get("itemId") or ""))).fetchone()
-            if existing and conn.execute("select count(*) from douyin_video_insight_retry_log where job_id=?", (existing["id"],)).fetchone()[0] >= 3:
-                raise ValueError("该视频已达到本版本的安全重试上限，请等待证据或分析版本更新。")
+            retry_slot = request["retrySlot"]
+            if existing and retry_slot in {"1", "2", "3"}:
+                retry_provider = VIDEO_INSIGHT_PROVIDERS[int(retry_slot) - 1]
+                failed_attempts = conn.execute("""
+                  select count(*) from douyin_video_insight_runs
+                  where job_id=? and provider_key=? and evidence_fingerprint=? and status='failed'
+                """, (existing["id"], retry_provider, existing["evidence_fingerprint"])).fetchone()[0]
+                if failed_attempts >= 3:
+                    raise ValueError("该失败项在当前冻结证据包下已达到安全重试上限，请先恢复分析能力后再试。")
+            elif existing and conn.execute(
+                "select count(*) from douyin_video_insight_retry_log where job_id=?",
+                (existing["id"],),
+            ).fetchone()[0] >= 3:
+                raise ValueError("该视频已达到本版本的完整重试上限，请等待证据或分析版本更新。")
         job, created = create_video_insight_job(
             conn, org_id=org_id, edition=edition, view=view, range_key=range_key,
             item=item, request=request, force=request["force"])
@@ -5552,10 +5616,25 @@ def call_kimi(messages, temperature=.6, profile="fast", timeout=None, max_tokens
             data = json.loads(resp.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
+        try:
+            provider_error = (json.loads(detail).get("error") or {})
+        except Exception:
+            provider_error = {}
+        provider_code = str(provider_error.get("code") or provider_error.get("type") or "").strip()
+        provider_message = str(provider_error.get("message") or "").strip()
         if exc.code == 401:
             raise ValueError("Kimi 请求未授权：KIMI_API_KEY 无效、过期或与当前服务地址不匹配。")
         if exc.code == 403:
-            raise ValueError("Kimi 请求被拒绝：请检查百炼工作空间和 kimi-k2.5 模型权限。")
+            if provider_code == "AllocationQuota.FreeTierOnly":
+                raise ValueError(
+                    f"Kimi 额度被拒绝（AllocationQuota.FreeTierOnly，模型 {cfg['model']}）："
+                    "免费额度已耗尽且开启了仅使用免费额度；请补充额度或关闭仅免费额度后重试。"
+                )
+            reason = f"{provider_code} {provider_message}".strip()
+            raise ValueError(
+                f"Kimi 请求被拒绝（模型 {cfg['model']}）："
+                f"{reason or '请检查模型权限、业务空间与服务状态。'}"
+            )
         raise ValueError(f"Kimi 请求失败：HTTP {exc.code} {detail[:300]}")
     except (TimeoutError, URLError) as exc:
         raise ValueError(f"Kimi 请求超时或网络不可用：{exc}")

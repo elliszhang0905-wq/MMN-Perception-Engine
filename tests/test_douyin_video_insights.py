@@ -210,6 +210,92 @@ class DouyinVideoInsightContractTest(unittest.TestCase):
         self.assertEqual(calls, ["kimi"])
         self.assertEqual(result["status"], "verified")
 
+    def test_retry_job_reuses_frozen_package_without_reacquiring_or_rerunning_successes(self):
+        package = self.package()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB_PATH", Path(tmp) / "mmn.db"):
+            server.init_db()
+            with server.db() as conn:
+                job, _ = create_job(
+                    conn,
+                    org_id="local",
+                    edition="china",
+                    view="videos",
+                    range_key="24h",
+                    item=self.item,
+                )
+                update_job(
+                    conn,
+                    job["jobId"],
+                    status="incomplete",
+                    evidence=package,
+                    result={"validation": {"status": "incomplete"}, "coverPrompt": {"status": "verified"}},
+                )
+                for provider in ("qwen", "deepseek"):
+                    save_run(
+                        conn,
+                        job_id=job["jobId"],
+                        provider=provider,
+                        evidence_fingerprint=package["evidenceFingerprint"],
+                        status="completed",
+                        raw=self.output(package),
+                    )
+                save_run(
+                    conn,
+                    job_id=job["jobId"],
+                    provider="kimi",
+                    evidence_fingerprint=package["evidenceFingerprint"],
+                    status="failed",
+                    error="timeout",
+                )
+                queued, created = create_job(
+                    conn,
+                    org_id="local",
+                    edition="china",
+                    view="videos",
+                    range_key="24h",
+                    item=self.item,
+                    request={"retrySlot": "3"},
+                    force=True,
+                )
+            self.assertTrue(created)
+            self.assertEqual(queued["evidenceFingerprint"], package["evidenceFingerprint"])
+            self.assertEqual(queued["evidencePackage"]["evidenceFingerprint"], package["evidenceFingerprint"])
+
+            def unexpected_acquisition(_item):
+                raise AssertionError("失败项重试不得重新获取视频证据")
+
+            with patch.object(
+                server,
+                "call_kimi",
+                return_value=json.dumps(self.output(package), ensure_ascii=False),
+            ) as call_kimi:
+                server.execute_video_insight_job(
+                    job["jobId"],
+                    "local",
+                    "china",
+                    {"retrySlot": "3"},
+                    evidence_resolver=unexpected_acquisition,
+                )
+
+            self.assertGreaterEqual(
+                call_kimi.call_args.kwargs["timeout"],
+                server.MMN_VIDEO_INSIGHT_KIMI_TIMEOUT,
+            )
+            with server.db() as conn:
+                saved = get_job(conn, job["jobId"], "local")
+                attempts = conn.execute("""
+                  select provider_key,count(*) from douyin_video_insight_runs
+                  where job_id=? group by provider_key order by provider_key
+                """, (job["jobId"],)).fetchall()
+            self.assertEqual(saved["status"], "completed")
+            self.assertEqual(saved["evidenceFingerprint"], package["evidenceFingerprint"])
+            self.assertEqual(saved["result"]["coverPrompt"]["status"], "verified")
+            self.assertEqual([(row[0], row[1]) for row in attempts], [
+                ("deepseek", 1),
+                ("kimi", 2),
+                ("qwen", 1),
+            ])
+
     def test_server_runs_three_independent_calls_and_persists_completed_result(self):
         captured = []
 
