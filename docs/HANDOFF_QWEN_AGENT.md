@@ -764,3 +764,14 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 - 最终 6 个容器运行且核心服务健康。发布窗口精确 HTTP 5xx、Traceback、BrokenPipeError、应用 ERROR 均为 0；3 条 nginx 499 是自动验收快速切页时客户端主动取消，不能误记为服务端 5xx。
 - 发布时保留服务器 `.env`、持久化数据库与 `sales_warning_cycles.json`。整批发布前回滚点：`backups/mmn_source_pre_20260720_032628.tar.gz`、`backups/mmn_env_pre_20260720_032628.env`、`backups/mmn_backup_20260720_032650.tar.gz`；修复前回滚点：`backups/mmn_source_pre_hotfix_20260720_034051.tar.gz`、`backups/mmn_backup_20260720_034052.tar.gz`。
 - 正式公网验收继续使用 `http://121.40.60.90`。独立域名 HTTPS 的备案、云侧放行和证书问题仍为外部基础设施风险，不得复用其他产品证书或修改其他产品路由。
+
+## 33. 2026-07-24 安全与请求边界零漂移交接
+
+- 当前生产版本为`beta-1.03-20260724-security-boundary-2`，应用提交为`eeb881f4000f1eb6c32de16c1df6bc1e431e600f`；GitHub `main`、发布分支和ECS运行包一致。
+- 调度器与服务端必须共同保留`MMN_SCHEDULER_SECRET`签名契约；禁止恢复`Host: mmn-app`或`X-MMN-Scheduler: 1`绕过。
+- 云端必须显式配置`MMN_AUTH_SECRET`，不得回退到模型密钥或演示密钥；`MMN_TRUSTED_PROXY_CIDRS`当前按Compose实际网段配置为`172.18.0.0/16`。
+- 普通看板浏览必须只读：数据页不得自动补写车型资产，政策页自动策略只做预览，相同产品评价指纹不得刷新数据库时间戳。导入和明确人工操作仍可按原流程持久化。
+- 本地完整Python测试635项、发布测试197项、数据优先和全表面门禁通过；生产全表面门禁、19项安全测试、401旧调度拒绝和413超限上传拒绝均通过。
+- 生产验收产生20条项目快照并按明确主键精确清理；最终77张表与发布前逐字段一致，变化表0，`quick_check=ok`。以后生产验收仍必须先建基线、记录新增主键、精确清理并复验。
+- 六个服务正常，应用Traceback和HTTP 5xx为0。回滚资产位于`backups/releases/security_boundary_20260724_132441`，完整数据备份为`backups/mmn_backup_20260724_132455.tar.gz`与`backups/mmn_backup_20260724_132546.tar.gz`。
+- HTTPS与Cookie会话仍是独立基础设施事项；本次未启用Cookie开关，也未修改其他产品域名和路由。
