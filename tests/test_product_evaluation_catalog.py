@@ -71,8 +71,18 @@ class ProductEvaluationCatalogTest(unittest.TestCase):
 
     def test_fingerprint_is_deterministic(self):
         first = save_dataset(self.conn, org_id="org-a", edition="china", dataset=dataset())
+        first_updated_at = self.conn.execute(
+            "select updated_at from product_evaluation_datasets where org_id=? and edition=? and source_model=?",
+            ("org-a", "china", "智己L6"),
+        ).fetchone()[0]
         second = save_dataset(self.conn, org_id="org-a", edition="china", dataset=dataset())
+        second_updated_at = self.conn.execute(
+            "select updated_at from product_evaluation_datasets where org_id=? and edition=? and source_model=?",
+            ("org-a", "china", "智己L6"),
+        ).fetchone()[0]
         self.assertEqual(first["fingerprint"], second["fingerprint"])
+        self.assertEqual(first_updated_at, second_updated_at)
+        self.assertEqual(first["updatedAt"], second["updatedAt"])
 
 
 if __name__ == "__main__":

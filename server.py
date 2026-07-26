@@ -305,6 +305,12 @@ RAW_BODY_POST_PATHS = frozenset({
     "/api/social-trends/import",
     "/api/vertical-rank-image/preview",
 })
+SCHEDULER_POST_PATHS = frozenset({
+    "/api/group-dashboard/refresh-weekly",
+    "/api/group-dashboard/refresh-monthly-sales",
+    "/api/founder-archives/run-weekly",
+    "/api/blogger-skill/scan-imports",
+})
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
 APP_VERSION_CODE = "beta-1.03-20260727-lead-dashboard-catalog-1"
@@ -321,6 +327,10 @@ MMN_LOGIN_MAX_FAILURES = max(3, int(os.getenv("MMN_LOGIN_MAX_FAILURES", "5")))
 MMN_LOGIN_FAILURE_WINDOW_SECONDS = max(30, int(os.getenv("MMN_LOGIN_FAILURE_WINDOW_SECONDS", "300")))
 MMN_LOGIN_BLOCK_SECONDS = max(30, int(os.getenv("MMN_LOGIN_BLOCK_SECONDS", "300")))
 MMN_LOGIN_RATE_LIMIT_MAX_KEYS = max(100, int(os.getenv("MMN_LOGIN_RATE_LIMIT_MAX_KEYS", "2000")))
+MMN_SCHEDULER_MAX_CLOCK_SKEW_SECONDS = max(
+    30,
+    int(os.getenv("MMN_SCHEDULER_MAX_CLOCK_SKEW_SECONDS", "300")),
+)
 DATA_DIR = DATA_ROOT
 DB_PATH = Path(os.getenv("MMN_DB_PATH", str(DATA_DIR / "commercial_demo.db"))).expanduser().resolve()
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
@@ -4078,7 +4088,66 @@ def cloud_post_required_roles(path):
 
 
 def auth_secret():
-    return env_value("MMN_AUTH_SECRET") or env_value("DASHSCOPE_API_KEY") or "mmn-local-demo-secret"
+    secret = env_value("MMN_AUTH_SECRET")
+    if secret:
+        return secret
+    if cloud_login_required():
+        raise RuntimeError("云端认证密钥未配置。")
+    return "mmn-local-demo-secret"
+
+
+def scheduler_secret():
+    secret = env_value("MMN_SCHEDULER_SECRET")
+    if secret:
+        return secret
+    if cloud_login_required():
+        raise RuntimeError("内部调度密钥未配置。")
+    return "mmn-local-scheduler-secret"
+
+
+def scheduler_signature(method, path, timestamp, secret=None):
+    message = f"{str(method or '').upper()}\n{str(path or '')}\n{str(timestamp or '')}".encode("utf-8")
+    return hmac.new((secret or scheduler_secret()).encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def valid_scheduler_signature(headers, method, path, current_time=None):
+    timestamp = str(headers.get("X-MMN-Scheduler-Timestamp") or "").strip()
+    signature = str(headers.get("X-MMN-Scheduler-Signature") or "").strip()
+    if not timestamp or not signature:
+        return False
+    try:
+        signed_at = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+    now_seconds = int(time.time() if current_time is None else current_time)
+    if abs(now_seconds - signed_at) > MMN_SCHEDULER_MAX_CLOCK_SKEW_SECONDS:
+        return False
+    try:
+        expected = scheduler_signature(method, path, timestamp)
+    except RuntimeError:
+        return False
+    return hmac.compare_digest(signature, expected)
+
+
+def trusted_proxy_networks():
+    configured = env_value("MMN_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")
+    networks = []
+    for value in configured.split(","):
+        candidate = value.strip()
+        if not candidate:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(candidate, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def public_server_error(exc, fallback="服务暂时不可用，请稍后重试。"):
+    if cloud_login_required():
+        print(f"[server-error] {type(exc).__name__}", flush=True)
+        return fallback
+    return str(exc)
 
 def cloud_accounts():
     return {
@@ -14574,7 +14643,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             peer_address = ipaddress.ip_address(peer)
         except ValueError:
             return "unknown"
-        if peer_address.is_loopback or peer_address.is_private:
+        if any(peer_address in network for network in trusted_proxy_networks()):
             candidate = str(self.headers.get("X-Real-IP") or "").strip()
             try:
                 return str(ipaddress.ip_address(candidate)) if candidate else peer
@@ -14582,9 +14651,56 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return peer
         return peer
 
+    def prepare_raw_request(self):
+        if hasattr(self, "_raw_content_length"):
+            return True
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "不支持分块请求体。"}, 400)
+            return False
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "Content-Length无效。"}, 400)
+            return False
+        if length < 0:
+            self.close_connection = True
+            self.send_json({"ok": False, "error": "Content-Length无效。"}, 400)
+            return False
+        if length > MAX_UPLOAD_BYTES:
+            self.close_connection = True
+            self.send_json(
+                {"ok": False, "error": f"上传文件不能超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB。"},
+                413,
+            )
+            return False
+        self._raw_content_length = length
+        return True
+
+    def read_raw_body(self, expected_length=None):
+        if not self.prepare_raw_request():
+            raise ValueError("上传请求未通过边界校验。")
+        length = self._raw_content_length
+        if expected_length is not None and int(expected_length) != length:
+            raise ValueError("Content-Length不一致。")
+        previous_timeout = self.connection.gettimeout()
+        try:
+            self.connection.settimeout(MMN_REQUEST_BODY_TIMEOUT_SECONDS)
+            raw = self.rfile.read(length)
+        except (TimeoutError, socket.timeout) as exc:
+            self.close_connection = True
+            raise ValueError("读取上传文件超时。") from exc
+        finally:
+            self.connection.settimeout(previous_timeout)
+        if len(raw) != length:
+            self.close_connection = True
+            raise ValueError("上传文件不完整。")
+        return raw
+
     def prepare_json_request(self, path):
         if path in RAW_BODY_POST_PATHS:
-            return True
+            return self.prepare_raw_request()
         if hasattr(self, "_json_body"):
             return True
         if self.headers.get("Transfer-Encoding"):
@@ -14874,7 +14990,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 payload = load_mmn_eval_dashboard(org_id=auth.get("org_id", "local"))
                 self.send_json({"ok": True, **payload})
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, 500)
+                self.send_json({"ok": False, "error": public_server_error(exc)}, 500)
             return
         if parsed.path == "/api/policy-intelligence/dashboard":
             try:
@@ -15211,7 +15327,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 if length > MAX_UPLOAD_BYTES:
                     raise BFParseError(f"本品资料超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制")
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 payload = ingest_opportunity_product_document(
                     data,
                     query.get("filename", ["本品产品资料"])[0],
@@ -15324,7 +15440,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 self.send_json(dongchedi_sales_payload())
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc), "items": []}, 500)
+                self.send_json({"ok": False, "error": public_server_error(exc), "items": []}, 500)
             return
         if parsed.path == "/api/attribution-reasoning":
             q = parse_qs(parsed.query)
@@ -15458,13 +15574,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 )
                 self.send_json(payload)
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, 500)
+                self.send_json({"ok": False, "error": public_server_error(exc)}, 500)
             return
         if parsed.path == "/api/global-sales-marquee":
             try:
                 self.send_json(thailand_market_payload())
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc), "items": []}, 500)
+                self.send_json({"ok": False, "error": public_server_error(exc), "items": []}, 500)
             return
         if parsed.path == "/api/social-plugin/status":
             self.send_json({"ok": True, "plugin": social_plugin_status()})
@@ -15769,6 +15885,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.prepare_json_request(parsed.path):
             return
+        internal_scheduler = (
+            parsed.path in SCHEDULER_POST_PATHS
+            and valid_scheduler_signature(self.headers, self.command, parsed.path)
+        )
         if parsed.path == "/api/login":
             try:
                 body = self.read_json()
@@ -15797,32 +15917,13 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         else:
                             self.send_json({"ok": False, "error": "账号或密码不正确。"}, 400)
                         return
-                    created = now()
                     org_name = account["org"]
                     email = f"{username.lower()}@mmn.local"
                     resolved_scope = resolve_cloud_auth_scope(username)
-                    with db() as conn:
-                        if resolved_scope:
-                            org_id = resolved_scope["org_id"]
-                            user_id = resolved_scope["user_id"]
-                        else:
-                            org = conn.execute("select * from organizations where name=? order by created_at desc limit 1", (org_name,)).fetchone()
-                            if not org:
-                                org_id = str(uuid.uuid4())
-                                conn.execute("insert into organizations values (?,?,?)", (org_id, org_name, created))
-                            else:
-                                org_id = org["id"]
-                            user = conn.execute("select * from users where org_id=? and email=?", (org_id, email)).fetchone()
-                            if not user:
-                                user_id = str(uuid.uuid4())
-                                conn.execute("insert into users values (?,?,?,?,?)", (user_id, org_id, email, account["name"], created))
-                            else:
-                                user_id = user["id"]
-                        ensure_workspace(conn, scoped_org_id(org_id, "china"), org_name)
-                        ensure_workspace(conn, scoped_org_id(org_id, "global"), org_name)
-                        seed_policy_mvp(conn, org_id=org_id, edition="china")
-                    if account["role"] == "admin":
-                        ensure_legacy_vertical_claim(org_id)
+                    if not resolved_scope:
+                        raise ValueError("账号尚未完成初始化，请联系管理员。")
+                    org_id = resolved_scope["org_id"]
+                    user_id = resolved_scope["user_id"]
                     clear_login_failures(source_ip, username)
                     token = make_auth_token(username, account["role"], org_id, user_id)
                     session_payload = {
@@ -15879,15 +15980,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 headers={"Set-Cookie": clear_session_cookie_header()},
             )
             return
-        scheduled_refresh_paths = {
+        scheduled_refresh_paths = SCHEDULER_POST_PATHS & {
             "/api/group-dashboard/refresh-weekly",
             "/api/group-dashboard/refresh-monthly-sales",
         }
         if parsed.path in scheduled_refresh_paths:
-            internal_scheduler = (
-                self.headers.get("X-MMN-Scheduler") == "1"
-                and self.headers.get("Host", "").split(":", 1)[0] == "mmn-app"
-            )
             if not internal_scheduler and not self.require_cloud_auth({"admin"} if cloud_login_required() else None):
                 return
             try:
@@ -15899,9 +15996,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     result = run_monthly_sales_warning_refresh()
                 self.send_json({"ok": True, "result": result})
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, 500)
+                self.send_json({"ok": False, "error": public_server_error(exc)}, 500)
             return
-        if cloud_login_required():
+        if cloud_login_required() and not internal_scheduler:
             roles = cloud_post_required_roles(parsed.path)
             if not self.require_cloud_auth(roles):
                 return
@@ -16214,6 +16311,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 auth = self.current_auth() or {}
+                persist = body.get("persist") is True
                 model = str(body.get("model") or "奥迪E7X").strip()
                 region = str(body.get("region") or "上海").strip()
                 if region not in SUPPORTED_POLICY_REGIONS:
@@ -16245,16 +16343,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         as_of=body.get("asOf") or None,
                     )
                 result["strategyValidation"] = run_policy_strategy_validation(result)
-                with db() as conn:
-                    analysis = save_policy_analysis_result(
-                        conn,
-                        org_id=auth.get("org_id", "local"),
-                        edition=edition,
-                        model=model,
-                        region=region,
-                        result=result,
-                    )
-                self.send_json({"ok": True, "result": result, "analysis": analysis, "strategyValidation": result["strategyValidation"]}, 201)
+                analysis = None
+                if persist:
+                    with db() as conn:
+                        analysis = save_policy_analysis_result(
+                            conn,
+                            org_id=auth.get("org_id", "local"),
+                            edition=edition,
+                            model=model,
+                            region=region,
+                            result=result,
+                        )
+                self.send_json(
+                    {"ok": True, "result": result, "analysis": analysis, "strategyValidation": result["strategyValidation"]},
+                    201 if persist else 200,
+                )
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
@@ -16316,7 +16419,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     raise ValueError("产品能力入口仅支持PDF格式白皮书。")
                 if length <= 0 or length > MAX_UPLOAD_BYTES:
                     raise ValueError(f"PDF大小需在1字节至{MAX_UPLOAD_BYTES // 1024 // 1024}MB之间。")
-                result = analyze_product_whitepaper(filename, self.rfile.read(length), model)
+                result = analyze_product_whitepaper(filename, self.read_raw_body(length), model)
                 auth = self.current_auth() or {}
                 save_product_whitepaper_evidence(
                     result,
@@ -16557,7 +16660,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 if length <= 0 or length > MAX_UPLOAD_BYTES:
                     raise ValueError(f"导入文件必须小于 {MAX_UPLOAD_BYTES // 1024 // 1024}MB")
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 records = generic_rows_from_file(data, filename)
                 keyword = query.get("keyword", [""])[0]
                 platforms = [x for x in query.get("platforms", ["douyin,xiaohongshu,weibo"])[0].split(",") if x]
@@ -16578,7 +16681,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 if length > MAX_UPLOAD_BYTES:
                     raise BFParseError(f"本品资料超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制")
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 auth = self.current_auth() or {}
                 payload = ingest_opportunity_product_document(data, query.get("filename", ["本品产品资料"])[0], org_id=auth.get("org_id", "local"), user_id=query.get("userId", [auth.get("username") or "local"])[0], brand=query.get("brand", [""])[0], model=query.get("model", [""])[0], version=query.get("version", [""])[0], edition=query.get("edition", ["china"])[0])
                 self.send_json({"ok": True, "document": payload}, 201)
@@ -16781,7 +16884,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0") or 0)
                 if length > MAX_UPLOAD_BYTES:
                     raise BFParseError(f"BF文件超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制")
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 org_id = self.bf_org_id(q.get("orgId", [""])[0])
                 result = bf_service().ingest_document(
                     project_id=q.get("projectId", [""])[0],
@@ -17050,7 +17153,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             filename = parse_qs(parsed.query).get("filename", ["视频采集数据.xlsx"])[0]
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 result = build_video_dataset_from_workbook(data, filename)
                 self.send_json({"ok": True, "dataset": result})
             except Exception as exc:
@@ -17064,7 +17167,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": f"图片超过{MAX_UPLOAD_BYTES // 1024 // 1024}MB限制"}, 400)
                 return
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 auth = self.current_auth() or {}
                 preview = create_vertical_rank_image_preview(
                     data,
@@ -17095,7 +17198,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             query = parse_qs(parsed.query)
             filename = query.get("filename", ["垂媒正反向排名.xlsx"])[0]
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 result = build_vertical_media_dataset_from_workbook(data, filename)
                 auth = self.current_auth() or {}
                 result = remember_vertical_dataset(data, filename, result, auth.get("org_id", "local"), query.get("edition", ["china"])[0])
@@ -17107,7 +17210,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             filename = parse_qs(parsed.query).get("filename", ["原始声量数据.csv"])[0]
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 result = build_dataset_from_any_file(data, filename)
                 self.send_json({"ok": True, "dataset": result})
             except Exception as exc:
@@ -17117,7 +17220,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             filename = parse_qs(parsed.query).get("filename", ["rag_material"])[0]
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 result = parse_rag_file(data, filename)
                 self.send_json({"ok": True, "dataset": result})
             except Exception as exc:
@@ -17171,7 +17274,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             filename = q.get("filename", ["blogger_skill_material"])[0]
             edition = edition_from(q.get("edition", ["china"])[0])
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 auth = self.current_auth() or {}
                 job = start_blogger_skill_import_job(
                     data,
@@ -17237,7 +17340,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             filename = q.get("filename", ["content_capability_material"])[0]
             edition = edition_from(q.get("edition", ["china"])[0])
             try:
-                data = self.rfile.read(length)
+                data = self.read_raw_body(length)
                 self.send_json(import_content_capability_file(data, filename, edition=edition, limit=120))
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
@@ -17637,7 +17740,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         filename = parse_qs(parsed.query).get("filename", ["导入数据.xlsx"])[0]
         try:
-            data = self.rfile.read(length)
+            data = self.read_raw_body(length)
             result = build_dataset_from_any_file(data, filename)
             self.send_json({"ok": True, "dataset": result})
         except Exception as exc:
@@ -17651,6 +17754,9 @@ class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 if __name__ == "__main__":
+    if cloud_login_required():
+        auth_secret()
+        scheduler_secret()
     init_db()
     schedule_founder_weekly_crawl()
     with Server((APP_HOST, PORT), Handler) as server:

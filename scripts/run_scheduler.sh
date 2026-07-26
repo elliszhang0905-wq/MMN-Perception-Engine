@@ -11,15 +11,28 @@ post_json() {
   python3 - "$path" "$payload" <<'PY'
 import os
 import sys
+import time
+import hashlib
+import hmac
 import urllib.request
 
 path, payload = sys.argv[1:3]
 port = os.environ.get("MMN_PORT", "8765")
 url = f"http://mmn-app:{port}{path}"
+secret = os.environ.get("MMN_SCHEDULER_SECRET", "")
+if not secret:
+    raise RuntimeError("MMN_SCHEDULER_SECRET is required")
+timestamp = str(int(time.time()))
+message = f"POST\n{path}\n{timestamp}".encode("utf-8")
+signature = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 req = urllib.request.Request(
     url,
     data=payload.encode("utf-8"),
-    headers={"Content-Type": "application/json", "X-MMN-Scheduler": "1"},
+    headers={
+        "Content-Type": "application/json",
+        "X-MMN-Scheduler-Timestamp": timestamp,
+        "X-MMN-Scheduler-Signature": signature,
+    },
     method="POST",
 )
 with urllib.request.urlopen(req, timeout=120) as resp:

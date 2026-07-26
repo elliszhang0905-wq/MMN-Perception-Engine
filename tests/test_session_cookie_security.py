@@ -19,6 +19,10 @@ class SessionCookieSecurityTest(unittest.TestCase):
         cls.patchers = [
             patch.object(server, "cloud_login_required", return_value=True),
             patch.object(server, "session_cookie_enabled", return_value=True),
+            patch.dict(server.os.environ, {
+                "MMN_AUTH_SECRET": "test-auth-secret",
+                "MMN_SCHEDULER_SECRET": "test-scheduler-secret",
+            }, clear=False),
             patch.object(server, "cloud_accounts", return_value={
                 "admin": {
                     "password": "correct-password",

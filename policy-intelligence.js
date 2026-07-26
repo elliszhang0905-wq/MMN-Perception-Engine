@@ -62,7 +62,7 @@
       state.comparisons = comparisons.map(item => item.vehicleImpact).filter(Boolean);
       state.loaded = true;
       render();
-      if (!state.strategyValidation && !state.strategyLoading) void startEvaluation();
+      if (!state.strategyValidation && !state.strategyLoading) void startEvaluation(false);
     } catch (error) {
       if (requestId !== state.loadRequest) return;
       if (root()) root().innerHTML = `<div class="policy-error"><b>政策环境分析未完成</b><p>${esc(error.message)}</p><button type="button" data-policy-retry>重新加载</button></div>`;
@@ -171,9 +171,9 @@
     state.strategyLoading = true; state.strategyError = "";
     if (panel) panel.innerHTML = '<p class="policy-eval-status">Qwen、DeepSeek、Kimi 正在基于同一组已审核政策证据独立分析…</p>';
     try {
-      const result = await jsonFetch("/api/policy-intelligence/analyze", { method: "POST", body: JSON.stringify({ edition: edition(), model: state.model, region: state.region, scenario: state.scenario, ...profile }) });
+      const result = await jsonFetch("/api/policy-intelligence/analyze", { method: "POST", body: JSON.stringify({ edition: edition(), model: state.model, region: state.region, scenario: state.scenario, persist: force, ...profile }) });
       if (requestId !== state.strategyRequest) return;
-      state.analysisId = result.analysis.analysisId;
+      state.analysisId = result.analysis?.analysisId || "";
       state.strategyValidation = result.strategyValidation;
       state.data = result.result || state.data;
     } catch (error) { if (requestId === state.strategyRequest) state.strategyError = error.message; }

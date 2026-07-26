@@ -19,14 +19,18 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
         self.assertIn("seed_policy_mvp(conn", self.server)
         self.assertNotIn("create table if not exists policy_records", self.server)
 
-    def test_login_seeds_policy_baseline_for_the_authenticated_org(self):
+    def test_login_does_not_seed_or_rewrite_business_data(self):
         login_route = self.server.split('parsed.path == "/api/login"', 1)[1].split(
             "scheduled_refresh_paths = {", 1
         )[0]
-        self.assertEqual(
-            login_route.count('seed_policy_mvp(conn, org_id=org_id, edition="china")'),
-            2,
-        )
+        cloud_login_route = login_route.split(
+            'if cloud_login_required():\n                    raise ValueError',
+            1,
+        )[0]
+        self.assertNotIn('seed_policy_mvp(conn, org_id=org_id, edition="china")', cloud_login_route)
+        self.assertNotIn("ensure_legacy_vertical_claim(org_id)", cloud_login_route)
+        self.assertNotIn("insert into organizations", cloud_login_route)
+        self.assertNotIn("insert into users", cloud_login_route)
 
     def test_dashboard_and_policy_list_get_routes_are_registered(self):
         self.assertIn('parsed.path == "/api/policy-intelligence/dashboard"', self.server)
@@ -43,6 +47,13 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
         ):
             self.assertIn('parsed.path == "%s"' % route, self.server)
         self.assertFalse(any(path.startswith("/api/policy-intelligence/") for path in TRIAL_POST_ALLOWED_PATHS))
+
+    def test_policy_preview_is_not_persisted_without_explicit_request(self):
+        analyze_route = self.server.split('parsed.path == "/api/policy-intelligence/analyze"', 1)[1].split(
+            'parsed.path == "/api/policy-intelligence/evaluate"', 1
+        )[0]
+        self.assertIn('persist = body.get("persist") is True', analyze_route)
+        self.assertIn("if persist:", analyze_route)
 
     def test_policy_model_gateway_is_source_locked_and_json_only(self):
         self.assertIn("def policy_model_gateway(messages):", self.server)
