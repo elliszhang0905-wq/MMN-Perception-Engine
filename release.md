@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-27｜E7X线索One-Page本地运行目录纠偏
+
+- 问题确认：`127.0.0.1:8765`虽然健康，但监听进程实际来自旧工作树`.worktrees/douyin-video-creation-20260724`，在线资源版本仍为`beta-1.03-20260724-douyin-video-creation-1`，因此页面继续显示旧式线索卡片。这不是浏览器缓存问题。
+- 根因修复：提交`3bae09e`让本地启动器和守护进程从脚本自身位置解析项目目录，并要求健康进程的`cwd`必须等于当前发布目录；发现其他工作树占用端口时，先检查`activeLocalJobs`，有任务则拒绝切换，无任务才精确停止旧进程。回归测试覆盖目录解析、进程工作目录校验、任务保护和守护进程清理。
+- 本地部署：从干净提交创建`.worktrees/local-stable-onepage-20260727`，沿用正式本地`MMN_DB_PATH`和`MMN_DATA_ROOT`启动；8765监听进程`cwd`已核验为该稳定目录，旧工作树进程及其Screen会话已退出。运行版本保持`beta-1.03-20260724-security-p1-1`，未冒充新的生产版本。
+- 页面验收：实际进入“管理层版 → 03 销量预警 → 奥迪E7X”，桌面1440px与移动390px均显示4组“线索与订单阶段达成”图表、当前阶段进度、阶段异常与证据边界；旧`.lead-dashboard-summary`数量为0，两种尺寸均无横向溢出，控制台错误和警告均为0。
+- 自动门禁：`tests/test_ensure_local_mmn.js`、`tests/test_lead_dashboard_ui.js`、`tests/test_data_first_cockpit_ui.js`和`tests.test_all_surfaces_release_gate`全部通过。
+- 数据保护：切换前使用SQLite在线备份保存`tmp/e7x-onepage-runtime-fix-20260727/commercial_demo_before.db`；浏览器验收产生的4条车型身份临时记录、6条车型身份时间刷新和1条E7X目录时间刷新均按明确主键恢复。最终数据库`integrity_check=ok`，全库逻辑SHA3与备份一致。
+- 发布边界：本轮只修复本地运行目录并同步当前GitHub分支`codex/social-evidence-v2`；不合并`main`、不创建标签、不部署ECS。
+- 回滚：停止`.worktrees/local-stable-onepage-20260727`的本地守护进程，执行`git revert 3bae09e`后从指定发布目录重新启动；本轮无数据库迁移或业务数据变更。
+
 ## 2026-07-24｜beta 1.03 E7X线索One-Page本地交付
 
 - 功能提交：`6011904`；随本条日志同步GitHub当前分支`codex/social-evidence-v2`。本轮不合并`main`、不创建版本标签、不部署ECS。
