@@ -44,6 +44,7 @@ class SessionCookieSecurityTest(unittest.TestCase):
         ]
         for patcher in cls.patchers:
             patcher.start()
+            cls.addClassCleanup(patcher.stop)
         cls.httpd = server.http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
         cls.thread.start()
@@ -53,8 +54,6 @@ class SessionCookieSecurityTest(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.thread.join(timeout=2)
-        for patcher in reversed(cls.patchers):
-            patcher.stop()
 
     def request(self, method, path, payload=None, headers=None):
         body = b"" if payload is None else json.dumps(payload).encode("utf-8")

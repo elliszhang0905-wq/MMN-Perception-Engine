@@ -342,8 +342,17 @@ class SocialEvidenceRepository:
     """Single-writer SQLite repository, isolated from MMN's business database."""
 
     def __init__(self, db_path=None, raw_dir=None):
-        self.db_path = Path(db_path or os.getenv("MMN_SOCIAL_EVIDENCE_DB", "data/social_evidence.sqlite"))
-        self.raw_dir = Path(raw_dir or os.getenv("MMN_SOCIAL_EVIDENCE_RAW_DIR", "data/social_evidence_raw"))
+        data_root = Path(os.getenv("MMN_DATA_ROOT", "data"))
+        self.db_path = Path(
+            db_path
+            or os.getenv("MMN_SOCIAL_EVIDENCE_DB")
+            or data_root / "social_evidence.sqlite"
+        )
+        self.raw_dir = Path(
+            raw_dir
+            or os.getenv("MMN_SOCIAL_EVIDENCE_RAW_DIR")
+            or data_root / "social_evidence_raw"
+        )
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()

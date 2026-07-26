@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -11,10 +12,20 @@ from .runner import evaluate_dataset, load_jsonl
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CASES_PATH = ROOT / "data" / "eval" / "mmn_eval_seed_v0.1.jsonl"
-DEFAULT_OUTPUTS_PATH = ROOT / "data" / "eval" / "mmn_eval_seed_outputs_v0.1.jsonl"
-DEFAULT_REPORT_PATH = ROOT / "output" / "mmn-eval-seed-report.json"
-DEFAULT_REVIEWS_PATH = ROOT / "data" / "eval" / "mmn_eval_human_reviews.json"
+DATA_ROOT = Path(os.getenv("MMN_DATA_ROOT", str(ROOT / "data"))).expanduser().resolve()
+OUTPUT_ROOT = Path(os.getenv("MMN_OUTPUT_ROOT", str(ROOT / "output"))).expanduser().resolve()
+DEFAULT_CASES_PATH = Path(
+    os.getenv("MMN_EVAL_CASES_PATH", str(DATA_ROOT / "eval" / "mmn_eval_seed_v0.1.jsonl"))
+).expanduser().resolve()
+DEFAULT_OUTPUTS_PATH = Path(
+    os.getenv("MMN_EVAL_OUTPUTS_PATH", str(DATA_ROOT / "eval" / "mmn_eval_seed_outputs_v0.1.jsonl"))
+).expanduser().resolve()
+DEFAULT_REPORT_PATH = Path(
+    os.getenv("MMN_EVAL_REPORT_PATH", str(OUTPUT_ROOT / "mmn-eval-seed-report.json"))
+).expanduser().resolve()
+DEFAULT_REVIEWS_PATH = Path(
+    os.getenv("MMN_EVAL_REVIEWS_PATH", str(DATA_ROOT / "eval" / "mmn_eval_human_reviews.json"))
+).expanduser().resolve()
 
 _REVIEWS_LOCK = Lock()
 

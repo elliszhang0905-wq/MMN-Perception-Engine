@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -140,7 +141,10 @@ class ExecutiveBriefReviewTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(server, "DATA_DIR", Path(tmp)), \
              patch.object(server, "enqueue_executive_brief_review", side_effect=enqueue):
-            result = server.run_weekly_group_dashboard_refresh(payload)
+            result = server.run_weekly_group_dashboard_refresh(
+                payload,
+                today=date(2026, 7, 24),
+            )
 
         packet = captured["packet"]
         self.assertEqual(result["status"], "published")

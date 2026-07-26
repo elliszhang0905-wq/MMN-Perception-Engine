@@ -1,6 +1,9 @@
 allowBuilds:
   puppeteer: true
   sharp: true
+overrides:
+  dompurify: 3.4.12
+  postcss: 8.5.18
 onlyBuiltDependencies:
   - puppeteer
   - sharp

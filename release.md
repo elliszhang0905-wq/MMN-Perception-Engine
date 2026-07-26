@@ -18,6 +18,28 @@
 - 7月25日已发布并继续保留：抖音视频第三路独立分析安全重试。免费额度关闭或单路失败时保留已成功结果与冻结证据，只重试失败槽位；客户侧不暴露供应商、模型或原始错误。
 - 两项能力边界不变：三路分析仍需同一冻结证据和独立首轮输出；线索看板没有线索级/订单级关联键时不得声称真实转化或因果归因。
 
+## 2026-07-27｜E7X线索One-Page本地运行目录纠偏
+
+- 问题确认：`127.0.0.1:8765`虽然健康，但监听进程实际来自旧工作树`.worktrees/douyin-video-creation-20260724`，在线资源版本仍为`beta-1.03-20260724-douyin-video-creation-1`，因此页面继续显示旧式线索卡片。这不是浏览器缓存问题。
+- 根因修复：提交`3bae09e`让本地启动器和守护进程从脚本自身位置解析项目目录，并要求健康进程的`cwd`必须等于当前发布目录；发现其他工作树占用端口时，先检查`activeLocalJobs`，有任务则拒绝切换，无任务才精确停止旧进程。回归测试覆盖目录解析、进程工作目录校验、任务保护和守护进程清理。
+- 本地部署：从干净提交创建`.worktrees/local-stable-onepage-20260727`，沿用正式本地`MMN_DB_PATH`和`MMN_DATA_ROOT`启动；8765监听进程`cwd`已核验为该稳定目录，旧工作树进程及其Screen会话已退出。运行版本保持`beta-1.03-20260724-security-p1-1`，未冒充新的生产版本。
+- 页面验收：实际进入“管理层版 → 03 销量预警 → 奥迪E7X”，桌面1440px与移动390px均显示4组“线索与订单阶段达成”图表、当前阶段进度、阶段异常与证据边界；旧`.lead-dashboard-summary`数量为0，两种尺寸均无横向溢出，控制台错误和警告均为0。
+- 自动门禁：`tests/test_ensure_local_mmn.js`、`tests/test_lead_dashboard_ui.js`、`tests/test_data_first_cockpit_ui.js`和`tests.test_all_surfaces_release_gate`全部通过。
+- 数据保护：切换前使用SQLite在线备份保存`tmp/e7x-onepage-runtime-fix-20260727/commercial_demo_before.db`；浏览器验收产生的4条车型身份临时记录、6条车型身份时间刷新和1条E7X目录时间刷新均按明确主键恢复。最终数据库`integrity_check=ok`，全库逻辑SHA3与备份一致。
+- 发布边界：本轮只修复本地运行目录并同步当前GitHub分支`codex/social-evidence-v2`；不合并`main`、不创建标签、不部署ECS。
+- 回滚：停止`.worktrees/local-stable-onepage-20260727`的本地守护进程，执行`git revert 3bae09e`后从指定发布目录重新启动；本轮无数据库迁移或业务数据变更。
+
+## 2026-07-24｜beta 1.03 E7X线索One-Page本地交付
+
+- 功能提交：`6011904`；随本条日志同步GitHub当前分支`codex/social-evidence-v2`。本轮不合并`main`、不创建版本标签、不部署ECS。
+- E7X线索看板改为分块式One-Page结构：四阶段线索/订单达成双轨图、100%目标基准、当前阶段进度、6月下半月表现背离和7月进行中状态集中呈现。
+- 证据边界保持不变：页面明确标注“车型总体线索｜暂未分平台”，缺少线索订单关联时不能认定为真实转化率下降；非E7X车型继续显示真实缺失状态。
+- 本地部署：`scripts/ensure_local_mmn.sh`确认`127.0.0.1:8765`可用，健康接口持久化检查为`ok`；静态资源已返回新看板结构。运行版本仍保持`beta-1.03-20260724-security-p1-1`，本次前端增量不冒充新的生产版本。
+- 发布门禁：完整`npm run release:gate`通过，覆盖全部前端合同、189项后端专项、19个客户入口、8个管理视图、1440px与390px；`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。
+- 本地真实流程：管理层版进入销量预警并选择奥迪E7X后，展示4个阶段图组、表现背离、进行中说明和证据边界；390px页面`scrollWidth=clientWidth=390`，控制台错误和警告均为0。
+- 数据保护：门禁前备份`tmp/e7x-lead-onepage-release-20260724/commercial_demo_before_gate.db`；浏览器验收触发的车型身份时间字段和E7X目录时间戳已按明确主键恢复。最终77张表与备份逐表、逐主键、逐字段逻辑对比无差异，`quick_check=ok`。
+- 回滚：代码执行`git revert 6011904`并重新运行本地守护脚本；本次无数据库迁移或业务数据变更。
+
 ## 2026-07-23｜beta 1.03 竞品格局与社媒可靠性发布
 
 - 最终版本码：`beta-1.03-20260723-vertical-social-reliability-2`；应用提交 `f3b35738e2327026e65fe1e6d944325c54210844` 已同步 GitHub `codex/social-evidence-v2`、`main` 和同名标签，并部署 ECS。首轮 `-1` 部署在真实 Linux 图片门禁发现 OCR 差异后未作完成结论，修复后升级为 `-2`。
