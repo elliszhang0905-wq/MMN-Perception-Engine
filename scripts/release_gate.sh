@@ -44,6 +44,7 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_legacy_product_evaluation.js
 "$NODE_BIN" tests/test_data_first_cockpit_ui.js
 "$NODE_BIN" tests/test_group_dashboard_ui.js
+"$NODE_BIN" tests/test_lead_dashboard_ui.js
 "$NODE_BIN" tests/test_social_competitor_picker.js
 "$NODE_BIN" tests/test_social_positive_benchmark.js
 "$NODE_BIN" tests/test_social_risk_popover.js
@@ -58,8 +59,10 @@ echo "MMN release gate: syntax checks"
 "$NODE_BIN" tests/test_policy_intelligence_ui.js
 "$NODE_BIN" tests/test_data_drill_xss.js
 "$NODE_BIN" tests/test_global_xss_boundaries.js
-python3 -m py_compile server.py group_dashboard.py product_whitepaper.py attribution_reasoning.py selling_point_advisory.py strategy_report_package.py vehicle_decision.py bf_factory/*.py
+python3 -m py_compile server.py lead_dashboard_catalog.py group_dashboard.py product_whitepaper.py attribution_reasoning.py selling_point_advisory.py strategy_report_package.py vehicle_decision.py bf_factory/*.py
 python3 -m unittest \
+  tests.test_lead_dashboard_catalog \
+  tests.test_lead_dashboard_api \
   tests.test_product_whitepaper \
   tests.test_product_summary_import \
   tests.test_brand_penetration_module \

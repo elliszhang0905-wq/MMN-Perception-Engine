@@ -61,6 +61,13 @@ from product_evaluation_catalog import (
     list_datasets as list_product_evaluation_datasets,
     save_dataset as save_product_evaluation_dataset,
 )
+from lead_dashboard_catalog import (
+    build_datasets_from_rows as build_lead_dashboard_datasets,
+    extract_rows_from_sheets as extract_lead_dashboard_rows,
+    get_dataset as get_lead_dashboard_dataset,
+    init_schema as init_lead_dashboard_schema,
+    save_datasets as save_lead_dashboard_datasets,
+)
 from opportunity_pipeline import (
     UNIFIED_LABELS,
     build_competitor_product_summaries,
@@ -292,14 +299,16 @@ RAW_BODY_POST_PATHS = frozenset({
     "/api/import-vertical-xlsx",
     "/api/import-video-xlsx",
     "/api/import-xlsx",
+    "/api/lead-dashboard/import",
     "/api/opportunity-map/own-document",
     "/api/product-whitepaper/analyze",
     "/api/social-trends/import",
     "/api/vertical-rank-image/preview",
 })
+LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260724-security-p1-1"
-APP_RELEASE_DATE = "2026-07-24"
+APP_VERSION_CODE = "beta-1.03-20260727-lead-dashboard-catalog-1"
+APP_RELEASE_DATE = "2026-07-27"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -1418,6 +1427,7 @@ def init_db():
         init_selling_point_advisory_schema(conn)
         init_strategy_report_schema(conn)
         init_product_evaluation_catalog_schema(conn)
+        init_lead_dashboard_schema(conn)
         seed_policy_sources(conn)
         seed_policy_mvp(conn, org_id="local", edition="china")
         migrate_vertical_scope_schema(conn)
@@ -11546,6 +11556,16 @@ def generic_rows_from_file(data, filename):
     text = decode_text_data(data)
     return [{"title": Path(filename or "文本样本").stem, "content": text}]
 
+def lead_dashboard_rows_from_file(data, filename):
+    lower = (filename or "").lower()
+    if lower.endswith(".xlsx"):
+        sheets = {
+            sheet: sheet_rows(cells)
+            for sheet, cells in read_xlsx_cells(data).items()
+        }
+        return extract_lead_dashboard_rows(sheets)
+    return generic_rows_from_file(data, filename)
+
 def field_value(row, aliases, default=""):
     if not isinstance(row, dict):
         return default
@@ -14800,6 +14820,28 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)
             return
+        if parsed.path == "/api/lead-dashboard-data":
+            try:
+                auth = self.require_cloud_auth()
+                if not auth:
+                    return
+                query = parse_qs(parsed.query)
+                model = str(query.get("model", [""])[0] or "").strip()
+                if not model:
+                    raise ValueError("缺少车型。")
+                with db() as conn:
+                    dataset = get_lead_dashboard_dataset(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        model=model,
+                    )
+                self.send_json({"ok": True, "dataset": dataset})
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            except Exception:
+                self.send_json({"ok": False, "error": "线索数据读取失败，请稍后重试。"}, 500)
+            return
         if parsed.path == "/api/auth/config":
             auth_payload = self.current_auth()
             self.send_json({
@@ -15884,6 +15926,40 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"ok": False, "error": str(exc)}, 422)
             except Exception:
                 self.send_json({"ok": False, "error": "产品评价数据保存失败，请稍后重试。"}, 500)
+            return
+        if parsed.path == "/api/lead-dashboard/import":
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            query = parse_qs(parsed.query)
+            filename = str(query.get("filename", ["线索数据.xlsx"])[0] or "线索数据.xlsx").strip()
+            if length <= 0:
+                self.send_json({"ok": False, "error": "线索数据文件为空。"}, 422)
+                return
+            if length > LEAD_DASHBOARD_MAX_UPLOAD_BYTES:
+                self.send_json({"ok": False, "error": "线索数据文件超出上传限制。"}, 413)
+                return
+            if not re.search(r"\.(xlsx|csv|json)$", filename, re.I):
+                self.send_json({"ok": False, "error": "线索数据仅支持xlsx、csv或json格式。"}, 422)
+                return
+            try:
+                data = self.rfile.read(length)
+                rows = lead_dashboard_rows_from_file(data, filename)
+                datasets = build_lead_dashboard_datasets(rows, filename)
+                auth = self.current_auth() or {"org_id": "local", "user_id": "local"}
+                with db() as conn:
+                    items = save_lead_dashboard_datasets(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        datasets=datasets,
+                        user_id=auth.get("user_id") or auth.get("username") or "local",
+                    )
+                self.send_json({"ok": True, "datasets": [item["dataset"] for item in items]}, 201)
+            except ValueError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            except (zipfile.BadZipFile, KeyError, ET.ParseError):
+                self.send_json({"ok": False, "error": "线索数据文件结构无效或已损坏。"}, 422)
+            except Exception:
+                self.send_json({"ok": False, "error": "线索数据导入失败，请检查格式后重试。"}, 500)
             return
         if parsed.path == "/api/strategy-report-packages":
             try:
