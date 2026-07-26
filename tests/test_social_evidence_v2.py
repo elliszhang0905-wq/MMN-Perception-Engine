@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -51,6 +52,20 @@ class SocialEvidenceV2Test(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_default_repository_paths_follow_mmn_data_root(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "MMN_DATA_ROOT": tmp,
+                "MMN_SOCIAL_EVIDENCE_DB": "",
+                "MMN_SOCIAL_EVIDENCE_RAW_DIR": "",
+            },
+            clear=False,
+        ):
+            repository = SocialEvidenceRepository()
+            self.assertEqual(repository.db_path, Path(tmp) / "social_evidence.sqlite")
+            self.assertEqual(repository.raw_dir, Path(tmp) / "social_evidence_raw")
 
     def plan(self, center_type="social_trend", **overrides):
         payload = {

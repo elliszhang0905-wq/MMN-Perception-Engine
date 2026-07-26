@@ -4,6 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  dompurify: 3.4.12
+  postcss: 8.5.18
+
 importers:
 
   .:
@@ -63,7 +67,7 @@ packages:
     resolution: {integrity: sha512-jS/TY4SpG4gszAtIg7Qnf3AS2pjcUM5SzxpApOrlndMeGhIbaTzWBzzP/IApXoNWEW7OhcjkRT48jnAUIFXhAQ==}
     engines: {node: '>=18'}
     peerDependencies:
-      postcss: ^8.4
+      postcss: 8.5.18
 
   '@csstools/selector-resolve-nested@3.1.0':
     resolution: {integrity: sha512-mf1LEW0tJLKfWyvn5KdDrhpxHyuxpbNwTIwOYLIvsTffeyOf85j5oIzfG0yosxDgx/sswlqBnESYUcQH0vgZ0g==}
@@ -991,8 +995,8 @@ packages:
   devtools-protocol@0.0.1638949:
     resolution: {integrity: sha512-mXwg4Fqnv0WR4iuAT/gYUmctNkjILwXFHyZ+m7Ty1dfr0ezZt2U3gnrrJTfRobJTHoXf+IbuFvFITzLrLFjwJA==}
 
-  dompurify@3.4.11:
-    resolution: {integrity: sha512-zhlUV12GsaRzMsf9q5M254YhA4+VuF0fG+QFqu6aYpoGlKtz+w8//jBcGVYBgQkR5GHjUomejY84AV+/uPbWdw==}
+  dompurify@3.4.12:
+    resolution: {integrity: sha512-zQvGet8Z2sWbQhCmfFz/T5QWH2oBmjnqK3qvOjaqaNLrLEF912WamU+ohnTp0TCep/MFVHpdJuCZEdFOdTnEFg==}
 
   dotenv@16.6.1:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
@@ -1376,14 +1380,14 @@ packages:
     resolution: {integrity: sha512-1YCI290TX+VP0U/K/aFxzHzQWHWURL+CtHMSbex1lCdpXD1SoR2sYuxDu5aNI9lPoXpKTCggFZiDJbwylU0LEQ==}
     engines: {node: '>=18'}
     peerDependencies:
-      postcss: ^8.4
+      postcss: 8.5.18
 
   postcss-selector-parser@7.1.4:
     resolution: {integrity: sha512-HeP7D2wyhkR+XaK6v4W8oRF62Dsz4flyuczALJp61GckGm42u1saSSJ/0auvcBqxs3jMRFEcPK34At/0JBKdOg==}
     engines: {node: '>=4'}
 
-  postcss@8.5.16:
-    resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
+  postcss@8.5.18:
+    resolution: {integrity: sha512-xdB1oSLHbz1vRWgCDalrCqEFTWzFlhqFC5tIHLMOSUIjhm3XXQ1qrFy8S/ESr1JYRRXqM3c1QFiMZUJdUTqyMQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   pptxgenjs@3.12.0:
@@ -1709,10 +1713,10 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@csstools/postcss-is-pseudo-class@5.0.3(postcss@8.5.16)':
+  '@csstools/postcss-is-pseudo-class@5.0.3(postcss@8.5.18)':
     dependencies:
       '@csstools/selector-specificity': 5.0.0(postcss-selector-parser@7.1.4)
-      postcss: 8.5.16
+      postcss: 8.5.18
       postcss-selector-parser: 7.1.4
 
   '@csstools/selector-resolve-nested@3.1.0(postcss-selector-parser@7.1.4)':
@@ -1938,14 +1942,14 @@ snapshots:
 
   '@marp-team/marpit@3.2.2':
     dependencies:
-      '@csstools/postcss-is-pseudo-class': 5.0.3(postcss@8.5.16)
+      '@csstools/postcss-is-pseudo-class': 5.0.3(postcss@8.5.18)
       cssesc: 3.0.0
       js-yaml: 4.3.0
       lodash.kebabcase: 4.1.1
       markdown-it: 14.3.0
       markdown-it-front-matter: 0.2.4
-      postcss: 8.5.16
-      postcss-nesting: 13.0.2(postcss@8.5.16)
+      postcss: 8.5.18
+      postcss-nesting: 13.0.2(postcss@8.5.18)
 
   '@mermaid-js/layout-elk@0.2.2(mermaid@11.16.0)':
     dependencies:
@@ -2250,7 +2254,7 @@ snapshots:
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       color-string: 2.1.4
-      dompurify: 3.4.11
+      dompurify: 3.4.12
       highlight.js: 11.11.1
       html-to-image: 1.11.13
       jotai: 2.20.1(react@19.2.7)
@@ -2630,7 +2634,7 @@ snapshots:
 
   devtools-protocol@0.0.1638949: {}
 
-  dompurify@3.4.11:
+  dompurify@3.4.12:
     optionalDependencies:
       '@types/trusted-types': 2.0.7
 
@@ -2871,7 +2875,7 @@ snapshots:
       d3-sankey: 0.12.3
       dagre-d3-es: 7.0.14
       dayjs: 1.11.21
-      dompurify: 3.4.11
+      dompurify: 3.4.12
       es-toolkit: 1.49.0
       katex: 0.16.47
       khroma: 2.1.0
@@ -2976,11 +2980,11 @@ snapshots:
       path-data-parser: 0.1.0
       points-on-curve: 0.2.0
 
-  postcss-nesting@13.0.2(postcss@8.5.16):
+  postcss-nesting@13.0.2(postcss@8.5.18):
     dependencies:
       '@csstools/selector-resolve-nested': 3.1.0(postcss-selector-parser@7.1.4)
       '@csstools/selector-specificity': 5.0.0(postcss-selector-parser@7.1.4)
-      postcss: 8.5.16
+      postcss: 8.5.18
       postcss-selector-parser: 7.1.4
 
   postcss-selector-parser@7.1.4:
@@ -2988,7 +2992,7 @@ snapshots:
       cssesc: 3.0.0
       util-deprecate: 1.0.2
 
-  postcss@8.5.16:
+  postcss@8.5.18:
     dependencies:
       nanoid: 3.3.15
       picocolors: 1.1.1

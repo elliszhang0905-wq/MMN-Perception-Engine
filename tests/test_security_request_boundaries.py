@@ -55,6 +55,7 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
         ]
         for patcher in cls.patchers:
             patcher.start()
+            cls.addClassCleanup(patcher.stop)
         cls.ensure_workspace_mock = server.ensure_workspace
         cls.seed_policy_mvp_mock = server.seed_policy_mvp
         cls.ensure_legacy_vertical_claim_mock = server.ensure_legacy_vertical_claim
@@ -67,8 +68,6 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.thread.join(timeout=2)
-        for patcher in reversed(cls.patchers):
-            patcher.stop()
 
     def setUp(self):
         server.reset_login_rate_limits()

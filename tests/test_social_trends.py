@@ -9,6 +9,17 @@ from social_trends import TikHubClient, _aggregate, _parse_import_date, apply_hi
 
 
 class SocialTrendsTest(unittest.TestCase):
+    def setUp(self):
+        self.tikhub_env = patch.dict(
+            os.environ,
+            {"TIKHUB_API_KEY": "test-placeholder"},
+            clear=False,
+        )
+        self.tikhub_env.start()
+
+    def tearDown(self):
+        self.tikhub_env.stop()
+
     def test_vehicle_search_aliases_cover_chinese_english_brand_and_short_model(self):
         self.assertEqual(vehicle_search_aliases("奥迪E7X"), ["奥迪E7X", "AUDI E7X", "E7X"])
 

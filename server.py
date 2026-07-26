@@ -6065,9 +6065,9 @@ def executive_brief_state(force=False):
     return public_executive_brief_state(packet, cached)
 
 
-def run_weekly_group_dashboard_refresh(payload=None):
+def run_weekly_group_dashboard_refresh(payload=None, today=None):
     """Publish one atomic weekly batch, then invalidate/re-run its review."""
-    status = refresh_weekly_market_snapshot(DATA_DIR, payload=payload)
+    status = refresh_weekly_market_snapshot(DATA_DIR, payload=payload, today=today)
     packet = executive_brief_evidence_packet()
     review_started = False
     if status.get("status") == "published":

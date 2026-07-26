@@ -37,7 +37,8 @@ def table_snapshot(conn, table):
 
 
 def database_snapshot(path):
-    with sqlite3.connect(path) as conn:
+    uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
         tables = [
             row[0]
             for row in conn.execute(
