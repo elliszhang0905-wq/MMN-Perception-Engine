@@ -4,7 +4,7 @@
 
 - 状态包版本：`v2.31`
 - 最后核验时间：`2026-07-27`（Asia/Shanghai）
-- Git应用基线：生产应用提交为 `7cee9d1690016573529777979214e541ea3eb57a`；GitHub `main`、发布分支、本地 8765 与 ECS 运行包已同步。文档收口提交由 GitHub `main` 和 ECS `.deployed-handoff-commit` 单独记录，不改变应用运行提交。
+- Git应用基线：生产应用提交为 `7cee9d13cdfc956efa1792fdedcc2085a1519769`；GitHub `main`、发布分支、本地 8765 与 ECS 运行包已同步。文档收口提交由 GitHub `main` 和 ECS `.deployed-handoff-commit` 单独记录，不改变应用运行提交。
 - 当前分支：`release/lead-dashboard-20260727`；应用版本为 `beta-1.03-20260727-lead-dashboard-catalog-1`。
 - 当前生产状态：车型线索看板已经由 E7X 单样本改为车型无关的数据产品。管理员可导入 xlsx、csv 或 json，一个文件可包含多车型；服务按企业空间、版本和车型隔离保存，未知车型返回真实空状态，不借用 E7X、其他车型或其他企业缓存。E7X仅保留为首个演示/验收样本。原有竞品格局、社媒证据、三路独立分析、决策驾驶舱和数据治理边界继续生效。
 - 基线说明：主线证据路由与封面 Prompt 代码随包保留，但公开社媒证据 V2、封面 Prompt、影子模式和独立 Worker profile 仍默认关闭；在真实插件影子导入与真实三旗舰成本/质量验收前，不得写成已启用。

@@ -778,7 +778,7 @@ BF P0 当前验收基线为 28 项完整测试通过、系统Python兼容与HTTP
 
 ## 34. 2026-07-27 通用车型线索看板与本地运行防漂移交接
 
-- 当前生产应用版本为`beta-1.03-20260727-lead-dashboard-catalog-1`，运行提交为`7cee9d1690016573529777979214e541ea3eb57a`；GitHub `main`、发布分支、本地8765和ECS运行包一致。
+- 当前生产应用版本为`beta-1.03-20260727-lead-dashboard-catalog-1`，运行提交为`7cee9d13cdfc956efa1792fdedcc2085a1519769`；GitHub `main`、发布分支、本地8765和ECS运行包一致。
 - `lead_dashboard_catalog.py`和`lead_dashboard_datasets`是线索看板的服务器权威目录。唯一键固定为`org_id + edition + model`；不得改回E7X分支、全局单例或仅浏览器保存。
 - 导入支持xlsx、csv、json及单文件多车型。必须保留缺列、非法/非有限数值、非法阶段状态、重复阶段、多个进行中阶段、4MB、100车型和120阶段门禁；任何非法输入不得覆盖已保存合法数据。
 - 前端必须通过`normalizeModelData`、`registerModelData`、`getModelData`和`renderModel`统一处理车型。未知车型返回`dataset: null`并显示空状态，严禁借用E7X、上一个车型、其他企业空间缓存或伪造0值。

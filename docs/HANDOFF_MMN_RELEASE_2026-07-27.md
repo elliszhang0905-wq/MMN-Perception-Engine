@@ -3,7 +3,7 @@
 ## 发布结果
 
 - 应用版本：`beta-1.03-20260727-lead-dashboard-catalog-1`
-- 应用提交：`7cee9d1690016573529777979214e541ea3eb57a`
+- 应用提交：`7cee9d13cdfc956efa1792fdedcc2085a1519769`
 - 发布范围：GitHub `main`、`release/lead-dashboard-20260727`、本地8765、ECS `/opt/mmn-perception-engine`
 - 生产入口：`http://121.40.60.90`
 - 运行状态：六个Compose服务运行，活动任务0
