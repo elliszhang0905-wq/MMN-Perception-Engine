@@ -1,7 +1,8 @@
 #!/bin/zsh
 set -u
 
-PROJECT_DIR="/Users/ellis/Documents/MMN汽车营销引擎/china-auto-marketing-engine"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 LOG_DIR="${PROJECT_DIR}/logs"
 LOG_FILE="${LOG_DIR}/local_mmn.log"
 PID_FILE="${LOG_DIR}/local_mmn.pid"
