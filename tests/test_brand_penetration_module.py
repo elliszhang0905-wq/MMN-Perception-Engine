@@ -38,7 +38,7 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         self.assertIn("mmn-brand-penetration-project-request", demo)
 
     def test_canonical_snapshot_contains_unique_validated_records(self):
-        conn = sqlite3.connect(ROOT / "data" / "commercial_demo.db")
+        conn = sqlite3.connect(server.DB_PATH)
         row = conn.execute("select result_json from social_trend_snapshots where keyword=? order by created_at desc limit 1", ("上汽奥迪品牌传播穿透",)).fetchone()
         conn.close()
         self.assertIsNotNone(row)
@@ -55,7 +55,7 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         self.assertTrue({item["platform"] for item in glc_records}.issuperset({"weibo", "xiaohongshu"}))
 
     def test_official_snapshot_is_visible_to_logged_in_organizations(self):
-        conn = sqlite3.connect(ROOT / "data" / "commercial_demo.db")
+        conn = sqlite3.connect(server.DB_PATH)
         conn.row_factory = sqlite3.Row
         result = server.brand_penetration_snapshot(conn, "customer-org", "china")
         conn.close()
