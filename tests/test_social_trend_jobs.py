@@ -25,7 +25,8 @@ class SocialTrendJobsTest(unittest.TestCase):
 
     def test_local_auto_update_defers_restart_while_collection_is_active(self):
         script = (Path(__file__).resolve().parents[1] / "scripts" / "ensure_local_mmn.sh").read_text(encoding="utf-8")
-        self.assertIn("has_active_social_trend_jobs", script)
+        self.assertIn("has_active_local_jobs", script)
+        self.assertIn("activeLocalJobs", script)
         self.assertIn("activeSocialTrendJobs", script)
         self.assertIn("延后重启 MMN 本地服务", script)
 
