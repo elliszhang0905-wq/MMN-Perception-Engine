@@ -136,6 +136,36 @@ class SocialTrendDualModelGateTest(unittest.TestCase):
         self.assertIn("返回不完整", result["qa"]["threeFlagships"]["errors"]["reviewer_1"])
         self.assertEqual(result["unifiedInsight"]["publicationStatus"], "withheld")
 
+    def test_transient_invalid_provider_output_retries_only_failed_batch(self):
+        items = [{"id": f"item-{index}", "brandName": "零跑", "text": "零跑B01上市", "sentiment": "positive"} for index in range(25)]
+        calls = {"kimi": 0}
+
+        def flaky_kimi(messages, **_kwargs):
+            calls["kimi"] += 1
+            if calls["kimi"] == 1:
+                return "{invalid-json"
+            return _review(messages)
+
+        def parse(value):
+            if isinstance(value, dict):
+                return value
+            raise ValueError("invalid json")
+
+        with patch.object(server, "qwen_config", return_value={"configured": True}), \
+             patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
+             patch.object(server, "call_qwen", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_deepseek", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_kimi", side_effect=flaky_kimi), \
+             patch.object(server, "parse_json_object", side_effect=parse), \
+             patch.object(server, "run_brand_penetration_conclusions", return_value={"validation": {"status": "aligned"}}):
+            result = server.validate_social_trends_with_models(_result(items))
+
+        self.assertEqual(calls["kimi"], 3)
+        self.assertEqual(result["qa"]["threeFlagships"]["errors"], {})
+        self.assertEqual(result["qa"]["threeFlagships"]["status"], "aligned")
+        self.assertEqual(len(result["verifiedComparisonItems"]), 25)
+
     def test_partial_collection_cannot_be_masked_by_aligned_models(self):
         items = [{"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"}]
         payload = _result(items)

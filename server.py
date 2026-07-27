@@ -1912,16 +1912,38 @@ def validate_social_trends_with_models(result):
         expected_ids = {str(x["id"]) for x in batch}
 
         def review_batch(provider, caller):
-            try:
-                output = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
-                rows = {str(x.get("id")): x for x in output.get("items", []) if isinstance(x, dict) and x.get("id") is not None}
-                missing = sorted(expected_ids - rows.keys())
-                if missing:
-                    raise ValueError(f"返回不完整，缺少 {len(missing)} 个证据ID")
-                conclusion = str(output.get("strategyConclusion") or "").strip()
-                return provider, {key: rows[key] for key in expected_ids}, conclusion, ""
-            except Exception as exc:
-                return provider, {}, "", f"批次{offset // batch_size + 1}: {exc}"
+            last_error = None
+            for attempt in range(2):
+                retry_messages = messages if attempt == 0 else [
+                    {
+                        **messages[0],
+                        "content": messages[0]["content"]
+                        + " 上次输出未通过结构校验；请逐条保留全部输入id，并重新完整输出合法JSON，不要解释。",
+                    },
+                    messages[1],
+                ]
+                try:
+                    output = parse_json_object(caller(
+                        retry_messages,
+                        temperature=.1,
+                        profile="fast",
+                        timeout=MMN_CRITIC_TIMEOUT,
+                    ))
+                    if not isinstance(output, dict):
+                        raise ValueError("未返回JSON证据复核结果")
+                    rows = {
+                        str(x.get("id")): x
+                        for x in output.get("items", [])
+                        if isinstance(x, dict) and x.get("id") is not None
+                    }
+                    missing = sorted(expected_ids - rows.keys())
+                    if missing:
+                        raise ValueError(f"返回不完整，缺少 {len(missing)} 个证据ID")
+                    conclusion = str(output.get("strategyConclusion") or "").strip()
+                    return provider, {key: rows[key] for key in expected_ids}, conclusion, ""
+                except Exception as exc:
+                    last_error = exc
+            return provider, {}, "", f"批次{offset // batch_size + 1}: {last_error}"
 
         with ThreadPoolExecutor(max_workers=len(providers)) as executor:
             batch_results = [executor.submit(review_batch, provider, caller) for provider, caller in providers]
