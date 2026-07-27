@@ -166,6 +166,24 @@ class SocialTrendDualModelGateTest(unittest.TestCase):
         self.assertEqual(result["qa"]["threeFlagships"]["status"], "aligned")
         self.assertEqual(len(result["verifiedComparisonItems"]), 25)
 
+    def test_analysis_only_revalidates_frozen_evidence_after_incomplete_review(self):
+        payload = _result([
+            {"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"},
+        ])
+        payload["verifiedComparisonItems"] = []
+        revalidated = {
+            **payload,
+            "verifiedComparisonItems": payload["comparisonItems"],
+            "brandDecision": {"validation": {"status": "aligned"}},
+        }
+
+        with patch.object(server, "validate_social_trends_with_models", return_value=revalidated) as validate:
+            result = server.analyze_existing_brand_penetration_snapshot(payload)
+
+        validate.assert_called_once()
+        self.assertEqual(result["verifiedComparisonItems"][0]["id"], "own-1")
+        self.assertEqual(result["brandDecision"]["validation"]["status"], "aligned")
+
     def test_partial_collection_cannot_be_masked_by_aligned_models(self):
         items = [{"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"}]
         payload = _result(items)

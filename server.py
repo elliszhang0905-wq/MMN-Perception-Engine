@@ -1821,8 +1821,15 @@ def run_brand_penetration_conclusions(result, provider_runner=None):
 def analyze_existing_brand_penetration_snapshot(result, provider_runner=None):
     """Add a current three-review decision without recollecting immutable evidence."""
     prepared = prepare_brand_penetration_snapshot(result)
-    if not prepared or not prepared.get("verifiedComparisonItems") or not prepared.get("modelComparisons"):
+    if not prepared or not prepared.get("modelComparisons"):
         raise ValueError("当前快照没有可用的已验证品牌证据")
+    if not prepared.get("verifiedComparisonItems"):
+        if not (prepared.get("comparisonItems") or prepared.get("items")):
+            raise ValueError("当前快照没有可用的已验证品牌证据")
+        revalidated = validate_social_trends_with_models(prepared)
+        if not revalidated.get("verifiedComparisonItems"):
+            raise ValueError("当前快照没有可用的已验证品牌证据")
+        return revalidated
     prepared["brandDecision"] = run_brand_penetration_conclusions(prepared, provider_runner=provider_runner)
     return prepared
 
