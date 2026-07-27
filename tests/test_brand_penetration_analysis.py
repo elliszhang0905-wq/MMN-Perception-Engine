@@ -97,6 +97,25 @@ class BrandPenetrationAnalysisTest(unittest.TestCase):
         self.assertEqual(len(set(fingerprints)), 1)
         self.assertEqual(fused["validation"]["status"], "aligned")
 
+    def test_server_retries_structurally_incomplete_brand_review(self):
+        calls = {"qwen": 0, "deepseek": 0, "kimi": 0}
+
+        def runner(provider, _messages):
+            calls[provider] += 1
+            review = self.review()
+            if provider == "kimi" and calls[provider] == 1:
+                review["pairwiseConclusions"] = []
+            return review
+
+        fused = server.run_brand_penetration_conclusions(self.result(), provider_runner=runner)
+
+        self.assertEqual(calls, {"qwen": 1, "deepseek": 1, "kimi": 2})
+        self.assertEqual(fused["validation"]["status"], "aligned")
+        self.assertTrue(all(
+            row["status"] == "completed"
+            for row in fused["validation"]["independentReviews"]
+        ))
+
     def test_legacy_snapshot_is_normalized_without_claiming_three_review_completion(self):
         legacy = {
             "primaryBrand": "智己", "verifiedCount": 2,

@@ -206,6 +206,7 @@ from brand_penetration_analysis import (
     analysis_messages as brand_penetration_analysis_messages,
     build_evidence_packet as build_brand_penetration_evidence_packet,
     fuse_reviews as fuse_brand_penetration_reviews,
+    normalize_review as normalize_brand_penetration_review,
 )
 from mmn_eval.dashboard import (
     load_dashboard_payload as load_mmn_eval_dashboard,
@@ -1799,6 +1800,7 @@ def run_brand_penetration_conclusions(result, provider_runner=None):
                 parsed = raw if isinstance(raw, dict) else parse_json_object(raw)
                 if not isinstance(parsed, dict):
                     raise ValueError("未返回JSON品牌结论")
+                normalize_brand_penetration_review(parsed, packet)
                 return parsed
             except Exception as exc:
                 last_error = exc
