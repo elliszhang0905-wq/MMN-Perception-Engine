@@ -1863,7 +1863,10 @@ def analyze_brand_penetration_mart(plan, items, provider_runner=None):
     return validate_social_trends_with_models(result).get("brandDecision")
 def validate_social_trends_with_models(result):
     """Run three blind evidence reviews and publish one neutral MMN conclusion."""
-    source_items = result.get("comparisonItems") or result.get("items") or []
+    # Metrics continue to use the complete collected dataset. Model QA reviews the
+    # deterministic, heat-ranked evidence set that is actually eligible for the
+    # customer-facing evidence chain, keeping the gate bounded and auditable.
+    source_items = result.get("comparisonEvidence") or result.get("comparisonItems") or result.get("items") or []
     evidence = [{
         "id": x.get("id"),
         "platform": x.get("platformLabel") or x.get("platform"),
@@ -1907,19 +1910,29 @@ def validate_social_trends_with_models(result):
             "keyword": result.get("keyword"), "projectBrands": project_brands, "evidence": batch,
         }, ensure_ascii=False)}]
         expected_ids = {str(x["id"]) for x in batch}
-        for provider, caller in providers:
+
+        def review_batch(provider, caller):
             try:
                 output = parse_json_object(caller(messages, temperature=.1, profile="fast", timeout=MMN_CRITIC_TIMEOUT))
                 rows = {str(x.get("id")): x for x in output.get("items", []) if isinstance(x, dict) and x.get("id") is not None}
                 missing = sorted(expected_ids - rows.keys())
                 if missing:
                     raise ValueError(f"返回不完整，缺少 {len(missing)} 个证据ID")
-                reviewed[provider].update({key: rows[key] for key in expected_ids})
                 conclusion = str(output.get("strategyConclusion") or "").strip()
+                return provider, {key: rows[key] for key in expected_ids}, conclusion, ""
+            except Exception as exc:
+                return provider, {}, "", f"批次{offset // batch_size + 1}: {exc}"
+
+        with ThreadPoolExecutor(max_workers=len(providers)) as executor:
+            batch_results = [executor.submit(review_batch, provider, caller) for provider, caller in providers]
+            for future in batch_results:
+                provider, rows, conclusion, error = future.result()
+                if error:
+                    error_lists[provider].append(error)
+                    continue
+                reviewed[provider].update(rows)
                 if conclusion:
                     conclusions[provider].append(conclusion)
-            except Exception as exc:
-                error_lists[provider].append(f"批次{offset // batch_size + 1}: {exc}")
     expected_by_id = {str(x["id"]): x for x in evidence}
     verified = []
     verified_items = []

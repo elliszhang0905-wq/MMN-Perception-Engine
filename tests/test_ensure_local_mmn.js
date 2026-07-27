@@ -10,6 +10,20 @@ assert.match(source, /SCRIPT_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd -P\)"/);
 assert.match(source, /PROJECT_DIR="\$\(cd "\$\{SCRIPT_DIR\}\/\.\." && pwd -P\)"/);
 assert.match(watchdog, /SCRIPT_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd -P\)"/);
 assert.match(watchdog, /PROJECT_DIR="\$\(cd "\$\{SCRIPT_DIR\}\/\.\." && pwd -P\)"/);
+for (const script of [source, watchdog]) {
+  assert.match(script, /load_local_env\(\)/);
+  assert.match(script, /git -C "\$\{PROJECT_DIR\}" rev-parse --git-common-dir/);
+  assert.match(script, /\[\[ -f "\$\{primary_repo_dir\}\/\.env" \]\] && env_file=/);
+  assert.match(script, /source "\$\{env_file\}"/);
+  assert.match(script, /\(\( had_tikhub \)\) && export TIKHUB_API_KEY=/);
+  assert.match(script, /\(\( had_dashscope \)\) && export DASHSCOPE_API_KEY=/);
+  assert.match(script, /\(\( had_kimi \)\) && export KIMI_API_KEY=/);
+  assert.match(script, /\(\( had_deepseek \)\) && export DEEPSEEK_API_KEY=/);
+  assert.match(script, /\(\( had_db_path \)\) && export MMN_DB_PATH=/);
+  assert.match(script, /\(\( had_data_root \)\) && export MMN_DATA_ROOT=/);
+  assert.match(script, /\(\( had_backup_root \)\) && export MMN_BACKUP_ROOT=/);
+  assert.match(script, /\(\( had_host \)\) && export MMN_HOST=[\s\S]*?return 0\s*\n}/);
+}
 
 function functionBody(name, nextName) {
   const start = source.indexOf(`${name}() {`);

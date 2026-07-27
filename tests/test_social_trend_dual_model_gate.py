@@ -2,6 +2,7 @@ import copy
 import json
 import unittest
 from io import BytesIO
+from threading import Barrier
 from urllib.error import HTTPError
 from unittest.mock import patch
 
@@ -42,6 +43,46 @@ def _review(messages, *, fail_ids=(), brand_overrides=None):
 
 
 class SocialTrendDualModelGateTest(unittest.TestCase):
+    def test_curated_comparison_evidence_bounds_model_review_without_changing_full_metrics(self):
+        items = [
+            {"id": f"item-{index}", "brandName": "智己", "text": f"智己证据{index}", "sentiment": "positive"}
+            for index in range(30)
+        ]
+        payload = _result(items)
+        payload["comparisonEvidence"] = copy.deepcopy(items[:5])
+
+        with patch.object(server, "qwen_config", return_value={"configured": True}), \
+             patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
+             patch.object(server, "call_qwen", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_deepseek", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "call_kimi", side_effect=lambda messages, **_kwargs: _review(messages)), \
+             patch.object(server, "parse_json_object", side_effect=lambda value: value):
+            result = server.validate_social_trends_with_models(payload)
+
+        self.assertEqual(result["qa"]["threeFlagships"]["reviewedEvidenceCount"], 5)
+        self.assertEqual(len(result["verifiedComparisonItems"]), 5)
+        self.assertEqual(result["modelComparisons"][0]["contentCount"], 1)
+
+    def test_three_reviewers_run_in_parallel_for_each_evidence_batch(self):
+        items = [{"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"}]
+        rendezvous = Barrier(3)
+
+        def reviewer(messages, **_kwargs):
+            rendezvous.wait(timeout=1)
+            return _review(messages)
+
+        with patch.object(server, "qwen_config", return_value={"configured": True}), \
+             patch.object(server, "deepseek_config", return_value={"configured": True}), \
+             patch.object(server, "kimi_config", return_value={"configured": True}), \
+             patch.object(server, "call_qwen", side_effect=reviewer), \
+             patch.object(server, "call_deepseek", side_effect=reviewer), \
+             patch.object(server, "call_kimi", side_effect=reviewer), \
+             patch.object(server, "parse_json_object", side_effect=lambda value: value):
+            result = server.validate_social_trends_with_models(_result(items))
+
+        self.assertEqual(result["qa"]["threeFlagships"]["status"], "aligned")
+
     def test_all_comparison_items_are_reviewed_and_only_common_brand_evidence_is_published(self):
         items = [
             {"id": "own-1", "brandName": "智己", "text": "智己LS9发布", "sentiment": "positive"},

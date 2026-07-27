@@ -3,6 +3,56 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
+
+load_local_env() {
+  local env_file common_git_dir primary_repo_dir
+  local had_tikhub=${+TIKHUB_API_KEY} old_tikhub="${TIKHUB_API_KEY-}"
+  local had_dashscope=${+DASHSCOPE_API_KEY} old_dashscope="${DASHSCOPE_API_KEY-}"
+  local had_kimi=${+KIMI_API_KEY} old_kimi="${KIMI_API_KEY-}"
+  local had_deepseek=${+DEEPSEEK_API_KEY} old_deepseek="${DEEPSEEK_API_KEY-}"
+  local had_openai=${+OPENAI_API_KEY} old_openai="${OPENAI_API_KEY-}"
+  local had_db_path=${+MMN_DB_PATH} old_db_path="${MMN_DB_PATH-}"
+  local had_data_root=${+MMN_DATA_ROOT} old_data_root="${MMN_DATA_ROOT-}"
+  local had_data_dir=${+MMN_DATA_DIR} old_data_dir="${MMN_DATA_DIR-}"
+  local had_backup_root=${+MMN_BACKUP_ROOT} old_backup_root="${MMN_BACKUP_ROOT-}"
+  local had_port=${+MMN_PORT} old_port="${MMN_PORT-}"
+  local had_host=${+MMN_HOST} old_host="${MMN_HOST-}"
+
+  env_file="${MMN_ENV_FILE:-}"
+  if [[ -z "${env_file}" && -f "${PROJECT_DIR}/.env" ]]; then
+    env_file="${PROJECT_DIR}/.env"
+  elif [[ -z "${env_file}" ]]; then
+    common_git_dir=$(git -C "${PROJECT_DIR}" rev-parse --git-common-dir 2>/dev/null || true)
+    if [[ -n "${common_git_dir}" ]]; then
+      [[ "${common_git_dir}" == /* ]] || common_git_dir="${PROJECT_DIR}/${common_git_dir}"
+      primary_repo_dir="$(cd "$(dirname "${common_git_dir}")" 2>/dev/null && pwd -P || true)"
+      [[ -f "${primary_repo_dir}/.env" ]] && env_file="${primary_repo_dir}/.env"
+    fi
+  fi
+  [[ -n "${env_file}" && -f "${env_file}" ]] || return 0
+
+  set +u
+  set -a
+  source "${env_file}"
+  set +a
+  set -u
+
+  (( had_tikhub )) && export TIKHUB_API_KEY="${old_tikhub}"
+  (( had_dashscope )) && export DASHSCOPE_API_KEY="${old_dashscope}"
+  (( had_kimi )) && export KIMI_API_KEY="${old_kimi}"
+  (( had_deepseek )) && export DEEPSEEK_API_KEY="${old_deepseek}"
+  (( had_openai )) && export OPENAI_API_KEY="${old_openai}"
+  (( had_db_path )) && export MMN_DB_PATH="${old_db_path}"
+  (( had_data_root )) && export MMN_DATA_ROOT="${old_data_root}"
+  (( had_data_dir )) && export MMN_DATA_DIR="${old_data_dir}"
+  (( had_backup_root )) && export MMN_BACKUP_ROOT="${old_backup_root}"
+  (( had_port )) && export MMN_PORT="${old_port}"
+  (( had_host )) && export MMN_HOST="${old_host}"
+  return 0
+}
+
+load_local_env
+
 PORT="${MMN_PORT:-8765}"
 HOST="${MMN_HOST:-0.0.0.0}"
 LOCAL_URL="http://127.0.0.1:${PORT}"
