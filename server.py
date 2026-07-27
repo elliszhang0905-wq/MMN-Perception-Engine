@@ -1796,7 +1796,7 @@ def run_brand_penetration_conclusions(result, provider_runner=None):
                 elif provider == "deepseek":
                     raw = call_deepseek(retry_messages, temperature=.05, profile="deep", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000, response_format={"type": "json_object"})
                 else:
-                    raw = call_kimi(retry_messages, temperature=.05, profile="fast", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000)
+                    raw = call_kimi(retry_messages, temperature=.05, profile="deep", timeout=BRAND_PENETRATION_MODEL_TIMEOUT, max_tokens=12000)
                 parsed = raw if isinstance(raw, dict) else parse_json_object(raw)
                 if not isinstance(parsed, dict):
                     raise ValueError("未返回JSON品牌结论")

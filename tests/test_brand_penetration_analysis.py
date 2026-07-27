@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 import server
 from brand_penetration_analysis import analysis_messages, build_evidence_packet, fuse_reviews
@@ -115,6 +116,15 @@ class BrandPenetrationAnalysisTest(unittest.TestCase):
             row["status"] == "completed"
             for row in fused["validation"]["independentReviews"]
         ))
+
+    def test_server_uses_deep_kimi_for_full_brand_decision(self):
+        with patch.object(server, "call_qwen", return_value=self.review()), \
+             patch.object(server, "call_deepseek", return_value=self.review()), \
+             patch.object(server, "call_kimi", return_value=self.review()) as kimi:
+            fused = server.run_brand_penetration_conclusions(self.result())
+
+        self.assertEqual(fused["validation"]["status"], "aligned")
+        self.assertEqual(kimi.call_args.kwargs["profile"], "deep")
 
     def test_legacy_snapshot_is_normalized_without_claiming_three_review_completion(self):
         legacy = {
