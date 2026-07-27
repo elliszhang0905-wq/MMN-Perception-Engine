@@ -1,5 +1,16 @@
 # MMN Perception Engine 发布记录
 
+## 2026-07-27｜beta 1.03 历史审计加固生产发布
+
+- 生产版本：`beta-1.03-20260727-audit-hardening-1`；应用提交 `dca9f42a9c333557bbb74bccc9f8c7d7b04e47c6` 已推送 GitHub `main` 并以精确归档部署 ECS。
+- 修复候选分支可能回退生产安全基线的问题，锁定认证密钥失败关闭、可信代理、调度 HMAC、原始上传读取门禁与中性 500；发布门禁改为测试前先隔离端口、数据、输出、缓存、备份和每个 Python 模块数据库。
+- 完整本地门禁通过 Python 651 项、33 个 JavaScript 测试文件、27 项真实 HTTP 边界、状态包、数据优先路径和全表面浏览器门禁；源库、服务初始化和浏览器三层 79 张表变化均为 0。
+- 生产真实管理员门禁覆盖 19 个客户入口、8 个管理视图、1440px 与 390px；`failed=[]`、`runtimeErrors=[]`、`failedResponses=[]`。E7X 保持 207 行、5 个车型、15 个属性；无数据车型不借用上一车型数据。
+- 部署启动前后生产 78 张表变化为 0；验收新增的 6 条项目快照已按主键与 payload SHA-256 精确清理，最终再次 78 张表变化为 0，`quick_check=ok`。
+- 六个 Compose 服务持续运行，活动任务 0，近 30 分钟严重日志与 HTTP 5xx 为 0。运行 `server.py` 与 `index.html` 哈希和 GitHub 候选完全一致。
+- 回滚目录：`/opt/mmn-perception-engine/backups/releases/20260727_dca9f42_predeploy`；源码归档 SHA-256 `5e50208d88134e38cec7cd1d47d0b520221dd0f3e96904148d26984ab1fdb7a0`，发布前 SQLite SHA-256 `6f53342e5bc3e8e790fbb779fc135466e3965e3589fc4e4999a388d0d454337e`。
+- MMN 正式入口维持 `http://mmnsh.com`；独立 HTTPS 仍为基础设施事项。443 当前属于 Sales Credo，按产品隔离原则未改动。
+
 ## 2026-07-27｜beta 1.03 通用车型线索看板发布
 
 - 生产版本：`beta-1.03-20260727-lead-dashboard-catalog-1`；应用提交：`7cee9d13cdfc956efa1792fdedcc2085a1519769`，已同步 GitHub `main`、发布分支、本地8765和ECS。
