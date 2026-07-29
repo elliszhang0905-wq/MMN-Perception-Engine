@@ -10,7 +10,7 @@ import server
 
 
 class FakeAdapter:
-    def search(self, platform, query, page, count, time_range, cursor=""):
+    def search(self, platform, query, page, count, time_range, cursor="", search_context=None):
         model = query.split()[0]
         item_id = str(abs(hash(query)))
         return {
@@ -79,6 +79,48 @@ class DouyinVehicleRadarApiTest(unittest.TestCase):
         self.assertGreater(stored["result"]["counts"]["verified"], 0)
         self.assertEqual("智己LS6", stored["result"]["subject"])
         self.assertEqual(["理想i6", "问界M6", "极氪7X"], stored["result"]["competitors"])
+
+    def test_single_model_request_keeps_temporary_query_out_of_competitor_context(self):
+        run = server.create_douyin_vehicle_radar_run({
+            "subject": "蔚来ET5T",
+            "competitors": ["不应写入的竞品"],
+            "topics": ["不应写入的属性"],
+            "mode": "single_model_rank",
+            "rangeDays": 14,
+            "topN": 20,
+            "maxQueries": 2,
+            "maxPages": 3,
+            "maxRequests": 6,
+            "maxCandidates": 60,
+            "count": 5,
+        }, org_id="org-a", edition="china", adapter=FakeAdapter())
+        for _ in range(50):
+            stored = server.douyin_vehicle_radar_repository().get_run(
+                run["id"], "org-a", "china"
+            )
+            if stored["status"] in {"completed", "partial", "failed"}:
+                break
+            time.sleep(0.02)
+        self.assertNotEqual("failed", stored["status"])
+        self.assertEqual("蔚来ET5T", stored["result"]["subject"])
+        self.assertEqual([], stored["result"]["competitors"])
+        self.assertEqual(20, stored["result"]["topN"])
+        self.assertEqual("single_model_rank", stored["result"]["mode"])
+
+    def test_single_model_request_rejects_missing_model_and_illegal_top_n(self):
+        with self.assertRaisesRegex(ValueError, "车型名称"):
+            server.create_douyin_vehicle_radar_run({
+                "subject": "",
+                "mode": "single_model_rank",
+                "rangeDays": 7,
+            }, org_id="org-a", edition="china", adapter=FakeAdapter())
+        with self.assertRaisesRegex(ValueError, "Top 10"):
+            server.create_douyin_vehicle_radar_run({
+                "subject": "智己LS6",
+                "mode": "single_model_rank",
+                "rangeDays": 7,
+                "topN": 999,
+            }, org_id="org-a", edition="china", adapter=FakeAdapter())
 
     def test_strategy_fails_closed_when_three_review_capability_is_unavailable(self):
         repository = server.douyin_vehicle_radar_repository()

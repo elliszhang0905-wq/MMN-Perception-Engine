@@ -322,7 +322,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260729-full-deployment-closure-1"
+APP_VERSION_CODE = "beta-1.03-20260730-dashboard-vehicle-heat-1"
 APP_RELEASE_DATE = "2026-07-29"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -730,8 +730,26 @@ def create_douyin_vehicle_radar_run(body, *, org_id="local", edition="china", ad
     body = body if isinstance(body, dict) else {}
     repository = douyin_vehicle_radar_repository()
     subject = str(body.get("subject") or "").strip()
-    competitors = body.get("competitors") if isinstance(body.get("competitors"), list) else []
-    topics = body.get("topics") if isinstance(body.get("topics"), list) else []
+    if not subject:
+        raise ValueError("请输入车型名称后再生成热榜。")
+    if len(subject) > 80:
+        raise ValueError("车型名称不能超过80个字符。")
+    try:
+        top_n = int(body.get("topN") or 20)
+        max_pages = int(body.get("maxPages") or 10)
+        max_requests = int(body.get("maxRequests") or 30)
+        max_candidates = int(body.get("maxCandidates") or 300)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("榜单数量或检索范围设置无效。") from exc
+    if top_n not in {10, 20, 50}:
+        raise ValueError("榜单数量仅支持 Top 10、Top 20 或 Top 50。")
+    single_model = body.get("mode") == "single_model_rank"
+    competitors = [] if single_model else (
+        body.get("competitors") if isinstance(body.get("competitors"), list) else []
+    )
+    topics = [] if single_model else (
+        body.get("topics") if isinstance(body.get("topics"), list) else []
+    )
     project = repository.upsert_project(org_id, edition, subject, competitors, topics)
     run = repository.create_run(project, body.get("rangeDays"), force=body.get("force") is True)
     if run["status"] in {"running", "completed", "partial"}:
@@ -748,6 +766,11 @@ def create_douyin_vehicle_radar_run(body, *, org_id="local", edition="china", ad
                 run["id"], org_id, edition,
                 max_queries=max(1, min(int(body.get("maxQueries") or 16), 24)),
                 count=max(5, min(int(body.get("count") or 20), 50)),
+                max_pages=max(1, min(max_pages, 10)),
+                max_requests=max(1, min(max_requests, 30)),
+                max_candidates=max(20, min(max_candidates, 300)),
+                top_n=top_n,
+                single_model=single_model,
             )
         except Exception as exc:
             repository.update_run(
@@ -15988,7 +16011,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 auth = self.current_auth() or {}
                 radar_edition = edition_from(q.get("edition", ["china"])[0])
                 run = douyin_vehicle_radar_repository().latest_run(
-                    auth.get("org_id", "local"), radar_edition, q.get("subject", [""])[0]
+                    auth.get("org_id", "local"),
+                    radar_edition,
+                    q.get("subject", [""])[0],
+                    single_model_only=q.get("scope", [""])[0] == "single",
                 )
                 self.send_json({
                     "ok": True,
@@ -16777,10 +16803,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if not previous:
                     raise ValueError("未找到需要重试的采集任务。")
                 public_previous = public_douyin_vehicle_radar_run(previous) or {}
-                if (
-                    previous.get("status") == "partial"
-                    or (public_previous.get("result") or {}).get("lists", {}).get("incompleteMetrics")
-                ):
+                previous_result = public_previous.get("result") or {}
+                incomplete_metrics = previous_result.get("lists", {}).get("incompleteMetrics") or []
+                if incomplete_metrics:
                     run = retry_douyin_vehicle_radar_metrics(
                         previous["id"],
                         org_id=auth.get("org_id", "local"),
@@ -16796,6 +16821,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     "competitors": project["competitors"],
                     "topics": project["topics"],
                     "rangeDays": previous["rangeDays"],
+                    "mode": previous_result.get("mode") or "vehicle_group",
+                    "topN": previous_result.get("topN") or 20,
+                    "maxPages": (
+                        previous_result.get("collection", {}).get("limits", {}).get("maxPagesPerQuery")
+                        or 10
+                    ),
+                    "maxRequests": (
+                        previous_result.get("collection", {}).get("limits", {}).get("maxRequests")
+                        or 30
+                    ),
+                    "maxCandidates": (
+                        previous_result.get("collection", {}).get("limits", {}).get("maxCandidates")
+                        or 300
+                    ),
                     "force": True,
                 }, org_id=auth.get("org_id", "local"), edition=radar_edition)
                 self.send_json({"ok": True, "run": run}, 202)

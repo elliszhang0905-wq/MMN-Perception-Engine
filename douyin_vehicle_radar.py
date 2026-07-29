@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import re
 import sqlite3
@@ -21,9 +22,13 @@ STAGES = (
     ("ranking", 94, "正在生成正式榜单"),
 )
 METRIC_CACHE_MINUTES = 30
-MAX_METRIC_ITEMS = 100
+MAX_METRIC_ITEMS = 300
 METRIC_BATCH_SIZE = 50
 MAX_METRIC_SPLIT_RETRIES = 8
+MAX_SEARCH_PAGES_PER_QUERY = 10
+MAX_SEARCH_REQUESTS = 30
+MAX_SEARCH_CANDIDATES = 300
+SUPPORTED_TOP_N = {10, 20, 50}
 
 
 def utcnow() -> str:
@@ -287,7 +292,14 @@ def rank_items(items: Iterable[dict[str, Any]], *, field: str = "views") -> list
             value = (item.get("metrics") or {}).get("views")
             return float(value) if value is not None else -1
         return float(item.get(field) or 0)
-    ordered = sorted(items, key=lambda item: (score(item), item.get("publishedAt") or ""), reverse=True)
+    ordered = sorted(
+        items,
+        key=lambda item: str(
+            item.get("platformItemId") or item.get("itemId") or item.get("sourceUrl") or ""
+        ),
+    )
+    ordered = sorted(ordered, key=lambda item: item.get("publishedAt") or "", reverse=True)
+    ordered = sorted(ordered, key=score, reverse=True)
     return [{**item, "rank": index + 1} for index, item in enumerate(ordered)]
 
 
@@ -296,6 +308,10 @@ def public_result(
     profiles: list[dict[str, Any]],
     items: list[dict[str, Any]],
     exclusions: dict[str, int],
+    *,
+    collection: dict[str, Any] | None = None,
+    top_n: int = 20,
+    mode: str = "vehicle_group",
 ) -> dict[str, Any]:
     verified = [
         item for item in items
@@ -311,6 +327,9 @@ def public_result(
         key: rank_items([item for item in formal if item.get("bucket") == key])
         for key in ("own", "competitor", "comparison", "attribute")
     }
+    top_n = top_n if top_n in SUPPORTED_TOP_N else 20
+    overall = rank_items(formal)[:top_n]
+    collection = dict(collection or {})
     coverage = round(len(formal) / len(verified) * 100, 1) if verified else 0.0
     own_models = {
         model for item in formal if item.get("bucket") in {"own", "comparison", "attribute"}
@@ -324,14 +343,21 @@ def public_result(
     has_relational_evidence = any(
         item.get("bucket") in {"comparison", "attribute"} for item in formal
     )
-    strategy_ready = (
+    strategy_ready = mode != "single_model_rank" and (
         profiles[0]["model"] in own_models
         and all(model in competitor_models for model in expected_competitors)
         and coverage >= 80
         and has_relational_evidence
         and bool(formal)
     )
-    publication_status = "ready" if not incomplete and formal else "partial" if formal else "blocked"
+    collection_status = str(collection.get("status") or "complete")
+    publication_status = (
+        "ready"
+        if not incomplete and formal and collection_status == "complete"
+        else "partial"
+        if formal
+        else "blocked"
+    )
     return {
         "runId": run["id"],
         "projectId": run["project_id"],
@@ -339,6 +365,9 @@ def public_result(
         "window": json.loads(run["window_json"]),
         "subject": profiles[0]["model"],
         "competitors": [profile["model"] for profile in profiles[1:]],
+        "mode": mode,
+        "topN": top_n,
+        "collection": collection,
         "counts": {
             "verified": len(verified),
             "rankingEligible": len(formal),
@@ -348,10 +377,12 @@ def public_result(
             "viewCoveragePct": coverage,
             "pendingReview": len(pending),
             "excluded": sum(exclusions.values()),
+            "returnedTopN": len(overall),
         },
         "exclusions": exclusions,
         "lists": {
             **buckets,
+            "all": overall,
             "pending": sorted(pending, key=lambda item: item.get("publishedAt") or "", reverse=True),
             "incompleteMetrics": sorted(
                 incomplete, key=lambda item: item.get("publishedAt") or "", reverse=True
@@ -367,6 +398,9 @@ def public_result(
             ],
             "hasComparisonOrAttributeEvidence": has_relational_evidence,
             "message": (
+                "单车型热榜只作为内容热度证据，不直接生成策略。"
+                if mode == "single_model_rank"
+                else
                 "证据达到策略输出条件"
                 if strategy_ready
                 else "当前仅可形成有限观察：需补齐本品、全部竞品、热度覆盖及对比或属性证据。"
@@ -386,7 +420,7 @@ def sanitize_public_result(result: dict[str, Any]) -> dict[str, Any]:
     """Treat pre-contract zero views as unavailable without mutating stored history."""
     result = json.loads(json.dumps(result or {}, ensure_ascii=False))
     lists = result.get("lists") or {}
-    formal_keys = ("own", "competitor", "comparison", "attribute")
+    formal_keys = ("own", "competitor", "comparison", "attribute", "all")
     if not any(
         "metricStatus" not in item
         for key in formal_keys
@@ -644,13 +678,19 @@ class RadarRepository:
             return self._run(row) if row else None
 
     def latest_run(
-        self, org_id: str, edition: str, subject: str
+        self,
+        org_id: str,
+        edition: str,
+        subject: str,
+        *,
+        single_model_only: bool = False,
     ) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                """select r.* from douyin_vehicle_radar_runs r
+                f"""select r.* from douyin_vehicle_radar_runs r
                    join douyin_vehicle_radar_projects p on p.id=r.project_id
                    where r.org_id=? and r.edition=? and p.subject=?
+                   {"and p.competitors_json='[]'" if single_model_only else ""}
                    order by r.updated_at desc limit 1""",
                 (org_id, edition, str(subject or "").strip()),
             ).fetchone()
@@ -1008,6 +1048,11 @@ class RadarService:
         on_stage: Callable[[str, int, str], None] | None = None,
         max_queries: int = 16,
         count: int = 20,
+        max_pages: int = MAX_SEARCH_PAGES_PER_QUERY,
+        max_requests: int = MAX_SEARCH_REQUESTS,
+        max_candidates: int = MAX_SEARCH_CANDIDATES,
+        top_n: int = 20,
+        single_model: bool = False,
     ) -> dict[str, Any]:
         run = self.repository.get_run(run_id, org_id, edition)
         if not run:
@@ -1019,6 +1064,16 @@ class RadarService:
         queries = build_queries(
             project["subject"], project["competitors"], project["topics"], max_queries=max_queries
         )
+        if single_model:
+            profiles = build_profiles(project["subject"], [])
+            queries = build_queries(project["subject"], [], [], max_queries=max_queries)
+        max_pages = max(1, min(int(max_pages or MAX_SEARCH_PAGES_PER_QUERY), MAX_SEARCH_PAGES_PER_QUERY))
+        max_requests = max(1, min(int(max_requests or MAX_SEARCH_REQUESTS), MAX_SEARCH_REQUESTS))
+        max_candidates = max(20, min(int(max_candidates or MAX_SEARCH_CANDIDATES), MAX_SEARCH_CANDIDATES))
+        top_n = top_n if top_n in SUPPORTED_TOP_N else 20
+        supports_search_context = (
+            "search_context" in inspect.signature(self.adapter.search).parameters
+        )
         def stage(name: str, progress: int, message: str) -> None:
             self.repository.update_run(
                 run_id, status="running", stage=name, progress=progress, message=message, retryable=False
@@ -1027,12 +1082,100 @@ class RadarService:
                 on_stage(name, progress, message)
         stage(*STAGES[0])
         raw: list[dict[str, Any]] = []
+        request_count = 0
+        query_coverage: list[dict[str, Any]] = []
+        collection_stop = ""
         stage(*STAGES[1])
         for query in queries:
-            response = self.adapter.search(
-                "douyin", query["query"], 1, max(5, min(int(count or 20), 50)), run["window"]
+            query_state = {
+                "query": query["query"],
+                "pagesVisited": 0,
+                "rawCandidateCount": 0,
+                "stopReason": "not_started",
+            }
+            query_coverage.append(query_state)
+            cursor = ""
+            search_context: dict[str, Any] = {}
+            for page in range(1, max_pages + 1):
+                if request_count >= max_requests:
+                    query_state["stopReason"] = "request_cap"
+                    collection_stop = "request_cap"
+                    break
+                try:
+                    search_args = (
+                        "douyin",
+                        query["query"],
+                        page,
+                        max(5, min(int(count or 20), 50)),
+                        run["window"],
+                        cursor,
+                    )
+                    response = (
+                        self.adapter.search(*search_args, search_context=search_context)
+                        if supports_search_context
+                        else self.adapter.search(*search_args)
+                    )
+                except Exception:
+                    query_state["stopReason"] = "source_error"
+                    collection_stop = collection_stop or "source_error"
+                    break
+                request_count += 1
+                candidates = response.get("items") or []
+                query_state["pagesVisited"] += 1
+                query_state["rawCandidateCount"] += len(candidates)
+                remaining = max_candidates - len(raw)
+                if remaining > 0:
+                    raw.extend(candidates[:remaining])
+                if len(raw) >= max_candidates:
+                    query_state["stopReason"] = "candidate_cap"
+                    collection_stop = "candidate_cap"
+                    break
+                next_cursor = str(response.get("nextCursor") or "")
+                next_context = response.get("nextSearchContext")
+                if isinstance(next_context, dict):
+                    search_context = dict(next_context)
+                if not next_cursor:
+                    query_state["stopReason"] = "source_exhausted"
+                    break
+                if next_cursor == cursor:
+                    query_state["stopReason"] = "cursor_cycle"
+                    collection_stop = collection_stop or "cursor_cycle"
+                    break
+                cursor = next_cursor
+                if page == max_pages:
+                    query_state["stopReason"] = "page_cap"
+                    collection_stop = collection_stop or "page_cap"
+            if collection_stop in {"request_cap", "candidate_cap"}:
+                break
+        partial_reasons = {"page_cap", "request_cap", "candidate_cap", "source_error", "cursor_cycle"}
+        observed_reasons = [str(row.get("stopReason") or "") for row in query_coverage]
+        if not raw and any(reason in {"source_error", "cursor_cycle"} for reason in observed_reasons):
+            collection_status = "blocked"
+        elif any(reason in partial_reasons for reason in observed_reasons) or len(query_coverage) < len(queries):
+            collection_status = "partial"
+        else:
+            collection_status = "complete"
+        if not collection_stop:
+            collection_stop = (
+                next((reason for reason in observed_reasons if reason in partial_reasons), "")
+                or "source_exhausted"
             )
-            raw.extend(response.get("items") or [])
+        collection = {
+            "status": collection_status,
+            "stopReason": collection_stop,
+            "requestCount": request_count,
+            "pagesVisited": sum(int(row["pagesVisited"]) for row in query_coverage),
+            "rawCandidateCount": sum(int(row["rawCandidateCount"]) for row in query_coverage),
+            "retainedCandidateCount": len(raw),
+            "queriesPlanned": len(queries),
+            "queriesVisited": len(query_coverage),
+            "queryCoverage": query_coverage,
+            "limits": {
+                "maxPagesPerQuery": max_pages,
+                "maxRequests": max_requests,
+                "maxCandidates": max_candidates,
+            },
+        }
         stage(*STAGES[2])
         exclusions = {
             "missing_published_at": 0,
@@ -1050,6 +1193,8 @@ class RadarService:
         stage(*STAGES[3])
         stage(*STAGES[4])
         items = deduplicate(classified)
+        collection["eligibleBeforeDeduplication"] = len(classified)
+        collection["deduplicatedCount"] = len(items)
         stage(*STAGES[5])
         self.enrich_metrics(items, org_id, edition)
         observed = utcnow()
@@ -1071,7 +1216,15 @@ class RadarService:
             "range_days": run["rangeDays"],
             "window_json": json.dumps(run["window"], ensure_ascii=False),
         }
-        result = public_result(row, profiles, items, exclusions)
+        result = public_result(
+            row,
+            profiles,
+            items,
+            exclusions,
+            collection=collection,
+            top_n=top_n,
+            mode="single_model_rank" if single_model else "vehicle_group",
+        )
         self.repository.save_observations(run, items)
         status = "partial" if result.get("publicationStatus") in {"partial", "blocked"} else "completed"
         self.repository.update_run(

@@ -8,6 +8,7 @@ market demand, sales causality or market-penetration claims by themselves.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -292,11 +293,29 @@ class TikHubEvidenceAdapter:
             return "media"
         return "user_or_unknown"
 
-    def search(self, platform, query, page, count, time_range, cursor=""):
-        from social_trends import PLATFORMS, _content_rows, _parse_import_date, douyin_next_cursor, normalize_item
+    def search(self, platform, query, page, count, time_range, cursor="", search_context=None):
+        from social_trends import (
+            PLATFORMS,
+            _content_rows,
+            _parse_import_date,
+            douyin_pagination_state,
+            normalize_item,
+        )
         if platform not in PLATFORMS:
             raise ValueError(f"平台{platform}尚未启用真实采集适配器")
-        payload, source = self.client.search(platform, query, page, count, self._search_range(time_range), cursor)
+        search_args = (
+            platform,
+            query,
+            page,
+            count,
+            self._search_range(time_range),
+            cursor,
+        )
+        payload, source = (
+            self.client.search(*search_args, search_context)
+            if "search_context" in inspect.signature(self.client.search).parameters
+            else self.client.search(*search_args)
+        )
         fetched_at = utcnow()
         items = []
         for row in _content_rows(payload):
@@ -342,9 +361,14 @@ class TikHubEvidenceAdapter:
                 "collectionMode": "api",
                 "observedAt": fetched_at,
             })
+        pagination = douyin_pagination_state(payload) if platform == "douyin" else {}
         return {
             "items": items,
-            "nextCursor": douyin_next_cursor(payload) if platform == "douyin" else "",
+            "nextCursor": pagination.get("cursor", "") if pagination.get("hasMore") else "",
+            "nextSearchContext": {
+                "searchId": pagination.get("searchId", ""),
+                "backtrace": pagination.get("backtrace", ""),
+            } if platform == "douyin" else {},
             "requestMeta": {
                 "endpoint": str(source.get("endpoint") or ""), "status": int(source.get("status") or 0),
                 "cost": float(source.get("cost") or 0),

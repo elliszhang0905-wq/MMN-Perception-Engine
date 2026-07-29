@@ -44,6 +44,18 @@ class FakeAdapter:
         }
 
 
+class PaginatedAdapter(FakeAdapter):
+    def __init__(self, pages):
+        super().__init__([])
+        self.pages = pages
+
+    def search(self, platform, query, page, count, time_range, cursor="", search_context=None):
+        self.calls.append((platform, query, page, count, time_range, cursor, search_context or {}))
+        response = dict(self.pages.get(cursor, {"items": [], "nextCursor": ""}))
+        response.setdefault("requestMeta", {"paginationMode": "cursor"})
+        return response
+
+
 class DouyinVehicleRadarTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -122,6 +134,19 @@ class DouyinVehicleRadarTest(unittest.TestCase):
         self.assertIsNone(self.repository.get_project(project["id"], "org-b", "china"))
         self.assertIsNone(self.repository.get_project(project["id"], "org-a", "global"))
 
+    def test_latest_single_model_run_does_not_reuse_group_context(self):
+        group = self.repository.upsert_project(
+            "org-a", "china", "智己LS6", ["理想i6"], ["动力与操控"]
+        )
+        single = self.repository.upsert_project("org-a", "china", "智己LS6", [], [])
+        self.repository.create_run(group, 7, force=True)
+        single_run = self.repository.create_run(single, 7, force=True)
+        latest = self.repository.latest_run(
+            "org-a", "china", "智己LS6", single_model_only=True
+        )
+        self.assertEqual(single_run["id"], latest["id"])
+        self.assertEqual(single["id"], latest["projectId"])
+
     def test_manual_run_persists_results_and_ranks_by_views(self):
         project = self.repository.upsert_project(
             "org-a", "china", "智己LS6", ["理想i6"], ["动力与操控"]
@@ -142,6 +167,62 @@ class DouyinVehicleRadarTest(unittest.TestCase):
     def test_invalid_ranking_field_is_rejected(self):
         with self.assertRaises(ValueError):
             rank_items([], field="relevance")
+
+    def test_equal_views_use_newer_publish_time_then_stable_item_id(self):
+        items = [
+            {**self.item("智己LS6 B", published="2026-07-28T08:00:00+00:00", views=500), "platformItemId": "b"},
+            {**self.item("智己LS6 A", published="2026-07-28T08:00:00+00:00", views=500), "platformItemId": "a"},
+            {**self.item("智己LS6 新内容", published="2026-07-29T07:00:00+00:00", views=500), "platformItemId": "new"},
+        ]
+        ranked = rank_items(items)
+        self.assertEqual(["new", "a", "b"], [item["platformItemId"] for item in ranked])
+
+    def test_single_model_run_pages_until_source_exhausted_and_reports_coverage(self):
+        project = self.repository.upsert_project("org-a", "china", "智己LS6", [], [])
+        run = self.repository.create_run(project, 7)
+        first = self.item("智己LS6空间体验", views=200)
+        second = self.item("智己LS6操控体验", views=500)
+        adapter = PaginatedAdapter({
+            "": {
+                "items": [first],
+                "nextCursor": "cursor-1",
+                "nextSearchContext": {"searchId": "search-1", "backtrace": "trace-1"},
+            },
+            "cursor-1": {"items": [second], "nextCursor": ""},
+        })
+        result = RadarService(self.repository, adapter).run(
+            run["id"], "org-a", "china",
+            single_model=True, max_queries=1, max_pages=10, max_requests=30,
+            max_candidates=300, top_n=20,
+        )
+        self.assertEqual(2, len(adapter.calls))
+        self.assertEqual("search-1", adapter.calls[1][6]["searchId"])
+        self.assertEqual("complete", result["collection"]["status"])
+        self.assertEqual("source_exhausted", result["collection"]["stopReason"])
+        self.assertEqual(2, result["collection"]["pagesVisited"])
+        self.assertEqual(2, result["counts"]["rankingEligible"])
+        self.assertEqual(500, result["lists"]["all"][0]["metrics"]["views"])
+
+    def test_page_cap_is_truthfully_partial(self):
+        project = self.repository.upsert_project("org-a", "china", "智己LS6", [], [])
+        run = self.repository.create_run(project, 7)
+        first = self.item("智己LS6第一条", views=200)
+        second = self.item("智己LS6第二条", views=500)
+        adapter = PaginatedAdapter({
+            "": {"items": [first], "nextCursor": "cursor-1"},
+            "cursor-1": {"items": [second], "nextCursor": "cursor-2"},
+        })
+        result = RadarService(self.repository, adapter).run(
+            run["id"], "org-a", "china",
+            single_model=True, max_queries=1, max_pages=2, max_requests=30,
+            max_candidates=300, top_n=10,
+        )
+        stored = self.repository.get_run(run["id"], "org-a", "china")
+        self.assertEqual("partial", stored["status"])
+        self.assertEqual("partial", result["collection"]["status"])
+        self.assertEqual("page_cap", result["collection"]["stopReason"])
+        self.assertEqual("partial", result["publicationStatus"])
+        self.assertEqual(2, len(result["lists"]["all"]))
 
     def test_missing_views_are_enriched_and_never_default_to_zero(self):
         project = self.repository.upsert_project(

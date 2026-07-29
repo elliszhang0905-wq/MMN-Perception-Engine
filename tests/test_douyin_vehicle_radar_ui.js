@@ -19,12 +19,26 @@ assert.match(
 );
 assert.match(
   html,
-  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260729-full-deployment-closure-1/,
+  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260730-dashboard-vehicle-heat-1/,
   "radar assets should use the cache-busting customer-UI revision",
 );
 assert.match(script, /待补热度/, "missing view metrics should be isolated from formal rankings");
 assert.match(script, /未取得/, "missing play count must never be rendered as zero");
 assert.doesNotMatch(script, /互动分/, "internal interaction score should not be customer-facing");
 assert.match(styles, /\.dvr-tabs button\{[^}]*flex:0 0 auto[^}]*white-space:nowrap/, "mobile tabs should stay readable and scroll horizontally");
+assert.match(
+  html,
+  /id="dashboard-competitor-intelligence"[\s\S]*id="dashboard-douyin-vehicle-radar"[\s\S]*id="selling-point-decision-workbench"/,
+  "vehicle heat evidence must sit inside competitor cognition before selling-point decisions",
+);
+assert.match(script, /data-dvr-model/, "single-model ranking should expose a vehicle-name input");
+assert.match(script, /data-dvr-topn/, "single-model ranking should expose a Top N control");
+assert.match(script, /查看完整榜单/, "cockpit should keep a compact Top 5 summary with an explicit full-list action");
+assert.match(script, /collection\?\.stopReason|collection\.stopReason/, "coverage stop reason must be rendered");
+assert.doesNotMatch(
+  script,
+  /visibleItems\.map\(resultRow\)|items\.map\(resultRow\)/,
+  "Array.map's third argument must not be mistaken for the pending-review flag",
+);
 
 console.log("douyin vehicle radar ui: ok");

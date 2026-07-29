@@ -1,4 +1,5 @@
 .douyin-vehicle-radar{margin:22px 0}
+.dashboard-competitor-intelligence>.douyin-vehicle-radar{margin:24px 0 0;padding-top:24px;border-top:1px solid #e2ece8}
 .dvr-panel{overflow:hidden;padding:0;border-color:#cfe3dd;background:linear-gradient(180deg,#fff 0,#fbfdfc 100%)}
 .dvr-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:28px 30px 22px;border-bottom:1px solid #e2ece8}
 .dvr-head>div>span,.dvr-strategy>div>span{color:#188675;font-size:11px;font-weight:800;letter-spacing:.14em}
@@ -10,6 +11,14 @@
 .dvr-head>em.completed i{background:#23a88e;box-shadow:0 0 0 4px #dff4ee}
 .dvr-head>em.partial i{background:#d5a43c;box-shadow:0 0 0 4px #f8efd9}
 .dvr-head>em.failed i{background:#d06767;box-shadow:0 0 0 4px #f8e6e6}
+.dvr-mode{display:flex;gap:6px;padding:14px 30px;border-bottom:1px solid #e2ece8;background:#f8fbfa}
+.dvr-mode button{padding:8px 13px;border:1px solid transparent;border-radius:8px;background:transparent;color:#687d7d;font-weight:700}
+.dvr-mode button.active{border-color:#cfe4de;background:#fff;color:#187d6f}
+.dvr-query{display:grid;grid-template-columns:minmax(220px,1fr) 140px minmax(220px,1fr);align-items:end;gap:16px;padding:18px 30px;border-bottom:1px solid #e2ece8}
+.dvr-query label{display:flex;flex-direction:column;gap:7px;color:#637876;font-size:11px;font-weight:700}
+.dvr-query input,.dvr-query select{width:100%;min-height:42px;padding:9px 11px;border:1px solid #d8e5e1;border-radius:9px;background:#fff;color:#24434b;font:inherit}
+.dvr-query input:focus,.dvr-query select:focus{outline:2px solid #78b8ac;outline-offset:1px}
+.dvr-query small{align-self:center;color:#83938f;font-size:11px}
 .dvr-scope{display:grid;grid-template-columns:minmax(180px,.75fr) minmax(320px,1.5fr);gap:1px;background:#e7efec;border-bottom:1px solid #e2ece8}
 .dvr-scope>div{display:flex;min-width:0;flex-direction:column;gap:6px;padding:18px 30px;background:#f8fbfa}
 .dvr-scope span,.dvr-summary span{color:#83938f;font-size:11px}
@@ -40,6 +49,10 @@
 .dvr-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#e4ece9}
 .dvr-summary>div{display:flex;flex-direction:column;gap:7px;padding:19px 30px;background:#f7faf9}
 .dvr-summary b{color:#196f65;font-size:22px}
+.dvr-coverage{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px 30px;border-bottom:1px solid #e4ece9;background:#f8fbfa}
+.dvr-coverage b{color:#3d6b65;font-size:12px}
+.dvr-coverage span{color:#84938f;font-size:11px;text-align:right}
+.dvr-coverage.partial b,.dvr-coverage.blocked b{color:#9b7427}
 .dvr-tabs{display:flex;gap:6px;padding:18px 30px 0;overflow:auto}
 .dvr-tabs button{flex:0 0 auto;padding:9px 13px;border:1px solid transparent;border-radius:9px;background:transparent;color:#687d7d;font-weight:700;white-space:nowrap}
 .dvr-tabs button i{margin-left:4px;color:#96a6a3;font-size:10px;font-style:normal}
@@ -47,6 +60,12 @@
 .dvr-tabs button.active i{color:#187d6f}
 .dvr-list-head{display:flex;justify-content:space-between;gap:20px;padding:12px 30px;color:#8b9996;font-size:11px}
 .dvr-list{margin:0;padding:0 30px 20px;list-style:none}
+.dvr-full-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 30px 22px}
+.dvr-full-actions small{color:#84938f;font-size:11px}
+.dvr-review-queue{margin:0 30px 22px;padding:18px 0 0;border-top:1px solid #e4ece9}
+.dvr-review-queue h3{margin:0;color:#24434b;font-size:15px}
+.dvr-review-queue>p{margin:5px 0 10px;color:#81908d;font-size:11px}
+.dvr-review-queue .dvr-list{padding:0}
 .dvr-row{display:grid;grid-template-columns:40px 1fr;gap:12px;padding:20px 0;border-top:1px solid #e8efed}
 .dvr-rank{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:#edf5f2;color:#247f72;font-weight:800}
 .dvr-row__head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
@@ -73,6 +92,10 @@
  .douyin-vehicle-radar{margin:14px 0}
  .dvr-head{flex-direction:column;padding:21px 18px 17px}
  .dvr-head h2{font-size:21px}
+ .dashboard-competitor-intelligence>.douyin-vehicle-radar{margin-top:18px;padding-top:18px}
+ .dvr-mode{padding:12px 18px}
+ .dvr-query{grid-template-columns:1fr;padding:16px 18px}
+ .dvr-query small{align-self:auto}
  .dvr-scope{grid-template-columns:1fr}
  .dvr-scope>div{padding:13px 18px}
  .dvr-controls{align-items:stretch;padding:16px 18px}
@@ -83,9 +106,13 @@
  .dvr-progress__steps{grid-template-columns:repeat(3,1fr)}
  .dvr-summary{grid-template-columns:repeat(2,1fr)}
  .dvr-summary>div{padding:15px 18px}
+ .dvr-coverage{align-items:flex-start;flex-direction:column;padding:12px 18px}
+ .dvr-coverage span{text-align:left}
  .dvr-tabs{padding:15px 18px 0}
  .dvr-list-head{padding:11px 18px}
  .dvr-list{padding:0 18px 16px}
+ .dvr-full-actions{align-items:flex-start;flex-direction:column;padding:0 18px 18px}
+ .dvr-review-queue{margin:0 18px 18px}
  .dvr-row{grid-template-columns:32px 1fr}
  .dvr-row__head{flex-direction:column;gap:7px}
  .dvr-metrics{display:grid;grid-template-columns:repeat(2,1fr)}
