@@ -451,9 +451,31 @@ class SocialEvidenceV2Test(unittest.TestCase):
             {"start": "2026-07-01", "end": "2026-07-22"}, "",
         )
         self.assertEqual(result["items"][0]["nativeMetrics"]["likes"], 33)
+        self.assertIsNone(result["items"][0]["nativeMetrics"]["views"])
         self.assertEqual(result["items"][0]["platformItemId"], "dy-1")
         self.assertEqual(result["requestMeta"]["endpoint"], "/douyin/search")
         self.assertIn("data", result["raw"])
+
+    def test_tikhub_adapter_fetches_verified_play_count_without_zero_fallback(self):
+        class Client:
+            def fetch_multi_video_statistics(self, aweme_ids):
+                self.ids = aweme_ids
+                return ({
+                    "data": {
+                        "aweme_list": [
+                            {"aweme_id": "dy-1", "statistics": {"play_count": 0}},
+                            {"aweme_id": "dy-2", "statistics": {"play_count": 9876}},
+                            {"aweme_id": "dy-3", "statistics": {}},
+                        ]
+                    }
+                }, {"status": 200})
+
+        client = Client()
+        result = TikHubEvidenceAdapter(client).fetch_statistics(["dy-1", "dy-2", "dy-3"])
+        self.assertEqual(["dy-1", "dy-2", "dy-3"], client.ids)
+        self.assertEqual(0, result["items"]["dy-1"]["views"])
+        self.assertEqual(9876, result["items"]["dy-2"]["views"])
+        self.assertNotIn("dy-3", result["items"])
 
     def test_persistent_worker_can_claim_exactly_one_queued_job(self):
         first = self.service.create_job(self.plan())

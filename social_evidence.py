@@ -302,6 +302,22 @@ class TikHubEvidenceAdapter:
         for row in _content_rows(payload):
             normalized = normalize_item(platform, row, query, fetched_at)
             published = _parse_import_date(normalized.get("publishedAt"))
+            stats = row.get("statistics") if isinstance(row.get("statistics"), dict) else {}
+            view_value = next(
+                (
+                    candidate
+                    for candidate in (
+                        stats.get("play_count"),
+                        stats.get("view_count"),
+                        row.get("play_count"),
+                        row.get("view_count"),
+                    )
+                    if candidate is not None and candidate != ""
+                ),
+                None,
+            )
+            native_metrics = dict(normalized.get("metrics") or {})
+            native_metrics["views"] = view_value
             items.append({
                 "id": normalized["id"],
                 "platformItemId": normalized["platformItemId"],
@@ -310,7 +326,7 @@ class TikHubEvidenceAdapter:
                 "text": normalized["text"],
                 "author": normalized.get("author") or "",
                 "publishedAt": published.isoformat() if published else "",
-                "nativeMetrics": dict(normalized.get("metrics") or {}),
+                "nativeMetrics": native_metrics,
                 "sourceRole": self._source_role(normalized),
                 "coverUrl": normalized.get("coverUrl") or "",
                 "dynamicCoverUrl": normalized.get("dynamicCoverUrl") or "",
@@ -335,6 +351,70 @@ class TikHubEvidenceAdapter:
                 "paginationMode": "cursor" if platform == "douyin" else "page",
             },
             "raw": payload,
+        }
+
+    @staticmethod
+    def _statistics_rows(payload):
+        rows = {}
+        stack = [payload]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, list):
+                stack.extend(value)
+                continue
+            if not isinstance(value, dict):
+                continue
+            stack.extend(value.values())
+            stats = value.get("statistics") if isinstance(value.get("statistics"), dict) else value
+            item_id = str(
+                value.get("aweme_id")
+                or value.get("awemeId")
+                or value.get("item_id")
+                or value.get("itemId")
+                or ""
+            ).strip()
+            if not item_id:
+                continue
+            raw_views = next(
+                (
+                    candidate
+                    for candidate in (
+                        stats.get("play_count"),
+                        stats.get("view_count"),
+                        stats.get("views"),
+                    )
+                    if candidate is not None and candidate != ""
+                ),
+                None,
+            )
+            try:
+                views = float(raw_views)
+            except (TypeError, ValueError):
+                continue
+            if views < 0:
+                continue
+            rows[item_id] = {
+                "views": views,
+                "likes": stats.get("digg_count"),
+                "comments": stats.get("comment_count"),
+                "shares": stats.get("share_count"),
+                "collects": stats.get("collect_count"),
+            }
+        return rows
+
+    def fetch_statistics(self, platform_item_ids):
+        ids = list(dict.fromkeys(
+            str(value or "").strip() for value in platform_item_ids if str(value or "").strip()
+        ))
+        if len(ids) > 50:
+            raise ValueError("单批热度核验最多支持 50 条内容。")
+        payload, source = self.client.fetch_multi_video_statistics(ids)
+        return {
+            "items": self._statistics_rows(payload),
+            "observedAt": utcnow(),
+            "requestMeta": {
+                "status": int(source.get("status") or 0),
+            },
         }
 
 

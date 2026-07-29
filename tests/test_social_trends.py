@@ -374,6 +374,22 @@ class SocialTrendsTest(unittest.TestCase):
         with patch.dict(os.environ, {"TIKHUB_API_KEY": "server-secret"}):
             self.assertEqual(TikHubClient().key, "server-secret")
 
+    def test_multi_video_statistics_uses_get_and_limits_batch_size(self):
+        client = TikHubClient()
+        with patch.object(
+            client,
+            "request_json",
+            return_value=({"data": []}, {"status": 200}),
+        ) as request:
+            client.fetch_multi_video_statistics(["a", "b", "a"])
+        request.assert_called_once_with(
+            "GET",
+            "/api/v1/douyin/app/v3/fetch_multi_video_statistics",
+            {"aweme_ids": "a,b"},
+        )
+        with self.assertRaisesRegex(ValueError, "最多核验 50"):
+            client.fetch_multi_video_statistics([str(index) for index in range(51)])
+
     def test_tikhub_business_error_is_not_silently_treated_as_an_empty_result(self):
         with self.assertRaisesRegex(RuntimeError, "TikHub API 400"):
             ensure_tikhub_success({"code": 400, "message": "invalid request"}, "/api/test")

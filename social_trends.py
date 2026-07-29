@@ -562,6 +562,8 @@ def ensure_tikhub_success(payload, path):
 
 
 class TikHubClient:
+    MULTI_VIDEO_STATISTICS_PATH = "/api/v1/douyin/app/v3/fetch_multi_video_statistics"
+
     def __init__(self):
         self.key = _backend_env("TIKHUB_API_KEY")
         self.base = _backend_env("TIKHUB_BASE_URL", "https://api.tikhub.io").rstrip("/")
@@ -607,6 +609,18 @@ class TikHubClient:
         if platform == "xiaohongshu": params.update({"sort_type": "general", "note_type": "不限", "time_filter": window, "ai_mode": 0})
         if platform == "weibo": params.update({"search_type": "1", **({"time_scope": window} if window else {})})
         return self.request_json(cfg["method"], cfg["path"], params)
+
+    def fetch_multi_video_statistics(self, aweme_ids):
+        ids = list(dict.fromkeys(str(value or "").strip() for value in aweme_ids if str(value or "").strip()))
+        if not ids:
+            return {}, {"endpoint": self.MULTI_VIDEO_STATISTICS_PATH, "status": 0}
+        if len(ids) > 50:
+            raise ValueError("单次最多核验 50 条视频热度。")
+        return self.request_json(
+            "GET",
+            self.MULTI_VIDEO_STATISTICS_PATH,
+            {"aweme_ids": ",".join(ids)},
+        )
 
     def hot_list(self, platform):
         method, path = ENRICHMENT_ENDPOINTS[platform]["hot"]

@@ -966,9 +966,18 @@ function isRedundantModelOption(model){
  const compact=String(model||"").replace(/\s+/g,"");
  return /^(?:上汽)?奥迪E5$/i.test(compact);
 }
+function productEvaluationCatalogModelOptions(){
+ const scopePrefix=`${browserStorageScope(activeEdition()).identityKey}::`,models=new Set();
+ productEvaluationCatalog.forEach((dataset,key)=>{
+  if(!String(key||"").startsWith(scopePrefix))return;
+  productEvaluationSupportedModels(dataset).forEach(model=>models.add(model));
+ });
+ return [...models];
+}
 function modelOptions(){
  const models=new Set([state.config.model]);
  state.rows.forEach(r=>{if(r[0])models.add(r[0])});
+ productEvaluationCatalogModelOptions().forEach(model=>models.add(model));
  (verticalState.items||[]).forEach(x=>{if(x.ownModel)models.add(x.ownModel);if(x.competitor)models.add(x.competitor)});
  (modelJudgments||[]).forEach(x=>{if(x.model_name||x.model)models.add(x.model_name||x.model)});
  return [...models].filter(x=>x&&!isRedundantModelOption(x)).sort((a,b)=>String(a).localeCompare(String(b),"zh-CN",{numeric:true}));
@@ -1191,6 +1200,7 @@ async function restoreProductEvaluationCatalogFromServer(){
   const data=await api(`/api/product-evaluation-catalog?edition=${encodeURIComponent(activeEdition())}`);if(contextKey!==productEvaluationServerContextKey())return false;
   const items=Array.isArray(data.datasets)?data.datasets:[],serverSources=new Set();
   items.forEach(item=>{if(!item?.dataset)return;serverSources.add(String(item.sourceModel||item.dataset.productEvaluationSourceModel||""));registerProductEvaluationDataset(item.dataset,{persist:true})});
+  renderModelSwitcher();
   const model=state.config?.model,registered=productEvaluationCatalogGet(model);
   if(registered&&productEvaluationDatasetNeedsUpgrade(registered,model)){installProductEvaluationDataset(registered,model);save();render()}
   const localSource=productEvaluationPersistenceId(localCandidate||{});if(localCandidate&&localSource&&!serverSources.has(localSource))syncProductEvaluationDatasetToServer(localCandidate);
@@ -1438,6 +1448,16 @@ function platformAdvice(platform){
 function money(n){return `${n.toFixed(1)} 万`}
 function render(){
  const dashCompetitors=syncDashboardCompetitors();
+ window.MMNVehicleRadarContext={
+  edition:activeEdition(),
+  project:String(state.config?.project||""),
+  subject:String(state.config?.model||""),
+  competitors:dashCompetitors,
+  topics:[...new Set((state.rows||[]).filter(row=>row?.[0]===state.config?.model&&row?.[4]).map(row=>String(row[4]).trim()).filter(Boolean))].slice(0,8),
+  datasetVersion:String(state.datasetVersion||""),
+  available:!isBlockedImport()&&Boolean(state.config?.model)&&dashCompetitors.length>0
+ };
+ window.dispatchEvent(new CustomEvent("mmn:vehicle-radar-context",{detail:window.MMNVehicleRadarContext}));
  const a=analysis();
  const metrics=metricDisplay(a);
  renderEditionChrome();

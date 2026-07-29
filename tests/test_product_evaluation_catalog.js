@@ -77,4 +77,34 @@ otherOrg.prepareProductEvaluationCatalog();
 assert.equal(otherOrg.productEvaluationCatalogHas("奥迪E7X"), false, "catalog data must not cross organization boundaries");
 assert.equal(otherOrg.productEvaluationCatalogHas("智己L6"), true, "bundled data remains available in an isolated organization");
 
+const modelOptionsStart = app.indexOf("function isRedundantModelOption");
+const modelOptionsEnd = app.indexOf("function dashboardModelOptions", modelOptionsStart);
+assert.ok(modelOptionsStart >= 0 && modelOptionsEnd > modelOptionsStart, "model option helpers should be discoverable");
+const modelOptionsContext = {
+  state: {config: {model: "奥迪E7X"}, rows: []},
+  verticalState: {items: []},
+  modelJudgments: [],
+  productEvaluationCatalog: new Map([
+    ["org-a::trial::china::奥迪E7X", dataset("奥迪E7X", "e7x")],
+    ["org-a::trial::china::智己LS6", dataset("智己LS6", "ls6")],
+    ["org-b::trial::china::外部车型", dataset("外部车型", "other")],
+  ]),
+  activeEdition() { return "china"; },
+  browserStorageScope() { return {identityKey: "org-a::trial::china"}; },
+  productEvaluationSupportedModels(value) { return value.models || []; },
+  String,
+  Set,
+};
+vm.runInNewContext(`${app.slice(modelOptionsStart, modelOptionsEnd)}\nthis.options=modelOptions();`, modelOptionsContext);
+assert.deepEqual(
+  Array.from(modelOptionsContext.options),
+  ["奥迪E7X", "智己LS6"],
+  "model switcher should include server-restored product evaluation models from the active scope",
+);
+assert.match(
+  app,
+  /items\.forEach\(item=>[\s\S]*?registerProductEvaluationDataset\(item\.dataset,\{persist:true\}\)\}\);\s*renderModelSwitcher\(\);/,
+  "server catalog restoration should refresh the visible model switcher",
+);
+
 console.log("product evaluation catalog: ok");

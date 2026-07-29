@@ -193,6 +193,12 @@ from douyin_hot_entities import (
     recognize_items as recognize_douyin_hot_entities,
     save_rank_snapshot as save_douyin_hot_rank_snapshot,
 )
+from douyin_vehicle_radar import (
+    RadarRepository as DouyinVehicleRadarRepository,
+    RadarService as DouyinVehicleRadarService,
+    init_schema as init_douyin_vehicle_radar_schema,
+    sanitize_public_result as sanitize_douyin_vehicle_radar_result,
+)
 from social_trends import apply_history as apply_social_trend_history, attach_competitor_rankings, collect as collect_social_trends, import_records as import_social_trend_records, init_schema as init_social_trend_schema, latest_snapshot as latest_social_trend_snapshot, normalized_vehicle_label, sanitize_competitor_models, save_snapshot as save_social_trend_snapshot, vehicle_identity_key
 from social_evidence import (
     BudgetExceeded as SocialEvidenceBudgetExceeded,
@@ -267,6 +273,8 @@ PUBLIC_STATIC_FILES = frozenset({
     "demo-brand-weekly-radar.html",
     "douyin-hot-demo.css",
     "douyin-hot-demo.js",
+    "douyin-vehicle-radar.css",
+    "douyin-vehicle-radar.js",
     "group-dashboard-charts.css",
     "group-dashboard.css",
     "group-dashboard.js",
@@ -314,8 +322,8 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260727-audit-hardening-1"
-APP_RELEASE_DATE = "2026-07-27"
+APP_VERSION_CODE = "beta-1.03-20260729-douyin-vehicle-radar-1"
+APP_RELEASE_DATE = "2026-07-29"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -374,6 +382,9 @@ SOCIAL_TREND_JOB_LIMIT = 100
 SOCIAL_TREND_JOB_TTL = timedelta(days=1)
 SOCIAL_EVIDENCE_REPOSITORY_LOCK = Lock()
 SOCIAL_EVIDENCE_REPOSITORY = None
+DOUYIN_VEHICLE_RADAR_LOCK = Lock()
+DOUYIN_VEHICLE_RADAR_REPOSITORY = None
+DOUYIN_VEHICLE_RADAR_THREADS = {}
 EXECUTIVE_BRIEF_REVIEW_LOCK = Lock()
 EXECUTIVE_BRIEF_REVIEW_TASKS = {}
 EXECUTIVE_BRIEF_REVIEW_PROVIDERS = ("qwen", "deepseek", "kimi")
@@ -496,6 +507,40 @@ def social_evidence_repository():
             SOCIAL_EVIDENCE_REPOSITORY = SocialEvidenceRepository()
             SOCIAL_EVIDENCE_REPOSITORY.recover_interrupted_jobs()
     return SOCIAL_EVIDENCE_REPOSITORY
+
+
+def douyin_vehicle_radar_repository():
+    global DOUYIN_VEHICLE_RADAR_REPOSITORY
+    with DOUYIN_VEHICLE_RADAR_LOCK:
+        if DOUYIN_VEHICLE_RADAR_REPOSITORY is None:
+            DOUYIN_VEHICLE_RADAR_REPOSITORY = DouyinVehicleRadarRepository(db)
+            DOUYIN_VEHICLE_RADAR_REPOSITORY.recover_interrupted()
+    return DOUYIN_VEHICLE_RADAR_REPOSITORY
+
+
+def public_douyin_vehicle_radar_run(run):
+    if not run:
+        return None
+    visible = {
+        "id", "projectId", "edition", "rangeDays", "window", "status", "stage",
+        "progress", "message", "result", "retryable", "createdAt", "updatedAt", "completedAt",
+    }
+    payload = {key: value for key, value in run.items() if key in visible}
+    if isinstance(payload.get("result"), dict) and payload["result"]:
+        payload["result"] = sanitize_douyin_vehicle_radar_result(payload["result"])
+        if (
+            payload.get("status") == "completed"
+            and payload["result"].get("publicationStatus") in {"partial", "blocked"}
+        ):
+            payload["status"] = "partial"
+            payload["stage"] = "partial"
+            payload["message"] = "历史榜单缺少播放热度核验，可仅补抓热度。"
+            payload["retryable"] = True
+    if run.get("status") == "failed":
+        payload["error"] = "采集能力未连接或访问受限，请检查本地采集配置后重试。"
+    else:
+        payload["error"] = ""
+    return payload
 
 
 def public_social_evidence_job(job):
@@ -679,6 +724,180 @@ def start_social_evidence_v2_job(body, *, org_id="local", edition="china", repos
 
 def get_social_evidence_v2_job(job_id, org_id="local", repository=None):
     return public_social_evidence_job((repository or social_evidence_repository()).get_job(job_id, org_id))
+
+
+def create_douyin_vehicle_radar_run(body, *, org_id="local", edition="china", adapter=None):
+    body = body if isinstance(body, dict) else {}
+    repository = douyin_vehicle_radar_repository()
+    subject = str(body.get("subject") or "").strip()
+    competitors = body.get("competitors") if isinstance(body.get("competitors"), list) else []
+    topics = body.get("topics") if isinstance(body.get("topics"), list) else []
+    project = repository.upsert_project(org_id, edition, subject, competitors, topics)
+    run = repository.create_run(project, body.get("rangeDays"), force=body.get("force") is True)
+    if run["status"] in {"running", "completed", "partial"}:
+        return public_douyin_vehicle_radar_run(run)
+    selected_adapter = adapter or TikHubEvidenceAdapter()
+    service = DouyinVehicleRadarService(repository, selected_adapter)
+
+    def work():
+        try:
+            client = getattr(selected_adapter, "client", None)
+            if client is not None and hasattr(client, "configured") and not client.configured():
+                raise RuntimeError("公开内容采集能力未配置。")
+            service.run(
+                run["id"], org_id, edition,
+                max_queries=max(1, min(int(body.get("maxQueries") or 16), 24)),
+                count=max(5, min(int(body.get("count") or 20), 50)),
+            )
+        except Exception as exc:
+            repository.update_run(
+                run["id"], status="failed", stage="failed", progress=0,
+                message="本轮采集未完成，可安全重试。", error=str(exc), retryable=True,
+            )
+        finally:
+            with DOUYIN_VEHICLE_RADAR_LOCK:
+                DOUYIN_VEHICLE_RADAR_THREADS.pop(run["id"], None)
+
+    thread = Thread(target=work, daemon=True, name=f"douyin-vehicle-radar-{run['id'][:8]}")
+    with DOUYIN_VEHICLE_RADAR_LOCK:
+        DOUYIN_VEHICLE_RADAR_THREADS[run["id"]] = thread
+    thread.start()
+    return public_douyin_vehicle_radar_run(repository.get_run(run["id"], org_id, edition))
+
+
+def retry_douyin_vehicle_radar_metrics(
+    run_id, *, org_id="local", edition="china", adapter=None
+):
+    repository = douyin_vehicle_radar_repository()
+    run = repository.get_run(run_id, org_id, edition)
+    if not run:
+        raise ValueError("未找到需要补抓热度的任务。")
+    if run.get("status") == "running":
+        return public_douyin_vehicle_radar_run(run)
+    selected_adapter = adapter or TikHubEvidenceAdapter()
+    service = DouyinVehicleRadarService(repository, selected_adapter)
+
+    def work():
+        try:
+            client = getattr(selected_adapter, "client", None)
+            if client is not None and hasattr(client, "configured") and not client.configured():
+                raise RuntimeError("公开内容热度核验能力未配置。")
+            service.retry_metrics(run_id, org_id, edition)
+        except Exception as exc:
+            repository.update_run(
+                run_id, status="partial", stage="partial", progress=100,
+                message="热度补抓未完成，可再次重试。", error=str(exc), retryable=True,
+            )
+        finally:
+            with DOUYIN_VEHICLE_RADAR_LOCK:
+                DOUYIN_VEHICLE_RADAR_THREADS.pop(run_id, None)
+
+    thread = Thread(target=work, daemon=True, name=f"douyin-radar-metrics-{run_id[:8]}")
+    with DOUYIN_VEHICLE_RADAR_LOCK:
+        DOUYIN_VEHICLE_RADAR_THREADS[run_id] = thread
+    thread.start()
+    return public_douyin_vehicle_radar_run(repository.get_run(run_id, org_id, edition))
+
+
+def douyin_vehicle_radar_strategy(run, *, org_id="local", edition="china"):
+    if not run or run.get("status") not in {"completed", "partial"}:
+        raise ValueError("本轮榜单尚未完成，不能生成策略。")
+    result = run.get("result") or {}
+    readiness = result.get("strategyReadiness") or {}
+    if not readiness.get("ready"):
+        withheld = {
+            "comparisonItems": [],
+            "modelComparisons": [],
+            "unifiedInsight": {
+                "publicationStatus": "withheld",
+                "headline": "当前仅形成有限观察",
+                "limitations": [readiness.get("message") or "当前证据未达到策略输出条件。"],
+            },
+            "qa": {
+                "threeFlagships": {
+                    "status": "insufficient_evidence",
+                    "completed": 0,
+                }
+            },
+        }
+        return douyin_vehicle_radar_repository().save_strategy(
+            run["id"], org_id, edition, withheld
+        )
+    lists = result.get("lists") or {}
+    items = []
+    for key in ("own", "competitor", "comparison", "attribute"):
+        for item in lists.get(key) or []:
+            model = next(iter(item.get("matchedModels") or []), result.get("subject") or "")
+            views = float((item.get("metrics") or {}).get("views") or 0)
+            items.append({
+                "id": item.get("itemId") or item.get("platformItemId"),
+                "platform": "抖音",
+                "platformLabel": "抖音",
+                "text": item.get("text") or "",
+                "normalizedModel": model,
+                "sourceUrl": item.get("sourceUrl") or "",
+                "sentiment": None,
+                "heat": views,
+            })
+    models = [result.get("subject"), *(result.get("competitors") or [])]
+    comparisons = []
+    for index, model in enumerate(model for model in models if model):
+        matched = [item for item in items if item.get("normalizedModel") == model]
+        comparisons.append({
+            "model": model,
+            "role": "own" if index == 0 else "competitor",
+            "contentCount": len(matched),
+            "heat": sum(float(item.get("heat") or 0) for item in matched),
+            "positiveRate": 0,
+            "riskCount": 0,
+        })
+    evidence = {
+        "keyword": result.get("subject") or "",
+        "comparisonItems": items[:72],
+        "modelComparisons": comparisons,
+        "collectionStatus": {"status": "complete"},
+        "scope": {
+            "rangeDays": result.get("rangeDays"),
+            "window": result.get("window"),
+            "source": "manual_douyin_vehicle_radar",
+        },
+    }
+    reviewed = validate_social_trends_with_models(evidence)
+    return douyin_vehicle_radar_repository().save_strategy(
+        run["id"], org_id, edition, reviewed
+    )
+
+
+def douyin_vehicle_radar_video_item(run, platform_item_id):
+    result = (run or {}).get("result") or {}
+    for bucket in ("own", "competitor", "comparison", "attribute"):
+        for item in (result.get("lists") or {}).get(bucket) or []:
+            current_id = str(item.get("platformItemId") or item.get("itemId") or "")
+            if current_id != str(platform_item_id or ""):
+                continue
+            metrics = item.get("metrics") or {}
+            return {
+                "itemId": current_id,
+                "platformItemId": current_id,
+                "title": item.get("text") or "",
+                "text": item.get("text") or "",
+                "author": item.get("author") or "",
+                "sourceUrl": item.get("sourceUrl") or "",
+                "url": item.get("sourceUrl") or "",
+                "coverUrl": item.get("coverUrl") or "",
+                "dynamicCoverUrl": item.get("dynamicCoverUrl") or "",
+                "publishedAt": item.get("publishedAt") or "",
+                "metrics": {
+                    "play": metrics.get("views") or 0,
+                    "likes": metrics.get("likes") or 0,
+                    "comments": metrics.get("comments") or 0,
+                    "shares": metrics.get("shares") or 0,
+                    "collects": metrics.get("collects") or 0,
+                },
+                "matchedModels": item.get("matchedModels") or [],
+                "radarRunId": run.get("id"),
+            }
+    return None
 
 
 def import_social_evidence_records(body, *, org_id="local", edition="china", repository=None,
@@ -1487,6 +1706,7 @@ def init_db():
     with db() as conn:
         init_social_trend_schema(conn)
         init_douyin_hot_entity_schema(conn)
+        init_douyin_vehicle_radar_schema(conn)
         init_content_defense_schema(conn)
         init_video_insight_schema(conn)
         conn.execute("""
@@ -2742,12 +2962,12 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
                 VIDEO_INSIGHT_THREADS.pop(job_id, None)
 
 
-def start_video_insight_job(body, *, org_id="local", media_runner=None, provider_runner=None):
+def start_video_insight_job(body, *, org_id="local", media_runner=None, provider_runner=None, trusted_item=None):
     edition = edition_from(body.get("edition") or "china")
     view, range_key = body.get("view") or "videos", body.get("range") or "24h"
     if view != "videos":
         raise ValueError("热门话题不启动逐视频分析。")
-    item = content_defense_item(org_id, edition, view, range_key, body.get("itemId"))
+    item = trusted_item or content_defense_item(org_id, edition, view, range_key, body.get("itemId"))
     if not item:
         raise ValueError("未找到当前榜单视频，请刷新榜单后重试。")
     request = {
@@ -4114,6 +4334,10 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/cockpit/execution-cycles",
     "/api/cockpit/execution-cycles/monitoring",
     "/api/douyin-hot/recognize",
+    "/api/douyin-vehicle-radar/runs",
+    "/api/douyin-vehicle-radar/items/review",
+    "/api/douyin-vehicle-radar/strategies",
+    "/api/douyin-vehicle-radar/video-insights/jobs",
     "/api/social-trends/collect",
     "/api/social-trends/jobs",
     "/api/social-trends/import",
@@ -4128,7 +4352,10 @@ def cloud_post_required_roles(path):
         r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", str(path or "")
     )
     social_evidence_retry = re.fullmatch(r"/api/social-evidence/jobs/[^/]+/retry", str(path or ""))
-    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action or social_evidence_retry else {"admin"}
+    douyin_vehicle_radar_retry = re.fullmatch(
+        r"/api/douyin-vehicle-radar/runs/[^/]+/retry", str(path or "")
+    )
+    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action or social_evidence_retry or douyin_vehicle_radar_retry else {"admin"}
 
 
 def auth_secret():
@@ -15755,6 +15982,47 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 ).fetchall()
             self.send_json({"ok": True, "items": [rowdict(r) for r in rows]})
             return
+        if parsed.path == "/api/douyin-vehicle-radar/latest":
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(q.get("edition", ["china"])[0])
+                run = douyin_vehicle_radar_repository().latest_run(
+                    auth.get("org_id", "local"), radar_edition, q.get("subject", [""])[0]
+                )
+                self.send_json({
+                    "ok": True,
+                    "run": public_douyin_vehicle_radar_run(run),
+                    "strategy": douyin_vehicle_radar_repository().latest_strategy(
+                        run["id"], auth.get("org_id", "local"), radar_edition
+                    ) if run else None,
+                })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        radar_run_match = re.fullmatch(r"/api/douyin-vehicle-radar/runs/([^/]+)", parsed.path)
+        if radar_run_match:
+            try:
+                q = parse_qs(parsed.query)
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(q.get("edition", ["china"])[0])
+                repository = douyin_vehicle_radar_repository()
+                run = repository.get_run(
+                    radar_run_match.group(1), auth.get("org_id", "local"), radar_edition
+                )
+                if not run:
+                    self.send_json({"ok": False, "error": "未找到本轮车型内容榜单。"}, 404)
+                    return
+                self.send_json({
+                    "ok": True,
+                    "run": public_douyin_vehicle_radar_run(run),
+                    "strategy": repository.latest_strategy(
+                        run["id"], auth.get("org_id", "local"), radar_edition
+                    ),
+                })
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+            return
         if parsed.path == "/api/douyin-hot/rankings":
             try:
                 q = parse_qs(parsed.query)
@@ -16481,6 +16749,119 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_json(payload or {"ok": False, "error": "达人蒸馏接口不存在"}, 201 if parsed.path == "/api/creator-distillation/tasks" else (200 if payload else 404))
             except Exception as exc:
                 self.send_json(creator_distillation_api_error(exc), 400)
+            return
+        if parsed.path == "/api/douyin-vehicle-radar/runs":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(body.get("edition") or "china")
+                run = create_douyin_vehicle_radar_run(
+                    body, org_id=auth.get("org_id", "local"), edition=radar_edition
+                )
+                self.send_json({"ok": True, "run": run}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            return
+        radar_retry_match = re.fullmatch(
+            r"/api/douyin-vehicle-radar/runs/([^/]+)/retry", parsed.path
+        )
+        if radar_retry_match:
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(body.get("edition") or "china")
+                repository = douyin_vehicle_radar_repository()
+                previous = repository.get_run(
+                    radar_retry_match.group(1), auth.get("org_id", "local"), radar_edition
+                )
+                if not previous:
+                    raise ValueError("未找到需要重试的采集任务。")
+                public_previous = public_douyin_vehicle_radar_run(previous) or {}
+                if (
+                    previous.get("status") == "partial"
+                    or (public_previous.get("result") or {}).get("lists", {}).get("incompleteMetrics")
+                ):
+                    run = retry_douyin_vehicle_radar_metrics(
+                        previous["id"],
+                        org_id=auth.get("org_id", "local"),
+                        edition=radar_edition,
+                    )
+                    self.send_json({"ok": True, "run": run}, 202)
+                    return
+                project = repository.get_project(
+                    previous["projectId"], auth.get("org_id", "local"), radar_edition
+                )
+                run = create_douyin_vehicle_radar_run({
+                    "subject": project["subject"],
+                    "competitors": project["competitors"],
+                    "topics": project["topics"],
+                    "rangeDays": previous["rangeDays"],
+                    "force": True,
+                }, org_id=auth.get("org_id", "local"), edition=radar_edition)
+                self.send_json({"ok": True, "run": run}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            return
+        if parsed.path == "/api/douyin-vehicle-radar/items/review":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(body.get("edition") or "china")
+                result = douyin_vehicle_radar_repository().review_item(
+                    str(body.get("runId") or ""),
+                    auth.get("org_id", "local"),
+                    radar_edition,
+                    str(body.get("platformItemId") or ""),
+                    str(body.get("verdict") or ""),
+                    reviewer_id=auth.get("user_id") or auth.get("username") or "local",
+                    model=str(body.get("model") or ""),
+                    reason=str(body.get("reason") or ""),
+                )
+                self.send_json({"ok": True, "result": result})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            return
+        if parsed.path == "/api/douyin-vehicle-radar/strategies":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(body.get("edition") or "china")
+                repository = douyin_vehicle_radar_repository()
+                run = repository.get_run(
+                    str(body.get("runId") or ""), auth.get("org_id", "local"), radar_edition
+                )
+                strategy = douyin_vehicle_radar_strategy(
+                    run, org_id=auth.get("org_id", "local"), edition=radar_edition
+                )
+                self.send_json({"ok": True, "strategy": strategy}, 201)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            return
+        if parsed.path == "/api/douyin-vehicle-radar/video-insights/jobs":
+            try:
+                body = self.read_json()
+                auth = self.current_auth() or {}
+                radar_edition = edition_from(body.get("edition") or "china")
+                run = douyin_vehicle_radar_repository().get_run(
+                    str(body.get("runId") or ""), auth.get("org_id", "local"), radar_edition
+                )
+                item = douyin_vehicle_radar_video_item(run, body.get("platformItemId"))
+                if not item:
+                    raise ValueError("该内容不在当前已核验榜单中。")
+                job = start_video_insight_job(
+                    {
+                        "edition": radar_edition,
+                        "view": "videos",
+                        "range": f"{run['rangeDays']}d",
+                        "itemId": item["itemId"],
+                        "force": body.get("force") is True,
+                    },
+                    org_id=auth.get("org_id", "local"),
+                    trusted_item=item,
+                )
+                self.send_json({"ok": True, "job": job}, 202)
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
             return
         if parsed.path == "/api/douyin-hot/recognize":
             try:
