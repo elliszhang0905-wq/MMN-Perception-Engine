@@ -99,6 +99,8 @@ class PlatformAdapter:
         raw = _config_value(f"TIKHUB_{self.platform.upper()}_ENDPOINTS", "")
         self.endpoints = json.loads(raw) if raw else self.default_endpoints()
         self.expected_creator_name = ""
+        self.request_attempt_budget = max(1, min(30, int(_config_value("MMN_CREATOR_REQUEST_ATTEMPT_BUDGET", "30"))))
+        self.request_attempts_used = 0
 
     def default_endpoints(self):
         raise NotImplementedError
@@ -126,6 +128,12 @@ class PlatformAdapter:
             from urllib.parse import urlencode
             url += ("&" if "?" in url else "?") + urlencode(params)
         for attempt in range(attempts):
+            if self.request_attempts_used >= self.request_attempt_budget:
+                raise AdapterError(
+                    f"本次采集已达到 {self.request_attempt_budget} 次外部请求上限，已停止继续调用",
+                    "request_budget_exhausted", False, True,
+                )
+            self.request_attempts_used += 1
             try:
                 req = Request(url, headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json",
                                             "User-Agent": "MMN-Perception-Engine/1.0"})

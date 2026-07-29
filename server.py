@@ -322,7 +322,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260729-douyin-vehicle-radar-1"
+APP_VERSION_CODE = "beta-1.03-20260729-full-deployment-closure-1"
 APP_RELEASE_DATE = "2026-07-29"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -12865,7 +12865,7 @@ def creator_incubation_workbenches(profiles, samples, org_id="local", repository
     workbenches = []
     linked_task_ids = set()
     for creator in creators:
-        detail = repo.creator_detail(creator.get("id")) or {}
+        detail = repo.creator_detail(creator.get("id"), org_id) or {}
         public_profile = creator.get("profile") or {}
         identity = public_profile.get("identity") or {}
         dna_row = detail.get("profile") or {}

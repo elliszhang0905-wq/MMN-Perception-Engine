@@ -1,9 +1,11 @@
 import os
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.error import URLError
 from unittest.mock import patch
 
 import creator_distillation.media_processing as media_processing
@@ -122,6 +124,25 @@ class CreatorDistillationTest(unittest.TestCase):
         self.assertEqual(task["sample_count"],50)
         self.assertEqual(task["status"],"queued")
         self.assertIn("Celery",task["degraded_reason"])
+
+    def test_identical_active_task_is_reused_before_paid_collection(self):
+        payload={"creatorUrl":"https://www.douyin.com/user/sec-reuse",
+                 "expectedCreatorName":"复用达人","sampleCount":50}
+        first=self.service.create_task(payload,"org-a")
+        second=self.service.create_task(payload,"org-a")
+        self.assertEqual(first["id"],second["id"])
+        self.assertTrue(second["reused"])
+        self.assertEqual(len(self.repo.list_tasks("org-a")),1)
+
+    def test_adapter_stops_before_exceeding_request_attempt_budget(self):
+        with patch.dict(os.environ,{"TIKHUB_API_KEY":"test-only","MMN_CREATOR_REQUEST_ATTEMPT_BUDGET":"2"}), \
+             patch("creator_distillation.adapters.urlopen",side_effect=URLError("timeout")) as request, \
+             patch("creator_distillation.adapters.time.sleep"):
+            adapter=DouyinAdapter()
+            with self.assertRaises(AdapterError) as ctx:
+                adapter.request("profile",{"sec_user_id":"sec-a"},attempts=4)
+        self.assertEqual(ctx.exception.category,"request_budget_exhausted")
+        self.assertEqual(request.call_count,2)
 
     def test_score_is_explainable_and_noise_is_downweighted(self):
         items=[
@@ -495,6 +516,78 @@ class CreatorDistillationTest(unittest.TestCase):
         self.assertEqual(second["version"],2)
         self.assertEqual(detail["opinionJudgment"]["version"],2)
         self.assertNotIn("opinionJudgment",detail["profile"]["dna"])
+
+    def test_same_platform_asset_is_isolated_between_organizations(self):
+        creator={"platform":"douyin","platform_creator_id":"sec-shared","display_name":"同一达人","profile":{}}
+        assets=[{"source_id":"post-shared","title":"同一公开作品","performance_score":80,"provenance":{}}]
+        task_a=self.repo.create_task("org-a","https://www.douyin.com/user/sec-shared","douyin",180,20,{})
+        task_b=self.repo.create_task("org-b","https://www.douyin.com/user/sec-shared","douyin",180,20,{})
+        saved_a=self.repo.save_collection(task_a,creator,assets,[])
+        saved_b=self.repo.save_collection(task_b,creator,assets,[])
+
+        self.assertNotEqual(saved_a["creatorId"],saved_b["creatorId"])
+        self.assertNotEqual(saved_a["assetIds"],saved_b["assetIds"])
+        self.assertEqual(self.repo.asset_detail(saved_a["assetIds"][0],"org-a")["asset"]["org_id"],"org-a")
+        self.assertEqual(self.repo.asset_detail(saved_b["assetIds"][0],"org-b")["asset"]["org_id"],"org-b")
+        with self.assertRaises(KeyError):
+            self.repo.asset_detail(saved_a["assetIds"][0],"org-b")
+
+    def test_task_creator_and_opinion_actions_reject_cross_org_ids(self):
+        task=self.repo.create_task("org-a","https://www.douyin.com/user/sec-a","douyin",180,20,{})
+        saved=self.repo.save_collection(
+            task,
+            {"platform":"douyin","platform_creator_id":"sec-a","display_name":"组织A达人","profile":{}},
+            [{"source_id":"post-a","title":"组织A作品","performance_score":80,"provenance":{}}],
+            [],
+        )
+        creator_id=saved["creatorId"]
+
+        self.assertIsNone(self.repo.get_task(task["id"],"org-b"))
+        with self.assertRaises(KeyError):
+            self.service.handle_get(f"/api/creator-distillation/creators/{creator_id}",{},"org-b")
+        with self.assertRaises(KeyError):
+            self.service.handle_post(f"/api/creator-distillation/tasks/{task['id']}/pause",{},"org-b")
+        with self.assertRaises(KeyError):
+            self.service.handle_post(f"/api/creator-distillation/tasks/{task['id']}/retry",{},"org-b")
+        with self.assertRaises(KeyError):
+            self.service.handle_post(
+                f"/api/creator-distillation/creators/{creator_id}/opinion-judgment",{},"org-b"
+            )
+
+    def test_methodology_assets_are_scoped_by_organization(self):
+        with self.repo.connect() as conn:
+            conn.execute(
+                "insert into methodology_assets values(?,?,?,?,?,?,?,?,?)",
+                ("method-a","org-a","opening","A方法","{}","[]","[]","2026-07-29","2026-07-29"),
+            )
+            conn.execute(
+                "insert into methodology_assets values(?,?,?,?,?,?,?,?,?)",
+                ("method-b","org-b","opening","B方法","{}","[]","[]","2026-07-29","2026-07-29"),
+            )
+        self.assertEqual([row["id"] for row in self.repo.methodologies("org-a")],["method-a"])
+        self.assertEqual([row["id"] for row in self.repo.methodologies("org-b")],["method-b"])
+
+    def test_legacy_asset_schema_migrates_without_losing_rows(self):
+        legacy_path=Path(self.tmp.name)/"legacy.db"
+        with sqlite3.connect(legacy_path) as conn:
+            conn.executescript("""
+            create table creators(id text primary key, org_id text, platform text, platform_creator_id text,
+              display_name text, profile_json text, created_at text, updated_at text);
+            create table assets(id text primary key, creator_id text, task_id text, platform text, asset_type text,
+              source_id text, source_url text, title text, published_at text, metrics_json text, provenance_json text,
+              analysis_json text, performance_score real, sample_role text, capabilities_json text,
+              degraded_reason text, created_at text, updated_at text, unique(platform,source_id));
+            create table methodology_assets(id text primary key, methodology_type text, title text, body_json text,
+              source_creator_ids_json text, evidence_ids_json text, created_at text, updated_at text);
+            insert into creators values('creator-a','org-a','douyin','sec-a','达人A','{}','t','t');
+            insert into assets values('asset-a','creator-a','task-a','douyin','video','post-a','','作品A','',
+              '{}','{}','{}',80,'stable','{}','','t','t');
+            insert into methodology_assets values('method-legacy','opening','旧方法','{}','[]','[]','t','t');
+            """)
+
+        migrated=CreatorRepository(legacy_path)
+        self.assertEqual(migrated.asset_detail("asset-a","org-a")["asset"]["org_id"],"org-a")
+        self.assertEqual([row["id"] for row in migrated.methodologies("legacy-unscoped")],["method-legacy"])
 
 
 if __name__ == "__main__": unittest.main()

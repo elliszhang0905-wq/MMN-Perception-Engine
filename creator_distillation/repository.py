@@ -27,16 +27,40 @@ class CreatorRepository:
             create table if not exists distillation_tasks(id text primary key, org_id text, creator_url text not null, platform text not null, range_days integer, sample_count integer, status text, stage text, progress integer, error_category text, error_message text, degraded_reason text, capabilities_json text, created_at text, updated_at text);
             create table if not exists creators(id text primary key, org_id text, platform text, platform_creator_id text, display_name text, profile_json text, created_at text, updated_at text, unique(org_id,platform,platform_creator_id));
             create table if not exists creator_profiles(id text primary key, creator_id text, version integer, status text, dna_json text, evidence_json text, corrected_by text, correction_note text, created_at text, unique(creator_id,version));
-            create table if not exists assets(id text primary key, creator_id text, task_id text, platform text, asset_type text, source_id text, source_url text, title text, published_at text, metrics_json text, provenance_json text, analysis_json text, performance_score real, sample_role text, capabilities_json text, degraded_reason text, created_at text, updated_at text, unique(platform,source_id));
+            create table if not exists assets(id text primary key, org_id text not null, creator_id text, task_id text, platform text, asset_type text, source_id text, source_url text, title text, published_at text, metrics_json text, provenance_json text, analysis_json text, performance_score real, sample_role text, capabilities_json text, degraded_reason text, created_at text, updated_at text, unique(org_id,platform,source_id));
             create table if not exists evidence(id text primary key, asset_id text, creator_profile_id text, evidence_type text, start_ms integer, end_ms integer, quote_text text, frame_url text, comment_id text, confidence real, provenance_json text, created_at text);
             create table if not exists opinion_judgments(id text primary key, creator_id text, version integer, status text, scope text, judgment_json text, model_validation_json text, evidence_ids_json text, created_at text, unique(creator_id,version));
             create table if not exists task_events(id text primary key, task_id text, stage text, status text, progress integer, message text, retryable integer, created_at text);
             create table if not exists raw_api_responses(id text primary key, task_id text, platform text, endpoint text, endpoint_version text, status_code integer, response_json text, fetched_at text);
-            create table if not exists methodology_assets(id text primary key, methodology_type text, title text, body_json text, source_creator_ids_json text, evidence_ids_json text, created_at text, updated_at text);
+            create table if not exists methodology_assets(id text primary key, org_id text not null, methodology_type text, title text, body_json text, source_creator_ids_json text, evidence_ids_json text, created_at text, updated_at text);
+            """)
+            asset_columns={row["name"] for row in conn.execute("pragma table_info(assets)").fetchall()}
+            if "org_id" not in asset_columns:
+                conn.executescript("""
+                create table assets_scoped(id text primary key, org_id text not null, creator_id text, task_id text, platform text, asset_type text, source_id text, source_url text, title text, published_at text, metrics_json text, provenance_json text, analysis_json text, performance_score real, sample_role text, capabilities_json text, degraded_reason text, created_at text, updated_at text, unique(org_id,platform,source_id));
+                insert into assets_scoped
+                select a.id,coalesce(c.org_id,'legacy-unscoped'),a.creator_id,a.task_id,a.platform,a.asset_type,a.source_id,a.source_url,a.title,a.published_at,a.metrics_json,a.provenance_json,a.analysis_json,a.performance_score,a.sample_role,a.capabilities_json,a.degraded_reason,a.created_at,a.updated_at
+                from assets a left join creators c on c.id=a.creator_id;
+                drop table assets;
+                alter table assets_scoped rename to assets;
+                """)
+            methodology_columns={row["name"] for row in conn.execute("pragma table_info(methodology_assets)").fetchall()}
+            if "org_id" not in methodology_columns:
+                conn.executescript("""
+                create table methodology_assets_scoped(id text primary key, org_id text not null, methodology_type text, title text, body_json text, source_creator_ids_json text, evidence_ids_json text, created_at text, updated_at text);
+                insert into methodology_assets_scoped
+                select id,'legacy-unscoped',methodology_type,title,body_json,source_creator_ids_json,evidence_ids_json,created_at,updated_at
+                from methodology_assets;
+                drop table methodology_assets;
+                alter table methodology_assets_scoped rename to methodology_assets;
+                """)
+            conn.executescript("""
             create index if not exists idx_tasks_org_status on distillation_tasks(org_id,status,updated_at);
+            create index if not exists idx_assets_org_creator_score on assets(org_id,creator_id,performance_score desc);
             create index if not exists idx_assets_creator_score on assets(creator_id,performance_score desc);
             create index if not exists idx_evidence_asset_time on evidence(asset_id,start_ms);
             create index if not exists idx_opinion_creator_version on opinion_judgments(creator_id,version desc);
+            create index if not exists idx_methodology_org_updated on methodology_assets(org_id,updated_at desc);
             """)
 
     @staticmethod
@@ -55,24 +79,48 @@ class CreatorRepository:
             conn.execute("insert into distillation_tasks values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                          (task_id,org_id,creator_url,platform,range_days,sample_count,"queued","preflight",0,"","","",json.dumps(capabilities,ensure_ascii=False),timestamp,timestamp))
             self.event(conn, task_id, "preflight", "queued", 0, "任务已创建", True)
-        return self.get_task(task_id)
+        return self.get_task(task_id, org_id)
+
+    def find_active_task(self, org_id, creator_url, platform, range_days, sample_count, expected_creator_name):
+        """Reuse an identical in-flight request so retries in the UI cannot duplicate paid collection."""
+        with self.connect() as conn:
+            rows=conn.execute(
+                """select * from distillation_tasks
+                   where org_id=? and creator_url=? and platform=? and range_days is ?
+                     and sample_count=? and status in ('queued','running','paused')
+                   order by created_at desc""",
+                (org_id,creator_url,platform,range_days,sample_count),
+            ).fetchall()
+        for row in rows:
+            item=self._row(row)
+            if str((item.get("capabilities") or {}).get("expectedCreatorName") or "").strip() == expected_creator_name:
+                return self.get_task(item["id"],org_id)
+        return None
 
     def event(self, conn, task_id, stage, status, progress, message="", retryable=False):
         conn.execute("insert into task_events values(?,?,?,?,?,?,?,?)",(uid("evt"),task_id,stage,status,progress,message,int(retryable),now()))
 
-    def update_task(self, task_id, **fields):
+    def update_task(self, task_id, org_id=None, **fields):
         allowed={"status","stage","progress","error_category","error_message","degraded_reason","capabilities_json"}
         values={k:(json.dumps(v,ensure_ascii=False) if k.endswith("_json") else v) for k,v in fields.items() if k in allowed}
         values["updated_at"]=now()
         with self.connect() as conn:
-            conn.execute("update distillation_tasks set "+",".join(f"{k}=?" for k in values)+" where id=?",(*values.values(),task_id))
+            where="id=?" if org_id is None else "id=? and org_id=?"
+            params=(*values.values(),task_id) if org_id is None else (*values.values(),task_id,org_id)
+            cursor=conn.execute("update distillation_tasks set "+",".join(f"{k}=?" for k in values)+f" where {where}",params)
+            if cursor.rowcount != 1:
+                raise KeyError("蒸馏任务不存在")
             self.event(conn,task_id,values.get("stage","update"),values.get("status","running"),int(values.get("progress",0)),values.get("error_message","") or values.get("degraded_reason",""),values.get("status") in {"failed","degraded"})
-        return self.get_task(task_id)
+        return self.get_task(task_id, org_id)
 
-    def get_task(self, task_id):
+    def get_task(self, task_id, org_id=None):
         with self.connect() as conn:
-            row=conn.execute("select * from distillation_tasks where id=?",(task_id,)).fetchone()
-            events=conn.execute("select * from task_events where task_id=? order by created_at",(task_id,)).fetchall()
+            if org_id is None:
+                row=conn.execute("select * from distillation_tasks where id=?",(task_id,)).fetchone()
+            else:
+                row=conn.execute("select * from distillation_tasks where id=? and org_id=?",(task_id,org_id)).fetchone()
+            events=(conn.execute("select * from task_events where task_id=? order by created_at",(task_id,)).fetchall()
+                    if row else [])
         out=self._row(row)
         if out: out["events"]=[self._row(x) for x in events]
         return out
@@ -81,17 +129,22 @@ class CreatorRepository:
         with self.connect() as conn: rows=conn.execute("select * from distillation_tasks where org_id=? order by created_at desc",(org_id,)).fetchall()
         return [self._row(x) for x in rows]
 
-    def pause(self, task_id): return self.update_task(task_id,status="paused",stage="paused")
-    def retry(self, task_id): return self.update_task(task_id,status="queued",stage="retry",progress=0,error_category="",error_message="")
+    def pause(self, task_id, org_id): return self.update_task(task_id,org_id=org_id,status="paused",stage="paused")
+    def retry(self, task_id, org_id): return self.update_task(task_id,org_id=org_id,status="queued",stage="retry",progress=0,error_category="",error_message="")
 
     def list_creators(self, org_id="local", q=""):
         with self.connect() as conn:
             rows=conn.execute("select * from creators where org_id=? and (?='' or display_name like ?) order by updated_at desc",(org_id,q,f"%{q}%")).fetchall()
         return [self._row(x) for x in rows]
 
-    def creator_detail(self, creator_id):
+    def creator_detail(self, creator_id, org_id=None):
         with self.connect() as conn:
-            creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
+            if org_id is None:
+                creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
+            else:
+                creator=conn.execute("select * from creators where id=? and org_id=?",(creator_id,org_id)).fetchone()
+            if not creator:
+                raise KeyError("达人档案不存在")
             profile=conn.execute("select * from creator_profiles where creator_id=? order by version desc limit 1",(creator_id,)).fetchone()
             opinion=conn.execute("select * from opinion_judgments where creator_id=? order by version desc limit 1",(creator_id,)).fetchone()
             assets=conn.execute("select * from assets where creator_id=? order by performance_score desc",(creator_id,)).fetchall()
@@ -102,9 +155,12 @@ class CreatorRepository:
         return {"creator":self._row(creator),"profile":self._row(profile),
                 "opinionJudgment":judgment,"assets":[self._row(x) for x in assets]}
 
-    def creator_opinion_inputs(self, creator_id):
+    def creator_opinion_inputs(self, creator_id, org_id=None):
         """Return comment-only evidence for opinion analysis; media evidence never enters this path."""
         with self.connect() as conn:
+            if org_id is not None and not conn.execute(
+                    "select 1 from creators where id=? and org_id=?",(creator_id,org_id)).fetchone():
+                raise KeyError("达人档案不存在")
             assets=conn.execute("select id,source_id,title from assets where creator_id=?",(creator_id,)).fetchall()
             comments=conn.execute(
                 """select e.*,a.source_id from evidence e join assets a on a.id=e.asset_id
@@ -113,10 +169,13 @@ class CreatorRepository:
         return {"assetCount":len(assets),"assets":[dict(x) for x in assets],
                 "comments":[self._row(x) for x in comments]}
 
-    def creator_content_inputs(self, creator_id):
+    def creator_content_inputs(self, creator_id, org_id=None):
         """Return persisted evidence IDs and provenance for the content release gate."""
         with self.connect() as conn:
-            creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
+            if org_id is None:
+                creator=conn.execute("select * from creators where id=?",(creator_id,)).fetchone()
+            else:
+                creator=conn.execute("select * from creators where id=? and org_id=?",(creator_id,org_id)).fetchone()
             assets=conn.execute(
                 "select id,source_id,title,asset_type from assets where creator_id=? order by performance_score desc",
                 (creator_id,),
@@ -131,10 +190,13 @@ class CreatorRepository:
         return {"creator":self._row(creator),"assets":[self._row(x) for x in assets],
                 "evidence":[self._row(x) for x in evidence]}
 
-    def save_opinion_judgment(self, creator_id, judgment):
+    def save_opinion_judgment(self, creator_id, judgment, org_id=None):
         """Append a versioned judgment; raw evidence remains immutable and separately queryable."""
         with self.connect() as conn:
-            creator=conn.execute("select id from creators where id=?",(creator_id,)).fetchone()
+            if org_id is None:
+                creator=conn.execute("select id from creators where id=?",(creator_id,)).fetchone()
+            else:
+                creator=conn.execute("select id from creators where id=? and org_id=?",(creator_id,org_id)).fetchone()
             if not creator:
                 raise KeyError("达人档案不存在")
             latest=conn.execute("select max(version) as version from opinion_judgments where creator_id=?",
@@ -223,11 +285,14 @@ class CreatorRepository:
             )
         return self.asset_detail(asset_id,org_id)
 
-    def refresh_creator_content_profile(self, creator_id):
+    def refresh_creator_content_profile(self, creator_id, org_id=None):
         """Refresh the deterministic content-evidence index after one asset is reprocessed."""
         timestamp=now()
         with self.connect() as conn:
-            creator=conn.execute("select profile_json from creators where id=?",(creator_id,)).fetchone()
+            if org_id is None:
+                creator=conn.execute("select profile_json from creators where id=?",(creator_id,)).fetchone()
+            else:
+                creator=conn.execute("select profile_json from creators where id=? and org_id=?",(creator_id,org_id)).fetchone()
             profile=conn.execute(
                 "select id,dna_json from creator_profiles where creator_id=? order by version desc limit 1",
                 (creator_id,),
@@ -257,8 +322,11 @@ class CreatorRepository:
                          (json.dumps(platform_profile,ensure_ascii=False),timestamp,creator_id))
         return summary
 
-    def methodologies(self):
-        with self.connect() as conn: rows=conn.execute("select * from methodology_assets order by updated_at desc").fetchall()
+    def methodologies(self, org_id):
+        with self.connect() as conn:
+            rows=conn.execute(
+                "select * from methodology_assets where org_id=? order by updated_at desc",(org_id,)
+            ).fetchall()
         return [self._row(x) for x in rows]
 
     def archive_raw_response(self, task_id, platform, endpoint, endpoint_version, status_code, response):
@@ -317,7 +385,8 @@ class CreatorRepository:
             asset_by_source = {}
             for item in assets:
                 existing_asset = conn.execute(
-                    "select id from assets where platform=? and source_id=?", (platform, item["source_id"])
+                    "select id from assets where org_id=? and platform=? and source_id=?",
+                    (task["org_id"], platform, item["source_id"])
                 ).fetchone()
                 asset_id = existing_asset["id"] if existing_asset else uid("asset")
                 asset_ids.append(asset_id)
@@ -328,7 +397,7 @@ class CreatorRepository:
                              "scoring_mode", "media")}
                 missing = (item.get("provenance") or {}).get("missingMetrics") or []
                 degraded_reason = "缺少指标: " + "、".join(missing) if missing else ""
-                values = (creator_id, task["id"], platform, item.get("asset_type") or "video", item["source_id"],
+                values = (task["org_id"], creator_id, task["id"], platform, item.get("asset_type") or "video", item["source_id"],
                           item.get("source_url"), item.get("title"), item.get("published_at"),
                           json.dumps(metrics, ensure_ascii=False), json.dumps(item.get("provenance") or {}, ensure_ascii=False),
                           json.dumps(analysis, ensure_ascii=False), item.get("performance_score"), item.get("sample_role"),
@@ -338,14 +407,14 @@ class CreatorRepository:
                           degraded_reason, timestamp, timestamp)
                 if existing_asset:
                     conn.execute(
-                        """update assets set creator_id=?,task_id=?,platform=?,asset_type=?,source_id=?,source_url=?,title=?,
+                        """update assets set org_id=?,creator_id=?,task_id=?,platform=?,asset_type=?,source_id=?,source_url=?,title=?,
                            published_at=?,metrics_json=?,provenance_json=?,analysis_json=?,performance_score=?,sample_role=?,
                            capabilities_json=?,degraded_reason=?,updated_at=? where id=?""",
                         (*values[:-2], values[-1], asset_id),
                     )
                     updated += 1
                 else:
-                    conn.execute("insert into assets values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (asset_id, *values))
+                    conn.execute("insert into assets values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (asset_id, *values))
                     inserted += 1
             evidence_inserted = evidence_updated = 0
             for item in evidence or []:

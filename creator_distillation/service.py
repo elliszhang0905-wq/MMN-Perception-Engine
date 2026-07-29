@@ -47,16 +47,25 @@ class CreatorDistillationService:
         if range_days not in {90, 180, None}: raise ValueError("采集范围仅支持 90、180 或 all")
         sample_count = max(20, min(100, int(payload.get("sampleCount") or 50)))
         capabilities = {**preflight["capabilities"], "expectedCreatorName": expected_name,
-                        "identityConfirmationRequired": True}
+                        "identityConfirmationRequired": True,
+                        "requestAttemptBudget": max(
+                            1, min(30, int(os.getenv("MMN_CREATOR_REQUEST_ATTEMPT_BUDGET","30")))
+                        )}
+        active=self.repository.find_active_task(
+            org_id,url,preflight["platform"],range_days,sample_count,expected_name
+        )
+        if active:
+            return {**active,"reused":True}
         task = self.repository.create_task(org_id,url,preflight["platform"],range_days,sample_count,capabilities)
         if self.enqueue:
             try: self.enqueue(task["id"])
             except Exception as exc:
-                self.repository.update_task(task["id"],status="failed",stage="queue",error_category="queue_unavailable",error_message=str(exc))
+                self.repository.update_task(task["id"],org_id=org_id,status="failed",stage="queue",
+                                            error_category="queue_unavailable",error_message=str(exc))
         else:
-            self.repository.update_task(task["id"],status="queued",stage="awaiting_worker",progress=0,
+            self.repository.update_task(task["id"],org_id=org_id,status="queued",stage="awaiting_worker",progress=0,
                                         degraded_reason="Celery worker 未连接；任务已安全排队")
-        return self.repository.get_task(task["id"])
+        return self.repository.get_task(task["id"],org_id)
 
     def platform_health(self):
         worker_mode = os.getenv("MMN_CREATOR_WORKER_MODE", "celery" if os.getenv("REDIS_URL") else "local")
@@ -66,10 +75,10 @@ class CreatorDistillationService:
                           "mode": worker_mode},
                 "database": {"target": "postgresql+pgvector", "localFallback": str(self.repository.path)}}
 
-    def generate_opinion_judgment(self, creator_id):
-        inputs = self.repository.creator_opinion_inputs(creator_id)
+    def generate_opinion_judgment(self, creator_id, org_id="local"):
+        inputs = self.repository.creator_opinion_inputs(creator_id, org_id)
         judgment = build_opinion_judgment(inputs["comments"], inputs["assetCount"])
-        return self.repository.save_opinion_judgment(creator_id, judgment)
+        return self.repository.save_opinion_judgment(creator_id, judgment, org_id)
 
     def reprocess_asset_media(self, asset_id, org_id="local"):
         context=self.repository.asset_processing_context(asset_id,org_id)
@@ -125,22 +134,22 @@ class CreatorDistillationService:
             asset_id,org_id,evidence,capabilities,status,message,media=candidate.get("media")
         )
         if evidence:
-            self.repository.refresh_creator_content_profile(detail["asset"]["creator_id"])
+            self.repository.refresh_creator_content_profile(detail["asset"]["creator_id"], org_id)
         return {"status":status,"message":message,**detail}
 
     def handle_get(self, path, query, org_id="local"):
         if path == "/api/creator-distillation/preflight": return {"ok":True,"preflight":self.preflight(query.get("url",[""])[0])}
         if path == "/api/creator-distillation/tasks": return {"ok":True,"tasks":self.repository.list_tasks(org_id)}
         if path == "/api/creator-distillation/creators": return {"ok":True,"creators":self.repository.list_creators(org_id,query.get("q",[""])[0])}
-        if path == "/api/creator-distillation/methodologies": return {"ok":True,"items":self.repository.methodologies()}
+        if path == "/api/creator-distillation/methodologies": return {"ok":True,"items":self.repository.methodologies(org_id)}
         if path == "/api/creator-distillation/health": return {"ok":True,"platforms":self.platform_health()}
         prefix="/api/creator-distillation/tasks/"
         if path.startswith(prefix):
-            item=self.repository.get_task(path[len(prefix):]);
+            item=self.repository.get_task(path[len(prefix):],org_id);
             if not item: raise KeyError("蒸馏任务不存在")
             return {"ok":True,"task":item}
         prefix="/api/creator-distillation/creators/"
-        if path.startswith(prefix): return {"ok":True,**self.repository.creator_detail(path[len(prefix):])}
+        if path.startswith(prefix): return {"ok":True,**self.repository.creator_detail(path[len(prefix):],org_id)}
         prefix="/api/creator-distillation/assets/"
         if path.startswith(prefix): return {"ok":True,**self.repository.asset_detail(path[len(prefix):],org_id)}
         return None
@@ -156,11 +165,11 @@ class CreatorDistillationService:
         suffix="/opinion-judgment"
         if path.startswith(prefix) and path.endswith(suffix):
             creator_id=path[len(prefix):-len(suffix)].strip("/")
-            return {"ok":True,"opinionJudgment":self.generate_opinion_judgment(creator_id)}
+            return {"ok":True,"opinionJudgment":self.generate_opinion_judgment(creator_id,org_id)}
         if path.endswith("/pause"):
-            return {"ok":True,"task":self.repository.pause(path.split("/")[-2])}
+            return {"ok":True,"task":self.repository.pause(path.split("/")[-2],org_id)}
         if path.endswith("/retry"):
-            task=self.repository.retry(path.split("/")[-2])
+            task=self.repository.retry(path.split("/")[-2],org_id)
             if self.enqueue: self.enqueue(task["id"])
             return {"ok":True,"task":task}
         return None

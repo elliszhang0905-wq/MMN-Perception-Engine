@@ -58,7 +58,7 @@ class FakeCreatorRepository:
             "stage": "review", "progress": 100,
         }]
 
-    def creator_detail(self, creator_id):
+    def creator_detail(self, creator_id, org_id=None):
         return {
             "profile": {
                 "status": "needs_review",
