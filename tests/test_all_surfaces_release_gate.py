@@ -45,6 +45,7 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn(f"group-dashboard.js?v={self.RELEASE_VERSION}", index)
         self.assertIn(f"lead-dashboard.js?v={self.RELEASE_VERSION}", index)
         self.assertIn(f'APP_VERSION_CODE = "{self.RELEASE_VERSION}"', server)
+        self.assertIn('APP_RELEASE_DATE = "2026-07-30"', server)
 
 
 if __name__ == "__main__":
