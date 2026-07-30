@@ -5,7 +5,7 @@
   const profiles = {};
   const regions = ["北京", "天津", "上海", "重庆", "河北", "山西", "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "海南", "四川", "贵州", "云南", "陕西", "甘肃", "青海", "内蒙古", "广西", "西藏", "宁夏", "新疆"];
   const regionLabels = { 北京: "北京市", 天津: "天津市", 上海: "上海市", 重庆: "重庆市", 河北: "河北省", 山西: "山西省", 辽宁: "辽宁省", 吉林: "吉林省", 黑龙江: "黑龙江省", 江苏: "江苏省", 浙江: "浙江省", 安徽: "安徽省", 福建: "福建省", 江西: "江西省", 山东: "山东省", 河南: "河南省", 湖北: "湖北省", 湖南: "湖南省", 广东: "广东省", 海南: "海南省", 四川: "四川省", 贵州: "贵州省", 云南: "云南省", 陕西: "陕西省", 甘肃: "甘肃省", 青海: "青海省", 内蒙古: "内蒙古自治区", 广西: "广西壮族自治区", 西藏: "西藏自治区", 宁夏: "宁夏回族自治区", 新疆: "新疆维吾尔自治区" };
-  const state = { loaded: false, loading: false, loadRequest: 0, model: "奥迪E7X", focusModel: "", region: "上海", scenario: "置换更新", data: null, comparisons: [], analysisId: "", strategyValidation: null, strategyLoading: false, strategyError: "", strategyRequest: 0 };
+  const state = { loaded: false, loading: false, loadRequest: 0, model: "", focusModel: "", region: "上海", scenario: "置换更新", data: null, comparisons: [], analysisId: "", strategyValidation: null, strategyLoading: false, strategyError: "", strategyRequest: 0 };
   const root = () => document.querySelector("#policy-intelligence-root");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const money = value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) ? `¥${Math.round(Number(value)).toLocaleString("zh-CN")}` : "—";
@@ -21,8 +21,16 @@
 
   async function jsonFetch(url, options = {}) {
     const response = await fetch(url, { ...options, headers: { ...headers(), ...(options.headers || {}) } });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) throw new Error(typeof data.error === "string" ? data.error : "政策分析服务暂不可用");
+    const fallback = url.includes("/api/policy-intelligence/analyze")
+      ? "交叉复核暂未完成，可安全重试。"
+      : "政策分析服务暂不可用，请稍后重试。";
+    let data;
+    try { data = await response.json(); }
+    catch (_) { throw new Error(fallback); }
+    if (!response.ok || data.ok === false) {
+      const message = response.status >= 500 ? fallback : (typeof data.error === "string" ? data.error : fallback);
+      throw new Error(message);
+    }
     return data;
   }
 
@@ -60,11 +68,29 @@
     state.loading = true;
     if (root()) root().innerHTML = '<div class="policy-loading"><b>正在关联官方规则与车型价格</b><span></span><span></span><span></span></div>';
     try {
-      const group = await jsonFetch(comparisonUrl(selection.model, selection.region, selection.scenario));
+      let group = await jsonFetch(comparisonUrl(selection.model, selection.region, selection.scenario));
       if (requestId !== state.loadRequest) return;
+      let ownOptions = group?.policyIntelligence?.ownModelOptions || [];
+      syncProfiles(ownOptions);
+      const returnedOwn = (group?.policyIntelligence?.models || []).find(item => item?.role === "own");
+      const resolvedModel = ownOptions.some(item => item?.model === selection.model)
+        ? selection.model
+        : String(ownOptions[0]?.model || returnedOwn?.model || "").trim();
+      if (!resolvedModel) throw new Error("当前企业空间尚无可自动审核的销量预警车型。");
+      if (resolvedModel !== selection.model) {
+        state.model = resolvedModel;
+        state.focusModel = "";
+        selection.model = resolvedModel;
+        resetStrategy();
+        if (returnedOwn?.model !== resolvedModel) {
+          group = await jsonFetch(comparisonUrl(selection.model, selection.region, selection.scenario));
+          if (requestId !== state.loadRequest) return;
+          ownOptions = group?.policyIntelligence?.ownModelOptions || [];
+          syncProfiles(ownOptions);
+        }
+      }
       const comparisons = group?.policyIntelligence?.models || [];
       if (!comparisons.some(item => item?.role === "own" && item?.model === selection.model)) throw new Error("所选车型未进入当前销量预警细分市场，无法生成同场对比。");
-      syncProfiles(group?.policyIntelligence?.ownModelOptions || []);
       const own = await jsonFetch(dashboardUrl(selection.model, selection.region, selection.scenario));
       if (requestId !== state.loadRequest) return;
       state.data = own;

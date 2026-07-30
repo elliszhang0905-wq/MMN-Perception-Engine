@@ -62,6 +62,9 @@ assert(source.includes('["aligned", "manual_required"].includes(validation?.stat
 assert(source.includes("loadRequest"), "区域快速切换必须使用请求序号阻止旧响应覆盖新选择");
 assert(source.includes("MMN交叉验证结论"), "区域策略结论必须使用中立的MMN输出措辞");
 assert(source.includes("const profiles = {};"), "本品清单必须来自服务端当前监测车型，不得在前端固化");
+assert(source.includes('model: ""'), "政策页首次进入时必须由当前企业空间自动选择可审核车型");
+assert(!source.includes('model: "奥迪E7X"'), "政策页不得以历史车型作为全局默认值");
+assert(source.includes("交叉复核暂未完成，可安全重试。"), "交叉复核服务异常时必须展示可执行的中文安全提示");
 assert(!source.includes('state.model = button.dataset.policyModel'), "点击竞品气泡不得改变本品身份");
 assert(source.includes("state.focusModel = button.dataset.policyModel"), "点击气泡只应切换对比焦点");
 assert(source.includes('target.dataset.submitting === "true" || target.dataset.submitted === "true"'), "Policy Eval必须阻止请求中和已成功评分的重复提交");
@@ -90,5 +93,6 @@ assert(groupSource.includes("/api/policy-intelligence/analyze"), "管理看板�
 assert(groupSource.includes("persist:false"), "管理看板自动审核只能预览，不得写入分析记录");
 assert(groupSource.includes("strategyValidation"), "管理看板结论卡必须消费交叉验证结果");
 assert(groupSource.includes("MMN交叉验证结论"), "管理看板不得把规则草案冒充最终策略结论");
+assert(groupSource.includes('uiState.policyModel=""'), "管理看板首次进入时必须由服务端选择当前可审核车型");
 
 console.log("policy intelligence UI contract tests passed");
