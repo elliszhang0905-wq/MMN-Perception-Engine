@@ -132,18 +132,26 @@
     }[job.status] || job.message || "当前未形成可发布洞察";
     const evidenceNote = job.status === "limited_analysis"
       ? `${missing.length ? `缺失：${missing.join("、")}；` : ""}${analysisStarted ? "部分分析已运行" : "三路分析尚未启动"}`
-      : "";
+      : job.status === "manual_required"
+        ? "三路分析均已完成，但核心判断存在冲突；人工复核前不可直接发布。"
+        : "";
     const failedReview = (job.result?.validation?.runs || []).find(row => row.status === "failed");
-    const actionLabel = job.status === "limited_analysis" && !analysisStarted
+    const requiresReview = job.status === "manual_required";
+    const actionLabel = requiresReview
+      ? "等待人工复核"
+      : job.status === "limited_analysis" && !analysisStarted
       ? "补取视频证据并分析"
       : job.status === "incomplete" && failedReview
         ? `重试未完成分析 ${failedReview.slot}`
         : job.status === "incomplete" ? "重试未完成分析" : "重新分析";
+    const primaryText = job.status === "completed"
+      ? insight.contentSummary || statusTitle
+      : statusTitle;
     return `<div class="dvr-insight ${escapeHtml(job.status || "")}">
-      <div><b>${running ? `${Number(job.progress) || 0}% · ${escapeHtml(job.message || "分析中")}` : escapeHtml(insight.contentSummary || statusTitle)}</b>
+      <div><b>${running ? `${Number(job.progress) || 0}% · ${escapeHtml(job.message || "分析中")}` : escapeHtml(primaryText)}</b>
       ${evidenceNote ? `<small>${escapeHtml(evidenceNote)}</small>` : ""}
       ${!running && insight.marketingImplications?.length ? `<p>${escapeHtml(insight.marketingImplications[0])}</p>` : ""}</div>
-      <button type="button" class="ghost" data-dvr-insight="${escapeHtml(id)}" data-dvr-retry-slot="${escapeHtml(failedReview?.slot || "")}" ${running ? "disabled" : ""}>${running ? "分析中…" : escapeHtml(actionLabel)}</button>
+      <button type="button" class="ghost" data-dvr-insight="${escapeHtml(id)}" data-dvr-retry-slot="${escapeHtml(failedReview?.slot || "")}" ${running || requiresReview ? "disabled" : ""}>${running ? "分析中…" : escapeHtml(actionLabel)}</button>
     </div>`;
   }
   function resultRow(item, index, pendingOverride = false) {

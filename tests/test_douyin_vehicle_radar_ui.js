@@ -19,7 +19,7 @@ assert.match(
 );
 assert.match(
   html,
-  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260730-douyin-video-evidence-chain-1/,
+  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260730-douyin-video-evidence-chain-2/,
   "radar assets should use the cache-busting customer-UI revision",
 );
 assert.match(script, /待补热度/, "missing view metrics should be isolated from formal rankings");
@@ -40,6 +40,8 @@ assert.match(script, /三路分析尚未启动/, "the UI must distinguish eviden
 assert.match(script, /补取视频证据并分析/, "limited evidence must expose the correct recovery action");
 assert.match(script, /data-dvr-retry-slot/, "an incomplete review must expose the failed slot only");
 assert.match(script, /retrySlot/, "the radar retry request must preserve successful review runs");
+assert.match(script, /核心判断存在冲突；人工复核前不可直接发布/, "manual review must remain a visible publication boundary");
+assert.match(script, /requiresReview/, "manual review must not be presented as another generic rerun");
 assert.match(styles, /\.dvr-insight small\{[^}]*display:block/, "evidence limitations must remain readable");
 assert.doesNotMatch(
   script,
