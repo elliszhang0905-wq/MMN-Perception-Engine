@@ -24,6 +24,11 @@ class SafeDeployScriptTest(unittest.TestCase):
             self.script.index("compose build mmn-app"),
         )
         self.assertIn("旧版本继续在线，开始构建候选镜像", self.script)
+        self.assertLess(
+            self.script.index('docker tag "$PREVIOUS_IMAGE_ID"'),
+            self.script.rindex("ensure_build_capacity"),
+        )
+        self.assertIn("docker image prune --force", self.script)
 
     def test_failed_cutover_has_automatic_image_rollback(self):
         self.assertIn('ROLLBACK_IMAGE_TAG="rollback"', self.script)
@@ -48,12 +53,20 @@ class SafeDeployScriptTest(unittest.TestCase):
         self.assertNotIn("compose restart mmn-app", self.script)
         self.assertNotIn("compose restart mmn-web", self.script)
 
-    def test_cutover_updates_read_only_bind_mount_from_host_and_fails_closed(self):
-        self.assertIn('NGINX_BASE_CONFIG="$(mktemp /tmp/mmn-nginx-base.', self.script)
-        self.assertIn('"$NGINX_BASE_CONFIG" > "$staged_config"', self.script)
-        self.assertIn('cp "$staged_config" deploy/nginx.conf', self.script)
-        self.assertIn("if ! compose exec -T mmn-web nginx -t", self.script)
+    def test_nginx_route_switch_updates_read_only_bind_source_then_reloads(self):
+        self.assertIn(
+            'cp "$routed_config" deploy/nginx-runtime/default.conf', self.script
+        )
+        self.assertIn("compose exec -T mmn-web nginx -s reload", self.script)
         self.assertNotIn("> /etc/nginx/conf.d/default.conf", self.script)
+        compose_config = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "./deploy/nginx-runtime:/etc/nginx/conf.d:ro", compose_config
+        )
+        self.assertNotIn(
+            "./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+            compose_config,
+        )
 
     def test_deploy_has_lock_disk_gate_and_post_build_cleanup(self):
         self.assertIn("acquire_lock", self.script)
