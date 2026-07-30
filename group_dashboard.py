@@ -1218,7 +1218,11 @@ def trusted_policy_warning_models(conn, org_id="local", edition="china"):
     warning = load_sales_warning()
     signals, _, monitoring = _vertical_signals(conn, org_id, edition)
     scoped = _apply_vertical_monitoring(warning, monitoring, signals)
-    return list(scoped.get("saicModels") or [])
+    period = str((warning.get("source") or {}).get("period") or "").strip()
+    return [
+        {**item, "period": str(item.get("period") or "").strip() or period}
+        for item in (scoped.get("saicModels") or [])
+    ]
 
 
 def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="china", fuel_market=None):

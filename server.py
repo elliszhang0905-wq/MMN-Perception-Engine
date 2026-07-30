@@ -330,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260730-douyin-video-evidence-chain-3"
+APP_VERSION_CODE = "beta-1.03-20260731-policy-energy-contract-1"
 APP_RELEASE_DATE = "2026-07-30"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -1214,10 +1214,14 @@ def trusted_policy_vehicle_profile(conn, org_id, edition, model, scenario):
         ),
         None,
     )
-    profiles = build_sales_warning_policy_profiles(
-        warning,
-        (warning or {}).get("period") or "",
+    warning = warning or {}
+    warning_period = (
+        warning.get("period")
+        or (warning.get("source") or {}).get("period")
+        or (warning.get("salesHistory") or {}).get("latestPeriod")
+        or ""
     )
+    profiles = build_sales_warning_policy_profiles(warning, warning_period)
     if profiles:
         return {**profiles[0], "model": model, "scenario": scenario}
     return {

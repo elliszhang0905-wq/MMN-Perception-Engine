@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 from server import (
     TRIAL_POST_ALLOWED_PATHS,
@@ -291,6 +292,22 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
         self.assertIsNone(unknown["price"])
         self.assertEqual(unknown["energyType"], "")
         self.assertEqual(unknown["bodyType"], "")
+
+    def test_trusted_vehicle_profile_preserves_source_period_for_energy_provenance(self):
+        warning = {
+            "model": "智己LS6",
+            "vehicleStartPriceWan": 18.99,
+            "energyType": "增程式/纯电动",
+            "bodyType": "SUV",
+            "salesHistory": {"latestPeriod": "2026-06"},
+        }
+        with patch("server.trusted_policy_warning_models", return_value=[warning]):
+            profile = trusted_policy_vehicle_profile(
+                None, "tenant-a", "china", "智己LS6", "置换更新"
+            )
+
+        self.assertEqual(profile["energyAsOf"], "2026-06")
+        self.assertEqual(profile["priceAsOf"], "2026-06")
 
     def test_missing_selected_policy_model_does_not_fail_the_group_dashboard(self):
         group_route = self.server.split('parsed.path == "/api/group-dashboard-demo"', 1)[1].split(

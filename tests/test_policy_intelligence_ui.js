@@ -68,6 +68,10 @@ assert(source.includes('target.dataset.submitting === "true" || target.dataset.s
 assert(source.includes('button.textContent = "评分提交中…"'), "Policy Eval点击后必须立即提供提交中反馈");
 assert(source.includes("评分已保存但未通过"), "未通过的Policy Eval必须明确说明保存结果与知识版本状态");
 assert(source.includes("当前结果未进入可用知识版本"), "Policy Eval未通过时不得让用户误以为已发布结论");
+assert(source.includes('"variant_required"'), "部分动力版本适用时必须进入车型版本待选择状态");
+assert(source.includes("需选择具体动力版本"), "车型版本待选择状态必须提供明确中文提示");
+assert(source.includes("unresolvedPolicyImpact"), "前端必须统一拦截档案缺失和动力版本未确定状态");
+assert(source.includes('value !== null && value !== undefined && value !== ""'), "空权益值不得格式化成¥0");
 assert(app.includes("async function ensureModelIdentities(models=[],{persistToServer=false}={})"), "车型标准化必须显式区分只读浏览与导入持久化");
 assert(app.includes("ensureModelIdentities(state.models||[],{persistToServer:true})"), "数据导入后才允许把车型标准化结果写入服务端");
 

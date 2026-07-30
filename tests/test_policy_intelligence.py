@@ -90,6 +90,9 @@ class PolicySchemaTest(unittest.TestCase):
             [item["energyType"] for item in profiles[1:]],
             [item["energyType"] for item in own["comparisonPeers"]],
         )
+        self.assertEqual(profiles[0]["energySource"], "懂车帝车型分类")
+        self.assertEqual(profiles[0]["energyAsOf"], warning["source"]["period"])
+        self.assertTrue(all(item["energySource"] for item in profiles[1:]))
         self.assertTrue(all("/" not in item["energyType"] for item in profiles))
         self.assertNotIn("蔚来ES6", [item["model"] for item in profiles])
 
@@ -130,8 +133,118 @@ class PolicySchemaTest(unittest.TestCase):
         )
 
         self.assertEqual(impact["profile"]["energyTypes"], ["增程式", "纯电动"])
+        self.assertEqual(impact["profile"]["energyTypeCodes"], ["EREV", "BEV"])
+        self.assertEqual(impact["profile"]["energyResolution"], "normalized")
         self.assertGreater(impact["verifiedPolicyCount"], 0)
         self.assertEqual(impact["evidenceStatus"], "conditional_eligibility")
+
+    def test_energy_contract_normalizes_standard_codes_and_common_separators(self):
+        seed_policy_mvp(self.conn)
+        cases = (
+            ("BEV+EREV", ["纯电动", "增程式"], ["BEV", "EREV"]),
+            ("纯电动，增程式", ["纯电动", "增程式"], ["BEV", "EREV"]),
+            ("PHEV | BEV", ["插电式混动", "纯电动"], ["PHEV", "BEV"]),
+        )
+        for raw, labels, codes in cases:
+            with self.subTest(raw=raw):
+                impact = build_vehicle_policy_impact(
+                    self.conn,
+                    model="能源别名车型",
+                    region="上海",
+                    profile={
+                        "price": 189900,
+                        "energyType": raw,
+                        "bodyType": "SUV",
+                        "purchaseScenario": "置换更新",
+                    },
+                    as_of="2026-07-18",
+                )
+                self.assertEqual(impact["profile"]["energyTypes"], labels)
+                self.assertEqual(impact["profile"]["energyTypeCodes"], codes)
+                self.assertEqual(impact["profile"]["sourceEnergyText"], raw)
+                self.assertEqual(impact["profile"]["energyResolution"], "normalized")
+
+    def test_unknown_energy_token_fails_closed_even_when_mixed_with_known_type(self):
+        impact = build_vehicle_policy_impact(
+            self.conn,
+            model="能源待核验车型",
+            region="上海",
+            profile={
+                "price": 189900,
+                "energyType": "BEV/氢能增程",
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            as_of="2026-07-18",
+        )
+
+        self.assertEqual(impact["evidenceStatus"], "vehicle_profile_incomplete")
+        self.assertEqual(impact["profile"]["energyResolution"], "unresolved")
+        self.assertEqual(impact["profile"]["unrecognizedEnergyTypes"], ["氢能增程"])
+        self.assertIsNone(impact["maxConditionalBenefit"])
+
+    def test_variant_specific_policy_is_not_reported_as_series_wide_zero_or_benefit(self):
+        seed_policy_mvp(self.conn)
+        self.conn.execute("update policy_records set status='inactive'")
+        self.conn.execute(
+            """
+            update policy_records
+               set status='active', policy_type='购置税', region='全国',
+                   energy_scope='纯电动', effective_at='2026-01-01',
+                   expires_at='2026-12-31'
+             where policy_name='2026—2027新能源汽车车辆购置税减免'
+            """
+        )
+        self.conn.execute(
+            """
+            update policy_records
+               set status='active', policy_type='置换更新', region='全国',
+                   energy_scope='新能源', effective_at='2026-01-01',
+                   expires_at='2026-12-31'
+             where policy_name='2026年汽车置换更新补贴'
+            """
+        )
+        impact = build_vehicle_policy_impact(
+            self.conn,
+            model="双动力车型",
+            region="上海",
+            profile={
+                "price": 189900,
+                "energyType": "EREV/BEV",
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            as_of="2026-07-18",
+        )
+
+        self.assertEqual(impact["evidenceStatus"], "variant_required")
+        self.assertEqual(impact["verifiedPolicyCount"], 1)
+        self.assertEqual(impact["variantRequiredPolicyCount"], 1)
+        self.assertIsNone(impact["maxConditionalBenefit"])
+        self.assertIsNone(impact["postPolicyConditionalPrice"])
+        self.assertEqual(
+            impact["variantRequiredPolicies"][0]["applicableEnergyTypes"],
+            ["纯电动"],
+        )
+
+    def test_complete_profile_with_no_reviewed_rule_is_a_truthful_zero(self):
+        impact = build_vehicle_policy_impact(
+            self.conn,
+            model="无适用政策车型",
+            region="上海",
+            profile={
+                "price": 189900,
+                "energyType": "BEV",
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            as_of="2026-07-18",
+        )
+
+        self.assertEqual(impact["evidenceStatus"], "no_reviewed_rule")
+        self.assertEqual(impact["verifiedPolicyCount"], 0)
+        self.assertEqual(impact["maxConditionalBenefit"], 0)
+        self.assertEqual(impact["postPolicyConditionalPrice"], 189900)
 
     def test_nio_peer_uses_baas_base_price_before_policy_calculation(self):
         profiles = build_sales_warning_policy_profiles({

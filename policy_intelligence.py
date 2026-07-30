@@ -55,6 +55,29 @@ EVAL_FIELDS = (
     "actionValue",
 )
 NIO_BAAS_DISCOUNT = 70000
+ENERGY_TYPE_ALIASES = {
+    "nev": ("NEV", "新能源"),
+    "新能源": ("NEV", "新能源"),
+    "bev": ("BEV", "纯电动"),
+    "ev": ("BEV", "纯电动"),
+    "纯电": ("BEV", "纯电动"),
+    "纯电动": ("BEV", "纯电动"),
+    "erev": ("EREV", "增程式"),
+    "reev": ("EREV", "增程式"),
+    "增程": ("EREV", "增程式"),
+    "增程式": ("EREV", "增程式"),
+    "phev": ("PHEV", "插电式混动"),
+    "插混": ("PHEV", "插电式混动"),
+    "插电混动": ("PHEV", "插电式混动"),
+    "插电式混动": ("PHEV", "插电式混动"),
+    "hev": ("HEV", "油电混动"),
+    "油电混动": ("HEV", "油电混动"),
+    "混合动力": ("HEV", "油电混动"),
+    "ice": ("ICE", "燃油"),
+    "燃油": ("ICE", "燃油"),
+    "汽油": ("ICE", "燃油"),
+    "柴油": ("ICE", "燃油"),
+}
 
 
 def _now():
@@ -154,6 +177,8 @@ def build_sales_warning_policy_profiles(warning_model, period=""):
         "role": "own",
         **own_price,
         "energyType": _text(warning_model.get("energyType")) or "待核验",
+        "energySource": _text(warning_model.get("energySource")) or "懂车帝车型分类",
+        "energyAsOf": _text(period),
         "bodyType": _text(warning_model.get("bodyType")) or "待核验",
         "engineDisplacementL": _number(warning_model.get("engineDisplacementL")),
         "salesReference": own_reference,
@@ -178,6 +203,8 @@ def build_sales_warning_policy_profiles(warning_model, period=""):
             "role": role,
             **peer_price,
             "energyType": _text(peer.get("energyType")) or "待核验",
+            "energySource": _text(peer.get("energySource")) or "懂车帝车型分类",
+            "energyAsOf": _text(period),
             "bodyType": _text(peer.get("bodyType")) or _text(warning_model.get("bodyType")) or "待核验",
             "engineDisplacementL": _number(peer.get("engineDisplacementL")),
             "salesReference": {
@@ -1181,15 +1208,56 @@ def _energy_matches(policy_energy, vehicle_energy):
     return policy_energy == vehicle_energy
 
 
-def _vehicle_energy_types(profile):
+def _energy_alias_key(value):
+    return re.sub(r"[\s_-]+", "", _text(value)).lower()
+
+
+def _vehicle_energy_contract(profile):
     profile = dict(profile or {})
     declared = profile.get("energyTypes")
     if isinstance(declared, list):
-        values = [_text(value) for value in declared]
+        source_values = [_text(value) for value in declared]
     else:
-        values = re.split(r"[/／、]", _text(profile.get("energyType")))
-    allowed = {"新能源", "纯电", "纯电动", "插混", "插电式混动", "增程", "增程式", "燃油"}
-    return list(dict.fromkeys(value for value in values if value in allowed))
+        source_values = [_text(profile.get("energyType"))]
+    source_text = (
+        _text(profile.get("sourceEnergyText"))
+        or _text(profile.get("energyType"))
+        or "/".join(value for value in source_values if value)
+    )
+    tokens = []
+    for value in source_values:
+        tokens.extend(
+            token.strip()
+            for token in re.split(r"[/／、,+，|｜;；]+", value)
+            if token.strip()
+        )
+    normalized = []
+    codes = []
+    unrecognized = []
+    for token in tokens:
+        alias = ENERGY_TYPE_ALIASES.get(_energy_alias_key(token))
+        if alias is None:
+            if token not in unrecognized:
+                unrecognized.append(token)
+            continue
+        code, label = alias
+        if label not in normalized:
+            normalized.append(label)
+            codes.append(code)
+    resolution = "missing" if not tokens else "unresolved" if unrecognized else "normalized"
+    return {
+        "energyTypes": normalized,
+        "energyTypeCodes": codes,
+        "sourceEnergyText": source_text,
+        "energyResolution": resolution,
+        "unrecognizedEnergyTypes": unrecognized,
+        "energySource": _text(profile.get("energySource")),
+        "energyAsOf": _text(profile.get("energyAsOf") or profile.get("priceAsOf")),
+    }
+
+
+def _vehicle_energy_types(profile):
+    return _vehicle_energy_contract(profile)["energyTypes"]
 
 
 def _vehicle_profile_gaps(profile):
@@ -1197,7 +1265,7 @@ def _vehicle_profile_gaps(profile):
     gaps = []
     if _number(profile.get("price")) is None or _number(profile.get("price")) <= 0:
         gaps.append("price")
-    if not _vehicle_energy_types(profile):
+    if _vehicle_energy_contract(profile)["energyResolution"] != "normalized":
         gaps.append("energyType")
     body_type = _text(profile.get("bodyType"))
     if not body_type or body_type in {"待核验", "待复核"}:
@@ -1242,7 +1310,8 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
     profile = dict(profile or {})
     price = _number(profile.get("price"))
     energy = _text(profile.get("energyType"))
-    energy_types = _vehicle_energy_types(profile)
+    energy_contract = _vehicle_energy_contract(profile)
+    energy_types = energy_contract["energyTypes"]
     scenario = _text(profile.get("purchaseScenario") or profile.get("scenario")) or "置换更新"
     profile_gaps = _vehicle_profile_gaps(profile)
     if profile_gaps:
@@ -1257,7 +1326,7 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
                 "priceSource": _text(profile.get("priceSource")) or "analyst_input",
                 "priceAsOf": _text(profile.get("priceAsOf")),
                 "energyType": energy,
-                "energyTypes": energy_types,
+                **energy_contract,
                 "bodyType": _text(profile.get("bodyType")),
                 "engineDisplacementL": _number(profile.get("engineDisplacementL")),
                 "purchaseScenario": scenario,
@@ -1273,16 +1342,35 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
             "scenarioLabel": "车型档案不完整，补充精确动力形式、车身形式与价格后自动审核",
             "causalBoundary": "车型档案缺失时不计算政策权益，不以0替代缺失结果",
             "policyEffects": [],
+            "variantRequiredPolicyCount": 0,
+            "variantRequiredPolicies": [],
         }
     conditions_confirmed = False
     effects = []
+    variant_required = []
     for row in _active_policy_rows(conn, org_id, edition, as_of or date.today().isoformat()):
-        if (
-            not _region_matches(row["region"], region)
-            or not all(_energy_matches(row["energy_scope"], value) for value in energy_types)
-            or not _scenario_matches(row["policy_type"], scenario)
-            or not _vehicle_matches(row, profile)
-        ):
+        if not _region_matches(row["region"], region) or not _scenario_matches(row["policy_type"], scenario) or not _vehicle_matches(row, profile):
+            continue
+        energy_matches = [_energy_matches(row["energy_scope"], value) for value in energy_types]
+        if not any(energy_matches):
+            continue
+        if not all(energy_matches):
+            variant_required.append({
+                "policyId": row["id"],
+                "policyName": row["policy_name"],
+                "policyType": row["policy_type"],
+                "region": row["region"],
+                "effectiveAt": row["effective_at"],
+                "expiresAt": row["expires_at"],
+                "sourceUrl": row["original_url"],
+                "sourceQuote": row["source_quote"],
+                "applicableEnergyTypes": [
+                    value for value, matched in zip(energy_types, energy_matches) if matched
+                ],
+                "excludedEnergyTypes": [
+                    value for value, matched in zip(energy_types, energy_matches) if not matched
+                ],
+            })
             continue
         effects.append(
             {
@@ -1314,21 +1402,47 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
             grouped[key] = item
         else:
             item["counted"] = False
-    conditional_total = sum(item["benefit"] for item in grouped.values())
-    verified_total = sum(item["benefit"] for item in grouped.values() if item["eligibilityStatus"] == "verified")
+    calculated = not variant_required
+    conditional_total = sum(item["benefit"] for item in grouped.values()) if calculated else None
+    verified_total = (
+        sum(item["benefit"] for item in grouped.values() if item["eligibilityStatus"] == "verified")
+        if calculated
+        else None
+    )
+    evidence_status = (
+        "variant_required"
+        if variant_required
+        else "eligibility_verified"
+        if effects and conditions_confirmed
+        else "conditional_eligibility"
+        if effects
+        else "no_reviewed_rule"
+    )
+    scenario_label = (
+        "当前车系包含多种动力形式，所匹配政策仅适用于部分版本；选择具体动力版本后再计算权益"
+        if evidence_status == "variant_required"
+        else "%s情景；满足全部列示消费者条件时的政策上限，不代表所有购车者均可获得" % scenario
+    )
+    causal_boundary = (
+        "未确定具体动力版本时不计算政策权益，不以0替代待确认结果"
+        if evidence_status == "variant_required"
+        else "规则影响链，不代表已验证销量因果"
+    )
     return {
         "model": _text(model),
         "region": _text(region),
-        "profile": {"price": price, "listPrice": _number(profile.get("listPrice")) or price, "priceBasis": _text(profile.get("priceBasis")) or "含电池经销商报价起售价", "baasDiscount": _number(profile.get("baasDiscount")) or 0, "priceSource": _text(profile.get("priceSource")) or "analyst_input", "priceAsOf": _text(profile.get("priceAsOf")), "energyType": energy, "energyTypes": energy_types, "bodyType": _text(profile.get("bodyType")), "engineDisplacementL": _number(profile.get("engineDisplacementL")), "purchaseScenario": scenario, "conditionsConfirmed": conditions_confirmed},
+        "profile": {"price": price, "listPrice": _number(profile.get("listPrice")) or price, "priceBasis": _text(profile.get("priceBasis")) or "含电池经销商报价起售价", "baasDiscount": _number(profile.get("baasDiscount")) or 0, "priceSource": _text(profile.get("priceSource")) or "analyst_input", "priceAsOf": _text(profile.get("priceAsOf")), "energyType": energy, **energy_contract, "bodyType": _text(profile.get("bodyType")), "engineDisplacementL": _number(profile.get("engineDisplacementL")), "purchaseScenario": scenario, "conditionsConfirmed": conditions_confirmed},
         "verifiedPolicyCount": len(effects),
         "maxVerifiedBenefit": verified_total,
         "maxConditionalBenefit": conditional_total,
-        "postPolicyReferencePrice": int(round(price - verified_total)) if price is not None else None,
-        "postPolicyConditionalPrice": int(round(price - conditional_total)) if price is not None else None,
-        "evidenceStatus": "eligibility_verified" if effects and conditions_confirmed else "conditional_eligibility" if effects else "no_reviewed_rule",
-        "scenarioLabel": "%s情景；满足全部列示消费者条件时的政策上限，不代表所有购车者均可获得" % scenario,
-        "causalBoundary": "规则影响链，不代表已验证销量因果",
+        "postPolicyReferencePrice": int(round(price - verified_total)) if price is not None and verified_total is not None else None,
+        "postPolicyConditionalPrice": int(round(price - conditional_total)) if price is not None and conditional_total is not None else None,
+        "evidenceStatus": evidence_status,
+        "scenarioLabel": scenario_label,
+        "causalBoundary": causal_boundary,
         "policyEffects": effects,
+        "variantRequiredPolicyCount": len(variant_required),
+        "variantRequiredPolicies": variant_required,
     }
 
 

@@ -18,12 +18,30 @@ from group_dashboard import (
     load_sales_warning,
     _latest_sales_warning_observed_path,
     merge_sales_payloads,
+    trusted_policy_warning_models,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_trusted_policy_models_preserve_sales_source_period(self):
+        warning = {
+            "source": {"period": "2026-06"},
+            "saicModels": [{"model": "智己LS6", "energyType": "增程式/纯电动"}],
+        }
+        with (
+            patch("group_dashboard.load_sales_warning", return_value=warning),
+            patch("group_dashboard._vertical_signals", return_value=({}, [], {})),
+            patch(
+                "group_dashboard._apply_vertical_monitoring",
+                return_value={"saicModels": warning["saicModels"]},
+            ),
+        ):
+            models = trusted_policy_warning_models(None, "tenant-a", "china")
+
+        self.assertEqual(models[0]["period"], "2026-06")
+
     def test_global_sales_file_cannot_add_models_outside_org_monitoring_scope(self):
         warning = {
             "additionalMonitoredModels": ["客户甲车型"],

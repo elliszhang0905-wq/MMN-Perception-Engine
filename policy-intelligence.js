@@ -9,8 +9,9 @@
   const root = () => document.querySelector("#policy-intelligence-root");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const money = value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) ? `¥${Math.round(Number(value)).toLocaleString("zh-CN")}` : "—";
-  const benefitOf = item => item?.evidenceStatus === "vehicle_profile_incomplete" ? null : Number(item?.maxVerifiedBenefit || item?.maxConditionalBenefit || 0);
-  const priceOf = item => Number(item?.maxVerifiedBenefit || 0) > 0 ? item?.postPolicyReferencePrice : item?.postPolicyConditionalPrice;
+  const unresolvedPolicyImpact = item => ["vehicle_profile_incomplete", "variant_required"].includes(item?.evidenceStatus);
+  const benefitOf = item => unresolvedPolicyImpact(item) ? null : Number(item?.maxVerifiedBenefit || item?.maxConditionalBenefit || 0);
+  const priceOf = item => unresolvedPolicyImpact(item) ? null : Number(item?.maxVerifiedBenefit || 0) > 0 ? item?.postPolicyReferencePrice : item?.postPolicyConditionalPrice;
   const priceBasisNote = item => Number(item?.profile?.baasDiscount || 0) > 0 ? `BaaS起售价 ${money(item.profile.price)}（含电池参考价 ${money(item.profile.listPrice)}，已减${money(item.profile.baasDiscount)}）` : "";
   const edition = () => { try { return activeEdition(); } catch (_) { return "china"; } };
   const headers = () => {
@@ -103,7 +104,7 @@
 
   function renderComparison(items) {
     if (!items.some(item => item.model !== state.model)) return "";
-    const chartItems = items.filter(item => item.evidenceStatus !== "vehicle_profile_incomplete" && priceOf(item) !== null);
+    const chartItems = items.filter(item => !unresolvedPolicyImpact(item) && priceOf(item) !== null);
     const maxBenefit = Math.max(1, ...chartItems.map(benefitOf));
     const prices = chartItems.map(priceOf).filter(value => value !== null && value !== undefined);
     if (!chartItems.length || !prices.length) return `<section class="policy-panel policy-competition"><div class="policy-panel-head"><div><span>MODEL IMPACT</span><h3>车型竞争力对比</h3></div><em>待补充车型档案</em></div><p class="policy-empty">当前对比车型缺少精确动力形式、车身形式或价格，暂不计算权益与政策后价格。</p></section>`;
@@ -111,14 +112,21 @@
     return `<section class="policy-panel policy-competition"><div class="policy-panel-head"><div><span>MODEL IMPACT</span><h3>资格满足后的车型竞争力气泡</h3></div><em>${esc(state.region)} · ${esc(state.scenario)} · 点击仅查看对比</em></div>
       <div class="policy-causal-chain" aria-label="${causalChainLabel}"><span>已审核政策规则</span><b>→</b><span>测算购车成本变化</span><b>→</b><span>同场车型位置</span><b>→</b><span>可验证营销动作</span></div>
       <div class="policy-bubble-chart"><div class="policy-axis-y"><span>条件满足后参考价高</span><span>条件满足后参考价低</span></div><div class="policy-bubble-stage">${chartItems.map(item => { const price = priceOf(item); const basis = priceBasisNote(item); const x = 12 + (benefitOf(item) / maxBenefit) * 72; const y = 12 + ((price - minPrice) / Math.max(1,maxPrice-minPrice)) * 72; const size = 58 + Number(item.verifiedPolicyCount || 0) * 12; return `<button type="button" class="policy-model-bubble ${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}" aria-pressed="${item.model === state.focusModel}" title="${esc(basis ? `${basis}；` : "")}点击只查看对比，不会切换本品" style="left:${x}%;top:${y}%;--model-size:${size}px" data-policy-model="${esc(item.model)}"><span>${item.model === state.model ? "本品" : "竞品"}</span><b>${esc(item.model)}</b><small>${money(price)}</small></button>`; }).join("")}</div><div class="policy-axis-x"><span>条件权益低</span><span>条件权益高</span></div></div>
-      <div class="policy-comparison-table">${items.map(item => { const basis = priceBasisNote(item), incomplete = item.evidenceStatus === "vehicle_profile_incomplete"; return `<article class="${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}"><div><span>${item.model === state.model ? "本品" : "同场竞品"}</span><b>${esc(item.model)}</b></div><strong>${money(benefitOf(item))}<small>${incomplete ? "车型档案待补充" : "满足条件时权益上限"}</small></strong><strong>${money(priceOf(item))}<small>${incomplete ? "暂不计算" : "条件满足后参考价"}</small></strong><em>${incomplete ? "待补充精确动力／车身／价格" : `${item.verifiedPolicyCount}项规则`}${basis ? `<small>${esc(basis)}</small>` : ""}</em></article>`; }).join("")}</div></section>`;
+      <div class="policy-comparison-table">${items.map(item => { const basis = priceBasisNote(item), incomplete = item.evidenceStatus === "vehicle_profile_incomplete", variantRequired = item.evidenceStatus === "variant_required", unresolved = incomplete || variantRequired; return `<article class="${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}"><div><span>${item.model === state.model ? "本品" : "同场竞品"}</span><b>${esc(item.model)}</b></div><strong>${money(benefitOf(item))}<small>${incomplete ? "车型档案待补充" : variantRequired ? "需选择具体动力版本" : "满足条件时权益上限"}</small></strong><strong>${money(priceOf(item))}<small>${unresolved ? "暂不计算" : "条件满足后参考价"}</small></strong><em>${incomplete ? "待补充精确动力／车身／价格" : variantRequired ? `${item.variantRequiredPolicyCount || 0}项版本相关规则待确认` : `${item.verifiedPolicyCount}项规则`}${basis ? `<small>${esc(basis)}</small>` : ""}</em></article>`; }).join("")}</div></section>`;
   }
 
   function renderImpact(impact) {
     const incomplete = impact.evidenceStatus === "vehicle_profile_incomplete";
+    const variantRequired = impact.evidenceStatus === "variant_required";
+    const emptyMessage = incomplete
+      ? "车型档案未满足审核门槛，暂不计算；补充后会自动重新审核。"
+      : variantRequired
+        ? `当前有${impact.variantRequiredPolicyCount || 0}项规则只适用于部分动力版本，需选择具体动力版本后计算。`
+        : "当前车型与购车情景未匹配到已审核政策规则。";
+    const variantNotice = variantRequired ? `<p class="policy-empty">${esc(emptyMessage)}</p>` : "";
     return `<section class="policy-panel policy-impact"><div class="policy-panel-head"><div><span>CAUSAL TRACE</span><h3>${esc(impact.model)}在${esc(impact.region)}的规则影响链</h3></div><em>${money(benefitOf(impact))} 条件上限</em></div>
       <p class="policy-scenario-note">${esc(impact.scenarioLabel)}</p>
-      <div class="policy-effect-list">${impact.policyEffects.length ? impact.policyEffects.map(effect => `<article><div class="policy-effect-value"><span>${esc(effect.policyType)}</span><strong>${money(effect.benefit)}</strong><small>${effect.counted ? "计入本情景" : "同组规则未重复计入"}</small></div><div><b>${esc(effect.policyName)}</b><p>${esc(effect.sourceQuote)}</p><small>适用条件：${esc([...effect.consumerConditions, ...effect.vehicleConditions].join("；"))}</small><a href="${esc(effect.sourceUrl)}" target="_blank" rel="noopener">查看官方原文</a></div><time>${esc(effect.expiresAt || "长期有效")}</time></article>`).join("") : `<p class="policy-empty">${incomplete ? "车型档案未满足审核门槛，暂不计算；补充后会自动重新审核。" : "当前车型与购车情景未匹配到已审核政策规则。"}</p>`}</div>
+      <div class="policy-effect-list">${variantNotice}${impact.policyEffects.length ? impact.policyEffects.map(effect => `<article><div class="policy-effect-value"><span>${esc(effect.policyType)}</span><strong>${money(effect.benefit)}</strong><small>${variantRequired ? "具体版本确认后计入" : effect.counted ? "计入本情景" : "同组规则未重复计入"}</small></div><div><b>${esc(effect.policyName)}</b><p>${esc(effect.sourceQuote)}</p><small>适用条件：${esc([...effect.consumerConditions, ...effect.vehicleConditions].join("；"))}</small><a href="${esc(effect.sourceUrl)}" target="_blank" rel="noopener">查看官方原文核对</a></div><time>${esc(effect.expiresAt || "长期有效")}</time></article>`).join("") : variantRequired ? "" : `<p class="policy-empty">${esc(emptyMessage)}</p>`}</div>
       <div class="policy-boundary"><b>因果边界</b><span>${esc(impact.causalBoundary)}</span></div></section>`;
   }
 
