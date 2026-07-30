@@ -54,9 +54,19 @@ class SafeDeployScriptTest(unittest.TestCase):
         self.assertNotIn("compose restart mmn-web", self.script)
 
     def test_nginx_route_switch_updates_read_only_bind_source_then_reloads(self):
-        self.assertIn('cp "$routed_config" deploy/nginx.conf', self.script)
+        self.assertIn(
+            'cp "$routed_config" deploy/nginx-runtime/default.conf', self.script
+        )
         self.assertIn("compose exec -T mmn-web nginx -s reload", self.script)
         self.assertNotIn("> /etc/nginx/conf.d/default.conf", self.script)
+        compose_config = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "./deploy/nginx-runtime:/etc/nginx/conf.d:ro", compose_config
+        )
+        self.assertNotIn(
+            "./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+            compose_config,
+        )
 
     def test_deploy_has_lock_disk_gate_and_post_build_cleanup(self):
         self.assertIn("acquire_lock", self.script)

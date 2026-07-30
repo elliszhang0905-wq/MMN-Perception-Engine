@@ -9,7 +9,8 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-mkdir -p data backups logs
+mkdir -p data backups logs deploy/nginx-runtime
+cp deploy/nginx.conf deploy/nginx-runtime/default.conf
 
 BRANCH="${MMN_DEPLOY_BRANCH:-main}"
 SKIP_GIT_PULL="${MMN_SKIP_GIT_PULL:-false}"
@@ -118,7 +119,7 @@ route_web_to() {
   local routed_config=""
   routed_config="$(mktemp /tmp/mmn-nginx-route.XXXXXX)"
   sed "s#http://mmn-app:8765#http://${upstream_name}:8765#g" "$NGINX_BASE_CONFIG" > "$routed_config"
-  cp "$routed_config" deploy/nginx.conf
+  cp "$routed_config" deploy/nginx-runtime/default.conf
   rm -f "$routed_config"
   if ! compose exec -T mmn-web nginx -t || ! compose exec -T mmn-web nginx -s reload; then
     echo "反向代理切换到 ${upstream_name} 失败。" >&2
