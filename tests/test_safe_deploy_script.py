@@ -15,7 +15,7 @@ class SafeDeployScriptTest(unittest.TestCase):
         self.assertNotIn("docker compose --env-file .env down", self.script)
         self.assertLess(
             self.script.index("compose build mmn-app"),
-            self.script.index("compose up -d --no-build --remove-orphans"),
+            self.script.index("compose run -d --no-deps --name"),
         )
 
     def test_running_data_is_backed_up_before_candidate_build(self):
@@ -33,6 +33,20 @@ class SafeDeployScriptTest(unittest.TestCase):
             '"${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"',
             self.script,
         )
+
+    def test_blue_green_cutover_routes_to_healthy_candidate_before_replacing_app(self):
+        self.assertIn('CANDIDATE_CONTAINER_NAME="mmn-app-candidate"', self.script)
+        candidate_route = self.script.index('route_web_to "$CANDIDATE_CONTAINER_NAME"')
+        formal_replace = self.script.index(
+            "compose up -d --no-build --no-deps --force-recreate "
+            "mmn-app mmn-creator-worker mmn-scheduler",
+            candidate_route,
+        )
+        route_back = self.script.index("route_web_to mmn-app", formal_replace)
+        self.assertLess(candidate_route, formal_replace)
+        self.assertLess(formal_replace, route_back)
+        self.assertNotIn("compose restart mmn-app", self.script)
+        self.assertNotIn("compose restart mmn-web", self.script)
 
     def test_deploy_has_lock_disk_gate_and_post_build_cleanup(self):
         self.assertIn("acquire_lock", self.script)

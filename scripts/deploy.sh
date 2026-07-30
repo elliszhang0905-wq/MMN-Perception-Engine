@@ -96,6 +96,31 @@ wait_for_web_health() {
   return 1
 }
 
+wait_for_container_health() {
+  local container_name="$1"
+  local attempts="${2:-120}"
+  local container_health=""
+  for ((i = 1; i <= attempts; i += 1)); do
+    container_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_name" 2>/dev/null || true)"
+    if [[ "$container_health" == "healthy" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+route_web_to() {
+  local upstream_name="$1"
+  compose cp deploy/nginx.conf mmn-web:/tmp/mmn-release-base.conf
+  compose exec -T mmn-web sh -lc \
+    "sed 's#http://mmn-app:8765#http://${upstream_name}:8765#g' /tmp/mmn-release-base.conf > /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload"
+  if ! compose exec -T mmn-web wget -qO- "http://${upstream_name}:8765/api/health" >/dev/null 2>&1; then
+    echo "反向代理目标 ${upstream_name} 健康检查失败。" >&2
+    return 1
+  fi
+}
+
 acquire_lock
 
 if [[ -d .git && "$SKIP_GIT_PULL" != "true" ]]; then
@@ -121,6 +146,7 @@ IMAGE_REPOSITORY="${MMN_IMAGE_REPOSITORY:-mmn-perception-engine}"
 DEPLOY_IMAGE_TAG="${MMN_IMAGE_TAG:-latest}"
 CANDIDATE_IMAGE_TAG="candidate-$(date '+%Y%m%d%H%M%S')"
 ROLLBACK_IMAGE_TAG="rollback"
+CANDIDATE_CONTAINER_NAME="mmn-app-candidate"
 APP_WAS_RUNNING="false"
 
 if compose ps --services --filter status=running 2>/dev/null | grep -qx "mmn-app"; then
@@ -151,24 +177,98 @@ if ! docker run --rm --entrypoint python "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_
   exit 1
 fi
 docker tag "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"
-export MMN_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+
+sync_release_assets() {
+  echo "同步随版本发布的数据资产到统一持久化根目录。"
+  compose exec -T mmn-app mkdir -p /app/data/modules/product_evaluation /app/data/imports/raw/product_evaluation /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
+  for eval_fixture in data/eval/mmn_eval_seed_v0.1.jsonl data/eval/mmn_eval_seed_outputs_v0.1.jsonl; do
+    if [[ -f "$eval_fixture" ]]; then
+      compose cp "$eval_fixture" "mmn-app:/app/$eval_fixture"
+    fi
+  done
+  if [[ -f data/modules/product_evaluation/e7x_product_evaluation_2026-06.json ]]; then
+    compose cp data/modules/product_evaluation/e7x_product_evaluation_2026-06.json mmn-app:/app/data/modules/product_evaluation/e7x_product_evaluation_2026-06.json
+  fi
+  for source_asset in data/imports/raw/product_evaluation/*; do
+    [[ -f "$source_asset" ]] || continue
+    compose cp "$source_asset" "mmn-app:/app/data/imports/raw/product_evaluation/$(basename "$source_asset")"
+  done
+  if [[ -f data/sales_warning_demo_2026-06.json ]]; then
+    compose cp data/sales_warning_demo_2026-06.json mmn-app:/app/data/sales_warning_demo_2026-06.json
+  fi
+  if [[ -f data/sales_warning_cycles.json ]]; then
+    if compose exec -T mmn-app test -f /app/data/sales_warning_cycles.json; then
+      echo "保留服务器已有车型上市日期，不用版本文件覆盖。"
+    else
+      compose cp data/sales_warning_cycles.json mmn-app:/app/data/sales_warning_cycles.json
+    fi
+  fi
+  for observed_file in data/dongchedi_sales/sales_warning_observed_????-??.json; do
+    [[ -f "$observed_file" ]] || continue
+    compose cp "$observed_file" "mmn-app:/app/$observed_file"
+  done
+  if [[ -f data/dongchedi_sales/sales_warning_latest.json ]]; then
+    compose cp data/dongchedi_sales/sales_warning_latest.json mmn-app:/app/data/dongchedi_sales/sales_warning_latest.json
+  fi
+  if [[ -f data/dongchedi_sales/sales_warning_history.json ]]; then
+    compose cp data/dongchedi_sales/sales_warning_history.json mmn-app:/app/data/dongchedi_sales/sales_warning_history.json
+  fi
+  if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
+    compose cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json
+  fi
+  if [[ -f data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl ]]; then
+    compose cp data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl mmn-app:/app/data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl
+  fi
+}
+
+remove_candidate_container() {
+  docker stop "$CANDIDATE_CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker rm "$CANDIDATE_CONTAINER_NAME" >/dev/null 2>&1 || true
+}
 
 restore_previous_image() {
   if [[ "$APP_WAS_RUNNING" != "true" ]]; then
     echo "发布前没有可回退的运行版本。" >&2
     return 1
   fi
-  echo "新版本未通过健康检查，自动恢复上一运行镜像。" >&2
+  echo "新版本未通过健康检查，候选实例继续承接流量并恢复上一运行镜像。" >&2
   docker tag "${IMAGE_REPOSITORY}:${ROLLBACK_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"
   export MMN_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-  compose up -d --no-build --remove-orphans
+  compose up -d --no-build --no-deps --force-recreate mmn-app mmn-creator-worker mmn-scheduler
   wait_for_app_health 60
-  compose restart mmn-web
+  route_web_to mmn-app
   wait_for_web_health 30
+  remove_candidate_container
 }
 
-echo "候选镜像构建成功，开始健康门控切换。"
-if ! compose up -d --no-build --remove-orphans; then
+echo "候选镜像构建成功，启动并行候选实例。"
+remove_candidate_container
+export MMN_IMAGE_TAG="$CANDIDATE_IMAGE_TAG"
+compose run -d --no-deps --name "$CANDIDATE_CONTAINER_NAME" mmn-app
+if ! wait_for_container_health "$CANDIDATE_CONTAINER_NAME" 120; then
+  echo "候选实例未通过健康检查；旧版本保持在线，本次发布停止。" >&2
+  remove_candidate_container
+  exit 1
+fi
+
+sync_release_assets
+docker restart "$CANDIDATE_CONTAINER_NAME" >/dev/null
+if ! wait_for_container_health "$CANDIDATE_CONTAINER_NAME" 120; then
+  echo "候选实例加载版本数据后未恢复健康；旧版本保持在线，本次发布停止。" >&2
+  remove_candidate_container
+  exit 1
+fi
+
+echo "候选实例健康，反向代理切换到候选实例。"
+if ! route_web_to "$CANDIDATE_CONTAINER_NAME"; then
+  route_web_to mmn-app || true
+  remove_candidate_container
+  exit 1
+fi
+
+echo "候选实例承接流量，后台替换正式应用与任务服务。"
+export MMN_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
+if ! compose up -d --no-build --no-deps --force-recreate mmn-app mmn-creator-worker mmn-scheduler; then
   restore_previous_image
   exit 1
 fi
@@ -178,63 +278,12 @@ if ! wait_for_app_health 60; then
   exit 1
 fi
 
-echo "同步随版本发布的数据资产到统一持久化根目录。"
-compose exec -T mmn-app mkdir -p /app/data/modules/product_evaluation /app/data/imports/raw/product_evaluation /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
-for eval_fixture in data/eval/mmn_eval_seed_v0.1.jsonl data/eval/mmn_eval_seed_outputs_v0.1.jsonl; do
-  if [[ -f "$eval_fixture" ]]; then
-    compose cp "$eval_fixture" "mmn-app:/app/$eval_fixture"
-  fi
-done
-if [[ -f data/modules/product_evaluation/e7x_product_evaluation_2026-06.json ]]; then
-  compose cp data/modules/product_evaluation/e7x_product_evaluation_2026-06.json mmn-app:/app/data/modules/product_evaluation/e7x_product_evaluation_2026-06.json
-fi
-for source_asset in data/imports/raw/product_evaluation/*; do
-  [[ -f "$source_asset" ]] || continue
-  compose cp "$source_asset" "mmn-app:/app/data/imports/raw/product_evaluation/$(basename "$source_asset")"
-done
-if [[ -f data/sales_warning_demo_2026-06.json ]]; then
-  compose cp data/sales_warning_demo_2026-06.json mmn-app:/app/data/sales_warning_demo_2026-06.json
-fi
-if [[ -f data/sales_warning_cycles.json ]]; then
-  if compose exec -T mmn-app test -f /app/data/sales_warning_cycles.json; then
-    echo "保留服务器已有车型上市日期，不用版本文件覆盖。"
-  else
-    compose cp data/sales_warning_cycles.json mmn-app:/app/data/sales_warning_cycles.json
-  fi
-fi
-for observed_file in data/dongchedi_sales/sales_warning_observed_????-??.json; do
-  [[ -f "$observed_file" ]] || continue
-  compose cp "$observed_file" "mmn-app:/app/$observed_file"
-done
-if [[ -f data/dongchedi_sales/sales_warning_latest.json ]]; then
-  compose cp data/dongchedi_sales/sales_warning_latest.json mmn-app:/app/data/dongchedi_sales/sales_warning_latest.json
-fi
-if [[ -f data/dongchedi_sales/sales_warning_history.json ]]; then
-  compose cp data/dongchedi_sales/sales_warning_history.json mmn-app:/app/data/dongchedi_sales/sales_warning_history.json
-fi
-if [[ -f data/dongchedi_sales/latest_mmn_perception_feed.json ]]; then
-  compose cp data/dongchedi_sales/latest_mmn_perception_feed.json mmn-app:/app/data/dongchedi_sales/latest_mmn_perception_feed.json
-fi
-if [[ -f data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl ]]; then
-  compose cp data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl mmn-app:/app/data/rag_training/dongchedi_sales/latest_dcd_sales_rag.jsonl
-fi
-
-echo "版本数据资产同步完成，重启数据读取服务以重新解析规范路径。"
-compose restart mmn-app mmn-scheduler
-if ! wait_for_app_health 60; then
-  echo "数据资产同步后 mmn-app 未恢复健康，停止发布。" >&2
-  compose ps
+echo "正式实例健康，反向代理切回正式实例。"
+if ! route_web_to mmn-app || ! wait_for_web_health 30; then
   restore_previous_image
   exit 1
 fi
-echo "应用地址可能因重启变化，重启反向代理以重新解析上游。"
-compose restart mmn-web
-if ! wait_for_web_health 30; then
-  echo "反向代理未能连接重启后的 mmn-app，停止发布。" >&2
-  compose ps
-  restore_previous_image
-  exit 1
-fi
+remove_candidate_container
 
 docker image rm "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_TAG}" >/dev/null 2>&1 || true
 docker builder prune --all --force

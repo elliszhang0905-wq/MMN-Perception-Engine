@@ -345,9 +345,10 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIn("data/dongchedi_sales/sales_warning_history.json", deploy_script)
         self.assertIn("mmn-app:/app/data/dongchedi_sales/sales_warning_history.json", deploy_script)
         self.assertIn("保留服务器已有车型上市日期，不用版本文件覆盖", deploy_script)
-        self.assertIn("restart mmn-app mmn-scheduler", deploy_script)
+        self.assertIn("sync_release_assets", deploy_script)
+        self.assertIn('CANDIDATE_CONTAINER_NAME="mmn-app-candidate"', deploy_script)
         self.assertIn("wait_for_app_health 60", deploy_script)
-        self.assertIn("restart mmn-web", deploy_script)
+        self.assertIn("route_web_to mmn-app", deploy_script)
         self.assertIn("wget -qO- http://127.0.0.1/api/health", deploy_script)
 
     def test_sales_warning_demo_uses_full_dongchedi_segment_without_price_filter(self):
