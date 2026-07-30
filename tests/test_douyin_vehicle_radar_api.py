@@ -59,6 +59,27 @@ class DouyinVehicleRadarApiTest(unittest.TestCase):
         ):
             self.assertIn(route, source)
 
+    def test_latest_radar_collects_unique_video_ids_for_insight_restore(self):
+        run = {
+            "result": {
+                "lists": {
+                    "own": [
+                        {"platformItemId": "video-1"},
+                        {"platformItemId": "video-2"},
+                    ],
+                    "all": [
+                        {"itemId": "video-1"},
+                        {"platformItemId": ""},
+                        "invalid",
+                    ],
+                },
+            },
+        }
+        self.assertEqual(
+            ["video-1", "video-2"],
+            server.douyin_vehicle_radar_item_ids(run),
+        )
+
     def test_async_manual_run_reaches_persistent_completed_state(self):
         run = server.create_douyin_vehicle_radar_run({
             "subject": "智己LS6",

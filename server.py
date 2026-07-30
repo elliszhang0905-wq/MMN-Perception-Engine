@@ -330,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260730-douyin-video-evidence-chain-2"
+APP_VERSION_CODE = "beta-1.03-20260730-douyin-video-evidence-chain-3"
 APP_RELEASE_DATE = "2026-07-30"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -549,6 +549,23 @@ def public_douyin_vehicle_radar_run(run):
     else:
         payload["error"] = ""
     return payload
+
+
+def douyin_vehicle_radar_item_ids(run):
+    lists = ((run or {}).get("result") or {}).get("lists") or {}
+    item_ids = []
+    seen = set()
+    for items in lists.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("platformItemId") or item.get("itemId") or "").strip()
+            if item_id and item_id not in seen:
+                seen.add(item_id)
+                item_ids.append(item_id)
+    return item_ids
 
 
 def public_social_evidence_job(job):
@@ -16144,19 +16161,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 q = parse_qs(parsed.query)
                 auth = self.current_auth() or {}
+                radar_org_id = auth.get("org_id", "local")
                 radar_edition = edition_from(q.get("edition", ["china"])[0])
                 run = douyin_vehicle_radar_repository().latest_run(
-                    auth.get("org_id", "local"),
+                    radar_org_id,
                     radar_edition,
                     q.get("subject", [""])[0],
                     single_model_only=q.get("scope", [""])[0] == "single",
                 )
+                item_ids = douyin_vehicle_radar_item_ids(run)
+                with db() as conn:
+                    video_insights = list_video_insight_jobs(
+                        conn,
+                        org_id=radar_org_id,
+                        edition=radar_edition,
+                        item_ids=item_ids,
+                    ) if item_ids else []
                 self.send_json({
                     "ok": True,
                     "run": public_douyin_vehicle_radar_run(run),
                     "strategy": douyin_vehicle_radar_repository().latest_strategy(
-                        run["id"], auth.get("org_id", "local"), radar_edition
+                        run["id"], radar_org_id, radar_edition
                     ) if run else None,
+                    "videoInsights": video_insights,
                 })
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)

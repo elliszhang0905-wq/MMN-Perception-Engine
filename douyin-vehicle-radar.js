@@ -316,6 +316,7 @@
       if (nextMode === state.mode) return;
       state.mode = nextMode;
       state.run = null; state.strategy = null; state.error = ""; state.fullOpen = false;
+      state.insightJobs.clear();
       clearTimeout(state.pollTimer);
       render();
       loadLatest();
@@ -326,6 +327,7 @@
       if (next === state.queryModel) return;
       state.queryModel = next;
       state.run = null; state.strategy = null; state.error = ""; state.fullOpen = false;
+      state.insightJobs.clear();
       render();
       loadLatest();
     };
@@ -424,6 +426,9 @@
       const payload = await request(`/api/douyin-vehicle-radar/latest?edition=${encodeURIComponent(edition())}&subject=${encodeURIComponent(subject)}${scope}`);
       state.run = payload.run;
       state.strategy = payload.strategy;
+      state.insightJobs = new Map(
+        (payload.videoInsights || []).map(job => [String(job.itemId || ""), job]).filter(([itemId]) => itemId),
+      );
       if (state.run) state.rangeDays = Number(state.run.rangeDays) || state.rangeDays;
       render();
       if (activeStatuses.has(state.run?.status)) pollRun();
@@ -485,6 +490,7 @@
       state.queryModel = next.subject || "";
       state.run = null; state.strategy = null; state.tab = "own";
       state.fullOpen = false;
+      state.insightJobs.clear();
       clearTimeout(state.pollTimer);
     }
     render();
