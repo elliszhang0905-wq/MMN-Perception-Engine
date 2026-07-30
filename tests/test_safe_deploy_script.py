@@ -68,6 +68,23 @@ class SafeDeployScriptTest(unittest.TestCase):
             compose_config,
         )
 
+    def test_cutover_drains_old_nginx_workers_before_upstream_removal(self):
+        self.assertIn("nginx_worker_pids()", self.script)
+        self.assertIn("wait_for_nginx_workers_to_drain()", self.script)
+        self.assertIn(
+            'wait_for_nginx_workers_to_drain "$previous_worker_pids" 330',
+            self.script,
+        )
+        route_function = self.script[
+            self.script.index("route_web_to()") : self.script.index(
+                "\n}\n\nacquire_lock", self.script.index("route_web_to()")
+            )
+        ]
+        self.assertLess(
+            route_function.index("nginx -s reload"),
+            route_function.index("wait_for_nginx_workers_to_drain"),
+        )
+
     def test_deploy_has_lock_disk_gate_and_post_build_cleanup(self):
         self.assertIn("acquire_lock", self.script)
         self.assertIn("MMN_DEPLOY_MIN_FREE_MB", self.script)

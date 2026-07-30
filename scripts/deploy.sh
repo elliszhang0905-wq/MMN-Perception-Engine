@@ -114,9 +114,39 @@ wait_for_container_health() {
   return 1
 }
 
+nginx_worker_pids() {
+  local master_pid=""
+  master_pid="$(docker inspect --format '{{.State.Pid}}' mmn-web)"
+  docker top mmn-web -eo pid,ppid,comm \
+    | awk -v master_pid="$master_pid" 'NR > 1 && $2 == master_pid && $3 == "nginx" {print $1}'
+}
+
+wait_for_nginx_workers_to_drain() {
+  local worker_pids="$1"
+  local attempts="${2:-330}"
+  local pending=""
+  local pid=""
+  for ((i = 1; i <= attempts; i += 1)); do
+    pending=""
+    for pid in $worker_pids; do
+      if kill -0 "$pid" 2>/dev/null; then
+        pending="${pending} ${pid}"
+      fi
+    done
+    if [[ -z "$pending" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "旧 Nginx 工作进程未在 ${attempts} 秒内完成请求排空：${pending}" >&2
+  return 1
+}
+
 route_web_to() {
   local upstream_name="$1"
+  local previous_worker_pids=""
   local routed_config=""
+  previous_worker_pids="$(nginx_worker_pids)"
   routed_config="$(mktemp /tmp/mmn-nginx-route.XXXXXX)"
   sed "s#http://mmn-app:8765#http://${upstream_name}:8765#g" "$NGINX_BASE_CONFIG" > "$routed_config"
   cp "$routed_config" deploy/nginx-runtime/default.conf
@@ -131,6 +161,10 @@ route_web_to() {
   fi
   if ! compose exec -T mmn-web wget -qO- "http://${upstream_name}:8765/api/health" >/dev/null 2>&1; then
     echo "反向代理目标 ${upstream_name} 健康检查失败。" >&2
+    return 1
+  fi
+  if ! wait_for_nginx_workers_to_drain "$previous_worker_pids" 330; then
+    echo "反向代理已指向 ${upstream_name}，但旧请求尚未安全排空。" >&2
     return 1
   fi
 }
