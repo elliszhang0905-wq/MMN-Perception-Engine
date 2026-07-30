@@ -8,6 +8,7 @@ from unittest.mock import patch
 from douyin_video_insights import (
     PROMPT_VERSION,
     build_evidence_package,
+    canonical_douyin_video_url,
     create_job,
     cross_validate,
     get_job,
@@ -83,6 +84,26 @@ class DouyinVideoInsightContractTest(unittest.TestCase):
         self.assertEqual(resolution["mediaAvailability"], "page_only")
         self.assertEqual(resolution["mediaUrl"], "")
         self.assertIn("不等于系统已读取视频本体", "".join(resolution["errors"]))
+
+    def test_iesdouyin_share_video_is_canonicalized_with_matching_item_id(self):
+        item = {
+            **self.item,
+            "sourceUrl": "https://www.iesdouyin.com/share/video/7650000000000000001/?region=CN",
+        }
+        resolution = resolve_video_access(item)
+        self.assertTrue(resolution["pageAvailable"])
+        self.assertEqual(
+            resolution["pageUrl"],
+            "https://www.douyin.com/video/7650000000000000001",
+        )
+        self.assertEqual(
+            canonical_douyin_video_url(item["sourceUrl"], item["itemId"]),
+            resolution["pageUrl"],
+        )
+        self.assertEqual(
+            canonical_douyin_video_url(item["sourceUrl"], "7650000000000000999"),
+            "",
+        )
 
     def test_complete_evidence_keeps_timestamps_and_current_item_only(self):
         package = self.package()
@@ -296,6 +317,43 @@ class DouyinVideoInsightContractTest(unittest.TestCase):
                 ("qwen", 1),
             ])
 
+    def test_slot_retry_limit_counts_schema_invalid_completed_responses(self):
+        package = self.package()
+        with tempfile.TemporaryDirectory() as tmp, patch.object(server, "DB_PATH", Path(tmp) / "mmn.db"):
+            server.init_db()
+            with server.db() as conn:
+                job, _ = create_job(
+                    conn,
+                    org_id="local",
+                    edition="china",
+                    view="videos",
+                    range_key="24h",
+                    item=self.item,
+                )
+                update_job(conn, job["jobId"], status="incomplete", evidence=package)
+                for index in range(3):
+                    conn.execute(
+                        """
+                        insert into douyin_video_insight_retry_log
+                          (id,job_id,requested_slot,reason,created_at)
+                        values(?,?,?,?,?)
+                        """,
+                        (f"retry-{index}", job["jobId"], "2", "结构校验失败", f"2026-07-30T00:00:0{index}Z"),
+                    )
+            with self.assertRaisesRegex(ValueError, "安全重试上限"):
+                server.start_video_insight_job(
+                    {
+                        "edition": "china",
+                        "view": "videos",
+                        "range": "24h",
+                        "itemId": self.item["itemId"],
+                        "force": True,
+                        "retrySlot": "2",
+                    },
+                    org_id="local",
+                    trusted_item=self.item,
+                )
+
     def test_server_runs_three_independent_calls_and_persists_completed_result(self):
         captured = []
 
@@ -362,6 +420,7 @@ class DouyinVideoInsightContractTest(unittest.TestCase):
         self.assertTrue(saved["evidencePackage"]["acquisition"]["mediaAvailable"])
         self.assertEqual(saved["evidencePackage"]["keyframes"][0]["startMs"], 4200)
         self.assertEqual(captured_media[0]["localImageTimestampsMs"], [4200])
+        self.assertEqual(captured_media[0]["durationMs"], 28000)
 
     def test_server_partial_failure_is_incomplete_without_template_fill(self):
         def provider_runner(provider, messages):

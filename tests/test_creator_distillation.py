@@ -35,6 +35,13 @@ class CreatorDistillationTest(unittest.TestCase):
         with self.assertRaises(MediaProcessingError):
             media_processing._json_object("没有可解析的结构化结果")
 
+    def test_ocr_json_parser_repairs_top_level_list_without_inventing_text(self):
+        value = media_processing._json_object(
+            '[{"imageIndex":0,"text":"报价单"}]',
+            list_field="texts",
+        )
+        self.assertEqual(value, {"texts": [{"imageIndex": 0, "text": "报价单"}]})
+
     def test_visual_processing_accepts_internal_browser_frames_with_timestamps(self):
         with tempfile.TemporaryDirectory() as tmp:
             frame = Path(tmp) / "frame.jpg"
@@ -95,6 +102,21 @@ class CreatorDistillationTest(unittest.TestCase):
         self.assertTrue(requests[0][0].endswith("/services/audio/asr/transcription"))
         self.assertTrue(requests[1][0].endswith("/tasks/task-1"))
         self.assertEqual(requests[0][2].get("X-dashscope-async"),"enable")
+
+    def test_transcribe_media_reads_legacy_top_level_duration_for_long_video(self):
+        asset = {
+            "source_id": "long-video",
+            "duration_ms": 360000,
+            "media": {"audioUrl": "https://example.com/long.mp4"},
+        }
+        with patch(
+            "creator_distillation.media_processing.transcribe_long_media",
+            return_value=("长视频真实转写", "filetrans-test"),
+        ) as long_asr:
+            evidence, mode = media_processing.transcribe_media(asset)
+        long_asr.assert_called_once_with("https://example.com/long.mp4", 360000)
+        self.assertEqual(mode, "qwen3_asr_filetrans")
+        self.assertEqual(evidence[0]["quote_text"], "长视频真实转写")
 
     def test_platform_link_preflight_keeps_platform_specific_capability(self):
         dy=self.service.preflight("https://www.douyin.com/user/MS4wLjAB")
@@ -261,6 +283,12 @@ class CreatorDistillationTest(unittest.TestCase):
         with patch("creator_distillation.media_processing.socket.getaddrinfo",fake_dns):
             self.assertEqual(_safe_public_url("https://sns-i11.rednotecdn.com/a.jpg"),
                              "https://sns-i11.rednotecdn.com/a.jpg")
+            self.assertEqual(
+                _safe_public_url(
+                    "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/transcript.json"
+                ),
+                "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/transcript.json",
+            )
             with self.assertRaises(MediaProcessingError):
                 _safe_public_url("https://untrusted.example/a.jpg")
 

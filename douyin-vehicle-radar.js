@@ -114,10 +114,36 @@
     if (!job) return `<button type="button" class="ghost" data-dvr-insight="${escapeHtml(id)}">生成逐视频洞察</button>`;
     const running = insightActive.has(job.status);
     const insight = job.result?.validation?.finalInsight || {};
+    const evidence = job.evidencePackage || {};
+    const transcriptCount = (evidence.transcriptSegments || []).length;
+    const visualCount = (evidence.keyframes || []).length + (evidence.visualSegments || []).length;
+    const ocrCount = (evidence.ocrSegments || []).length;
+    const missing = [];
+    if (!transcriptCount) missing.push("字幕或转写");
+    if (!visualCount) missing.push("关键画面");
+    if (!ocrCount) missing.push("画面文字");
+    const analysisStarted = (job.runStatus || []).some(row => row.status && row.status !== "pending");
+    const statusTitle = {
+      limited_analysis: "视频内容未读取完整",
+      incomplete: analysisStarted ? "部分分析未完成" : "分析尚未启动",
+      manual_required: "核心判断等待人工复核",
+      failed: "逐视频洞察未完成",
+      completed: "逐视频洞察已完成",
+    }[job.status] || job.message || "当前未形成可发布洞察";
+    const evidenceNote = job.status === "limited_analysis"
+      ? `${missing.length ? `缺失：${missing.join("、")}；` : ""}${analysisStarted ? "部分分析已运行" : "三路分析尚未启动"}`
+      : "";
+    const failedReview = (job.result?.validation?.runs || []).find(row => row.status === "failed");
+    const actionLabel = job.status === "limited_analysis" && !analysisStarted
+      ? "补取视频证据并分析"
+      : job.status === "incomplete" && failedReview
+        ? `重试未完成分析 ${failedReview.slot}`
+        : job.status === "incomplete" ? "重试未完成分析" : "重新分析";
     return `<div class="dvr-insight ${escapeHtml(job.status || "")}">
-      <div><b>${running ? `${Number(job.progress) || 0}% · ${escapeHtml(job.message || "分析中")}` : escapeHtml(insight.contentSummary || job.message || "当前未形成可发布洞察")}</b>
+      <div><b>${running ? `${Number(job.progress) || 0}% · ${escapeHtml(job.message || "分析中")}` : escapeHtml(insight.contentSummary || statusTitle)}</b>
+      ${evidenceNote ? `<small>${escapeHtml(evidenceNote)}</small>` : ""}
       ${!running && insight.marketingImplications?.length ? `<p>${escapeHtml(insight.marketingImplications[0])}</p>` : ""}</div>
-      <button type="button" class="ghost" data-dvr-insight="${escapeHtml(id)}" ${running ? "disabled" : ""}>${running ? "分析中…" : "重新分析"}</button>
+      <button type="button" class="ghost" data-dvr-insight="${escapeHtml(id)}" data-dvr-retry-slot="${escapeHtml(failedReview?.slot || "")}" ${running ? "disabled" : ""}>${running ? "分析中…" : escapeHtml(actionLabel)}</button>
     </div>`;
   }
   function resultRow(item, index, pendingOverride = false) {
@@ -317,7 +343,11 @@
     mount.querySelectorAll("[data-dvr-review]").forEach(button => button.onclick = () =>
       reviewItem(button.dataset.dvrReview, button.dataset.verdict));
     mount.querySelectorAll("[data-dvr-insight]").forEach(button => button.onclick = () =>
-      startInsight(button.dataset.dvrInsight, Boolean(state.insightJobs.get(button.dataset.dvrInsight))));
+      startInsight(
+        button.dataset.dvrInsight,
+        Boolean(state.insightJobs.get(button.dataset.dvrInsight)),
+        button.dataset.dvrRetrySlot || "",
+      ));
     mount.querySelector("[data-dvr-strategy]")?.addEventListener("click", runStrategy);
   }
   async function startRun() {
@@ -407,12 +437,12 @@
       state.run.result = payload.result; render();
     } catch (error) { state.error = error.message || String(error); render(); }
   }
-  async function startInsight(platformItemId, force) {
+  async function startInsight(platformItemId, force, retrySlot = "") {
     try {
       const payload = await request("/api/douyin-vehicle-radar/video-insights/jobs", {
         method: "POST",
         body: JSON.stringify({
-          edition: edition(), runId: state.run.id, platformItemId, force,
+          edition: edition(), runId: state.run.id, platformItemId, force, retrySlot,
         }),
       });
       state.insightJobs.set(String(platformItemId), payload.job); render();

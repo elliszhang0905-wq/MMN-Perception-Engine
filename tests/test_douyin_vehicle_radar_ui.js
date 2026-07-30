@@ -19,7 +19,7 @@ assert.match(
 );
 assert.match(
   html,
-  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260730-policy-auto-audit-1/,
+  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260730-douyin-video-evidence-chain-1/,
   "radar assets should use the cache-busting customer-UI revision",
 );
 assert.match(script, /待补热度/, "missing view metrics should be isolated from formal rankings");
@@ -35,6 +35,12 @@ assert.match(script, /data-dvr-model/, "single-model ranking should expose a veh
 assert.match(script, /data-dvr-topn/, "single-model ranking should expose a Top N control");
 assert.match(script, /查看完整榜单/, "cockpit should keep a compact Top 5 summary with an explicit full-list action");
 assert.match(script, /collection\?\.stopReason|collection\.stopReason/, "coverage stop reason must be rendered");
+assert.match(script, /视频内容未读取完整/, "limited evidence must not look like a generic model failure");
+assert.match(script, /三路分析尚未启动/, "the UI must distinguish evidence acquisition from model analysis");
+assert.match(script, /补取视频证据并分析/, "limited evidence must expose the correct recovery action");
+assert.match(script, /data-dvr-retry-slot/, "an incomplete review must expose the failed slot only");
+assert.match(script, /retrySlot/, "the radar retry request must preserve successful review runs");
+assert.match(styles, /\.dvr-insight small\{[^}]*display:block/, "evidence limitations must remain readable");
 assert.doesNotMatch(
   script,
   /visibleItems\.map\(resultRow\)|items\.map\(resultRow\)/,

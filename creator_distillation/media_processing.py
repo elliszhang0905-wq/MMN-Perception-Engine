@@ -19,6 +19,7 @@ class MediaProcessingError(RuntimeError):
 _TRUSTED_MEDIA_HOST_SUFFIXES = (
     "douyinstatic.com", "douyinpic.com", "douyinvod.com", "bytecdntp.com",
     "rednotecdn.com", "xhscdn.com", "tikhub.io",
+    "dashscope-result-bj.oss-cn-beijing.aliyuncs.com",
 )
 _LOCAL_PROXY_SYNTHETIC_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 
@@ -142,7 +143,7 @@ def _chat_completion(model, messages, timeout=180, extra=None, api_key_env="DASH
         raise MediaProcessingError(f"多模态模型调用失败: {type(exc).__name__}") from exc
 
 
-def _json_object(text):
+def _json_object(text, *, list_field=""):
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(text or "").strip(), flags=re.I | re.S)
     try:
         value = json.loads(cleaned)
@@ -159,6 +160,8 @@ def _json_object(text):
                 break
         if value is None:
             raise MediaProcessingError("多模态模型未返回 JSON 对象")
+    if isinstance(value, list) and list_field:
+        return {list_field: value}
     if not isinstance(value, dict):
         raise MediaProcessingError("多模态模型结果不是 JSON 对象")
     return value
@@ -244,6 +247,8 @@ def transcribe_media(asset):
             continue
     audio_url = media.get("audioUrl") or media.get("videoUrl")
     duration_ms = media.get("durationMs")
+    if duration_ms in {None, ""}:
+        duration_ms = asset.get("durationMs") or asset.get("duration_ms")
     if not audio_url:
         return [], "unavailable"
     if duration_ms and int(duration_ms) > 5 * 60 * 1000:
@@ -405,7 +410,7 @@ def analyze_ocr_media(asset):
     payload = _chat_completion(
         model, [{"role": "user", "content": content}], timeout=180,
         api_key_env="MMN_CREATOR_OCR_API_KEY")
-    parsed = _json_object(_model_content(payload))
+    parsed = _json_object(_model_content(payload), list_field="texts")
     provenance = {"processor": "specialist_ocr", "provider": "qwen_ocr",
                   "model": payload.get("model") or model, "availability": "available",
                   "fetchTime": datetime.now(timezone.utc).isoformat()}

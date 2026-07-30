@@ -84,6 +84,30 @@ def _stable_url(value):
         return value
 
 
+def canonical_douyin_video_url(value, expected_item_id=""):
+    """Return one canonical Douyin video page after host, path and item checks."""
+    value = _text(value, 2000)
+    expected_item_id = _text(expected_item_id, 160)
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return ""
+    if parts.scheme.lower() != "https":
+        return ""
+    host = (parts.hostname or "").lower()
+    patterns = {
+        "douyin.com": r"^/video/(\d+)(?:/.*)?$",
+        "www.douyin.com": r"^/video/(\d+)(?:/.*)?$",
+        "iesdouyin.com": r"^/share/video/(\d+)(?:/.*)?$",
+        "www.iesdouyin.com": r"^/share/video/(\d+)(?:/.*)?$",
+    }
+    match = re.match(patterns.get(host, r"(?!x)x"), parts.path or "")
+    item_id = match.group(1) if match else ""
+    if not item_id or (expected_item_id and item_id != expected_item_id):
+        return ""
+    return f"https://www.douyin.com/video/{item_id}"
+
+
 def init_schema(conn):
     conn.executescript("""
     create table if not exists douyin_video_insight_jobs (
@@ -172,8 +196,9 @@ def source_fingerprint(item):
 
 def resolve_video_access(item):
     item_id = _text(item.get("itemId") or item.get("id"), 160)
-    page_url = _text(item.get("sourceUrl"), 2000)
-    page_valid = bool(re.match(r"^https://(?:www\.)?douyin\.com/(?:video/\d+|.+)", page_url))
+    source_url = _text(item.get("sourceUrl"), 2000)
+    page_url = canonical_douyin_video_url(source_url, item_id)
+    page_valid = bool(page_url)
     media_url = _text(item.get("mediaUrl") or item.get("videoUrl"), 2000)
     audio_url = _text(item.get("audioUrl"), 2000)
     subtitle_url = _text(item.get("subtitleUrl"), 2000)

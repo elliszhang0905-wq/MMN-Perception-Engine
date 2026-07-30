@@ -47,6 +47,32 @@ class DouyinBrowserEvidenceTest(unittest.TestCase):
             self.assertEqual(environment["NODE_PATH"], str((root / "node_modules").resolve()))
             self.assertEqual(environment["MMN_DOUYIN_BROWSER_EXECUTABLE"], "/usr/bin/chromium")
 
+    def test_iesdouyin_share_video_is_normalized_before_browser_worker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            frame = root / "frame.jpg"
+            frame.write_bytes(b"frame")
+            payload = {
+                "pageAvailable": True,
+                "mediaAvailable": True,
+                "durationMs": 360000,
+                "frames": [{"path": str(frame), "timestampMs": 1000}],
+                "mediaFingerprint": "browser-fingerprint",
+            }
+            completed = subprocess.CompletedProcess([], 0, json.dumps(payload), "")
+            with patch("douyin_browser_evidence.subprocess.run", return_value=completed) as runner:
+                extract_browser_video_evidence(
+                    "https://www.iesdouyin.com/share/video/123/?region=CN",
+                    "123",
+                    root,
+                    node_binary="node",
+                    script_path=root / "worker.js",
+                )
+            self.assertEqual(
+                runner.call_args.args[0][-3],
+                "https://www.douyin.com/video/123",
+            )
+
     def test_worker_has_server_headless_fallback_without_hiding_evidence_failure(self):
         worker = Path(__file__).resolve().parents[1] / "scripts" / "douyin_video_browser_evidence.js"
         source = worker.read_text(encoding="utf-8")

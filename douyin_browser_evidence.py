@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
+
+from douyin_video_insights import canonical_douyin_video_url
 
 
 class BrowserEvidenceError(RuntimeError):
@@ -18,9 +19,8 @@ def extract_browser_video_evidence(source_url, item_id, output_root, *,
                                    node_binary="node", script_path=None, timeout=90,
                                    node_modules=None, browser_executable=None):
     item_id = str(item_id or "").strip()
-    source_url = str(source_url or "").strip()
-    match = re.fullmatch(r"https://(?:www\.)?douyin\.com/video/(\d+)(?:[/?#].*)?", source_url)
-    if not match or match.group(1) != item_id:
+    source_url = canonical_douyin_video_url(source_url, item_id)
+    if not source_url:
         raise BrowserEvidenceError("原视频地址与当前榜单内容不匹配")
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)

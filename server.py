@@ -330,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260730-policy-auto-audit-1"
+APP_VERSION_CODE = "beta-1.03-20260730-douyin-video-evidence-chain-1"
 APP_RELEASE_DATE = "2026-07-30"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -2988,11 +2988,16 @@ def execute_video_insight_job(job_id, org_id, edition, request, *, media_runner=
                     "localImagePaths": (browser_evidence or {}).get("imagePaths") or [],
                     "localImageTimestampsMs": (browser_evidence or {}).get("timestampsMs") or [],
                 }
+                duration_ms = int(
+                    (browser_evidence or {}).get("durationMs")
+                    or float(item.get("duration") or 0) * 1000
+                )
+                asset_media["durationMs"] = duration_ms
                 if any(asset_media.values()):
                     runner = media_runner or process_representative_media
                     processed, _media_stats, processing_errors = runner([{
                         "source_id": str(item.get("itemId")), "title": item.get("title"),
-                        "duration_ms": int((browser_evidence or {}).get("durationMs") or float(item.get("duration") or 0) * 1000),
+                        "duration_ms": duration_ms,
                         "media": asset_media,
                     }], max_assets=1)
                     media_errors.extend(processing_errors or [])
@@ -3067,7 +3072,11 @@ def start_video_insight_job(body, *, org_id="local", media_runner=None, provider
                   select count(*) from douyin_video_insight_runs
                   where job_id=? and provider_key=? and evidence_fingerprint=? and status='failed'
                 """, (existing["id"], retry_provider, existing["evidence_fingerprint"])).fetchone()[0]
-                if failed_attempts >= 3:
+                slot_retries = conn.execute("""
+                  select count(*) from douyin_video_insight_retry_log
+                  where job_id=? and requested_slot=?
+                """, (existing["id"], retry_slot)).fetchone()[0]
+                if max(failed_attempts, slot_retries) >= 3:
                     raise ValueError("该失败项在当前冻结证据包下已达到安全重试上限，请先恢复分析能力后再试。")
             elif existing and conn.execute(
                 "select count(*) from douyin_video_insight_retry_log where job_id=?",
@@ -17017,6 +17026,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         "range": f"{run['rangeDays']}d",
                         "itemId": item["itemId"],
                         "force": body.get("force") is True,
+                        "retrySlot": str(body.get("retrySlot") or ""),
                     },
                     org_id=auth.get("org_id", "local"),
                     trusted_item=item,
