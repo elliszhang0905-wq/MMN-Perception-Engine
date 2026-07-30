@@ -346,7 +346,7 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIn("mmn-app:/app/data/dongchedi_sales/sales_warning_history.json", deploy_script)
         self.assertIn("保留服务器已有车型上市日期，不用版本文件覆盖", deploy_script)
         self.assertIn("restart mmn-app mmn-scheduler", deploy_script)
-        self.assertIn('APP_HEALTH" == "healthy', deploy_script)
+        self.assertIn("wait_for_app_health 60", deploy_script)
         self.assertIn("restart mmn-web", deploy_script)
         self.assertIn("wget -qO- http://127.0.0.1/api/health", deploy_script)
 
