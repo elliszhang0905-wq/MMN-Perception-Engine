@@ -140,8 +140,6 @@ set -a
 source .env
 set +a
 
-ensure_build_capacity
-
 IMAGE_REPOSITORY="${MMN_IMAGE_REPOSITORY:-mmn-perception-engine}"
 DEPLOY_IMAGE_TAG="${MMN_IMAGE_TAG:-latest}"
 CANDIDATE_IMAGE_TAG="candidate-$(date '+%Y%m%d%H%M%S')"
@@ -151,10 +149,16 @@ APP_WAS_RUNNING="false"
 
 if compose ps --services --filter status=running 2>/dev/null | grep -qx "mmn-app"; then
   APP_WAS_RUNNING="true"
-  echo "发布前备份当前运行数据。"
-  bash scripts/backup.sh
   PREVIOUS_IMAGE_ID="$(docker inspect --format '{{.Image}}' mmn-app)"
   docker tag "$PREVIOUS_IMAGE_ID" "${IMAGE_REPOSITORY}:${ROLLBACK_IMAGE_TAG}"
+  docker image prune --force
+fi
+
+ensure_build_capacity
+
+if [[ "$APP_WAS_RUNNING" == "true" ]]; then
+  echo "发布前备份当前运行数据。"
+  bash scripts/backup.sh
 fi
 
 echo "旧版本继续在线，开始构建候选镜像。"

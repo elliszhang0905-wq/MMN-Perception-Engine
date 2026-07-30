@@ -24,6 +24,11 @@ class SafeDeployScriptTest(unittest.TestCase):
             self.script.index("compose build mmn-app"),
         )
         self.assertIn("旧版本继续在线，开始构建候选镜像", self.script)
+        self.assertLess(
+            self.script.index('docker tag "$PREVIOUS_IMAGE_ID"'),
+            self.script.rindex("ensure_build_capacity"),
+        )
+        self.assertIn("docker image prune --force", self.script)
 
     def test_failed_cutover_has_automatic_image_rollback(self):
         self.assertIn('ROLLBACK_IMAGE_TAG="rollback"', self.script)
