@@ -3,7 +3,7 @@
   "source": "dongchedi_public_rank_api",
   "sourceLabel": "懂车帝月销量榜",
   "sourceUrl": "https://www.dongchedi.com/sales",
-  "updatedAt": "2026-07-17T07:54:39+00:00",
+  "updatedAt": "2026-07-30T06:04:15+00:00",
   "latestPeriod": "2026-06",
   "windowPeriods": [
     "2026-01",
@@ -418,6 +418,176 @@
               "seriesId": "25904",
               "model": "蔚来ES9",
               "sales": 8595,
+              "rank": 3
+            }
+          ]
+        }
+      ]
+    },
+    "9118": {
+      "seriesId": "9118",
+      "model": "智己LS6",
+      "launchDate": "2025-09-10",
+      "rankType": "mid_large_suv",
+      "months": [
+        {
+          "period": "2026-01",
+          "sales": 2090,
+          "rank": 15,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 27146,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 37869,
+              "rank": 1
+            },
+            {
+              "seriesId": "5820",
+              "model": "问界M7",
+              "sales": 26454,
+              "rank": 2
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 17116,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-02",
+          "sales": 1440,
+          "rank": 13,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 15965,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 20196,
+              "rank": 1
+            },
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 16007,
+              "rank": 2
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 11693,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-03",
+          "sales": 3073,
+          "rank": 10,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 17314,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 24198,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 14187,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 13558,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-04",
+          "sales": 3005,
+          "rank": 11,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 15034,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 21024,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 14201,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 9876,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-05",
+          "sales": 3295,
+          "rank": 12,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 18424,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 20878,
+              "rank": 1
+            },
+            {
+              "seriesId": "25953",
+              "model": "问界M6",
+              "sales": 18148,
+              "rank": 2
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 16247,
+              "rank": 3
+            }
+          ]
+        },
+        {
+          "period": "2026-06",
+          "sales": 3661,
+          "rank": 11,
+          "rankType": "mid_large_suv",
+          "segmentTop3AverageSales": 16981,
+          "segmentTop3Vehicles": [
+            {
+              "seriesId": "25557",
+              "model": "理想i6",
+              "sales": 21453,
+              "rank": 1
+            },
+            {
+              "seriesId": "25559",
+              "model": "钛7 PHEV",
+              "sales": 15165,
+              "rank": 2
+            },
+            {
+              "seriesId": "20041",
+              "model": "小米YU7",
+              "sales": 14324,
               "rank": 3
             }
           ]

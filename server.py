@@ -104,7 +104,13 @@ from vehicle_decision import (
     review_learning_candidate as review_vehicle_learning_candidate,
     update_action_status as update_vehicle_decision_action_status,
 )
-from group_dashboard import build_group_dashboard_payload, build_sales_warning_demo, merge_sales_payloads, parse_cpca_ice_market
+from group_dashboard import (
+    build_group_dashboard_payload,
+    build_sales_warning_demo,
+    merge_sales_payloads,
+    parse_cpca_ice_market,
+    trusted_policy_warning_models,
+)
 from weekly_market_refresh import load_weekly_market_snapshot, refresh_weekly_market_snapshot
 from mmn_model_governance import (
     GOVERNANCE_VERSION,
@@ -220,6 +226,7 @@ from mmn_eval.dashboard import (
     save_human_review as save_mmn_eval_human_review,
 )
 from policy_intelligence import (
+    POLICY_STRATEGY_PROVIDERS,
     SUPPORTED_POLICY_REGIONS,
     build_policy_dashboard_payload,
     build_sales_warning_policy_profiles,
@@ -229,6 +236,7 @@ from policy_intelligence import (
     init_policy_schema,
     list_policy_knowledge_signals,
     list_policy_records,
+    normalize_policy_strategy_output,
     parse_policy_with_gateway,
     review_policy,
     save_policy_analysis_result,
@@ -322,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260730-dashboard-vehicle-heat-1"
+APP_VERSION_CODE = "beta-1.03-20260730-policy-auto-audit-1"
 APP_RELEASE_DATE = "2026-07-30"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -1160,6 +1168,52 @@ def validate_policy_vehicle_inputs(price_raw, scenario_raw, engine_displacement_
     ):
         raise ValueError("发动机排量超出政策分析范围。")
     return price, scenario, engine_displacement
+
+
+def optional_policy_vehicle_inputs(price_raw, scenario_raw, engine_displacement_raw=None):
+    """Validate supplied fields while preserving an absent price as missing evidence."""
+    scenario = str(scenario_raw or "").strip()
+    if scenario not in {"直接购车", "置换更新", "报废更新"}:
+        raise ValueError("购车情景必须为直接购车、置换更新或报废更新。")
+    raw_price = str(price_raw or "").strip()
+    if raw_price:
+        return validate_policy_vehicle_inputs(raw_price, scenario, engine_displacement_raw)
+    raw_engine = str(engine_displacement_raw or "").strip()
+    engine_displacement = float(raw_engine) if raw_engine else None
+    if engine_displacement is not None and (
+        not math.isfinite(engine_displacement) or engine_displacement <= 0 or engine_displacement > 20
+    ):
+        raise ValueError("发动机排量超出政策分析范围。")
+    return None, scenario, engine_displacement
+
+
+def trusted_policy_vehicle_profile(conn, org_id, edition, model, scenario):
+    """Resolve policy inputs from the tenant-scoped vehicle record, never the client."""
+    model = str(model or "").strip()
+    warning = next(
+        (
+            item for item in trusted_policy_warning_models(conn, org_id, edition)
+            if str(item.get("model") or "").strip() == model
+        ),
+        None,
+    )
+    profiles = build_sales_warning_policy_profiles(
+        warning,
+        (warning or {}).get("period") or "",
+    )
+    if profiles:
+        return {**profiles[0], "model": model, "scenario": scenario}
+    return {
+        "model": model,
+        "price": None,
+        "energyType": "",
+        "bodyType": "",
+        "engineDisplacementL": None,
+        "priceSource": "",
+        "priceAsOf": "",
+        "scenario": scenario,
+    }
+
 
 def bf_service():
     gateway = bf_model_gateway if BF_MODELS_ENABLED else None
@@ -5359,6 +5413,26 @@ def policy_strategy_messages(dashboard_result):
     ]
 
 
+def policy_strategy_summary_messages(dashboard_result, validated):
+    impact = dict((dashboard_result or {}).get("vehicleImpact") or {})
+    packet = {
+        "车型": impact.get("model"),
+        "区域": impact.get("region"),
+        "购车情景": (impact.get("profile") or {}).get("purchaseScenario"),
+        "共同政策证据ID": validated.get("commonEvidenceIds") or [],
+        "独立审核结果": list((validated.get("providers") or {}).values()),
+    }
+    system = (
+        "你是MMN最终归纳选择器。三份独立审核已通过共同证据、政策判断和策略方向的一致性门禁。"
+        "只能从三份原始审核中选择一份作为最终归纳，不得重写、补充或删除任何策略字段。"
+        "只输出单个合法JSON对象，且只能包含 selectedProvider；其值只能是 qwen、deepseek 或 kimi。"
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(packet, ensure_ascii=False)},
+    ]
+
+
 def run_policy_strategy_validation(dashboard_result, provider_runner=None):
     impact = dict((dashboard_result or {}).get("vehicleImpact") or {})
     evidence_ids = [item.get("policyId") for item in impact.get("policyEffects") or [] if item.get("policyId")]
@@ -5397,7 +5471,47 @@ def run_policy_strategy_validation(dashboard_result, provider_runner=None):
                 outputs[provider] = future.result()
             except Exception as exc:
                 errors[provider] = str(exc)
+    for provider in tuple(errors):
+        try:
+            outputs[provider] = run_one(provider)
+            errors.pop(provider, None)
+        except Exception as exc:
+            errors[provider] = str(exc)
     validated = cross_validate_policy_strategies(outputs, evidence_ids, errors)
+    if validated.get("status") == "aligned":
+        summary_messages = policy_strategy_summary_messages(dashboard_result, validated)
+        try:
+            raw_summary = (
+                provider_runner("qwen", summary_messages)
+                if provider_runner
+                else call_provider("qwen", summary_messages, "strategy_reasoning", mode="deep")
+            )
+            selection = parse_json_object(raw_summary)
+            if not isinstance(selection, dict) or set(selection) != {"selectedProvider"}:
+                raise ValueError("最终归纳只能选择一份已通过门禁的原始审核")
+            selected_provider = str(selection.get("selectedProvider") or "").strip().lower()
+            if selected_provider not in POLICY_STRATEGY_PROVIDERS:
+                raise ValueError("最终归纳选择了不存在的审核结果")
+            summary = dict(validated["providers"][selected_provider])
+            summary.pop("provider", None)
+            summary["evidenceIds"] = list(validated["commonEvidenceIds"])
+            summary["confidence"] = min(
+                summary["confidence"],
+                validated["finalStrategy"]["confidence"],
+            )
+            summary["modelAgreement"] = "三方政策判断与策略方向一致"
+            summary["agreementFields"] = [
+                "policyJudgement",
+                "strategyDirection",
+                "commonEvidenceIds",
+            ]
+            summary["summaryRole"] = "MMN最终归纳"
+            summary["selectedReview"] = selected_provider
+            validated["finalStrategy"] = summary
+        except Exception as exc:
+            validated["status"] = "manual_required"
+            validated["reasons"] = ["最终归纳未通过一致性门禁：%s" % exc]
+            validated["finalStrategy"] = None
     validated["modelNames"] = {
         "qwen": qwen_config("deep")["model"],
         "deepseek": deepseek_config("deep")["model"],
@@ -15290,30 +15404,29 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 query = parse_qs(parsed.query)
                 auth = self.current_auth() or {}
-                price, scenario, engine_displacement = validate_policy_vehicle_inputs(
-                    query.get("price", ["280000"])[0],
+                _, scenario, _ = optional_policy_vehicle_inputs(
+                    None,
                     query.get("scenario", ["置换更新"])[0],
-                    query.get("engineDisplacementL", [""])[0],
+                    None,
                 )
                 region = str(query.get("region", ["上海"])[0] or "上海").strip()
                 if region not in SUPPORTED_POLICY_REGIONS:
                     raise ValueError("区域必须为支持的省、自治区或直辖市。")
-                profile = {
-                    "model": str(query.get("model", ["奥迪E7X"])[0] or "奥迪E7X").strip(),
-                    "price": price,
-                    "energyType": str(query.get("energyType", ["新能源"])[0] or "新能源").strip(),
-                    "bodyType": str(query.get("bodyType", ["SUV"])[0] or "SUV").strip(),
-                    "engineDisplacementL": engine_displacement,
-                    "priceSource": str(query.get("priceSource", ["analyst_input"])[0] or "analyst_input").strip(),
-                    "priceAsOf": str(query.get("priceAsOf", [""])[0] or "").strip(),
-                    "scenario": scenario,
-                }
+                model = str(query.get("model", [""])[0] or "").strip()
+                edition = edition_from(query.get("edition", ["china"])[0])
                 with db() as conn:
+                    profile = trusted_policy_vehicle_profile(
+                        conn,
+                        auth.get("org_id", "local"),
+                        edition,
+                        model,
+                        scenario,
+                    )
                     payload = build_policy_dashboard_payload(
                         conn,
-                        model=profile["model"],
+                        model=model,
                         org_id=auth.get("org_id", "local"),
-                        edition=edition_from(query.get("edition", ["china"])[0]),
+                        edition=edition,
                         profile=profile,
                         region=region,
                         as_of=str(query.get("asOf", [""])[0] or "").strip() or None,
@@ -15795,22 +15908,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     requested_policy_model = str(q.get("policy_model", ["奥迪E7X"])[0] or "奥迪E7X").strip()
                     selected_warning = next(
                         (item for item in warning_models if item.get("model") == requested_policy_model),
-                        next((item for item in warning_models if item.get("model") == "奥迪E7X"), warning_models[0] if warning_models else {}),
+                        {},
                     )
                     policy_profiles = build_sales_warning_policy_profiles(
                         selected_warning,
                         payload["salesWarnings"].get("source", {}).get("period") or "",
                     )
+                    availability = "available" if policy_profiles else "selected_model_unavailable"
                     if not policy_profiles:
                         policy_profiles = [{
-                            "model": requested_policy_model or "奥迪E7X",
+                            "model": requested_policy_model,
                             "role": "own",
-                            "price": 269800,
-                            "energyType": "纯电动",
-                            "bodyType": "SUV",
-                            "priceSource": "重点车型监测兜底输入",
-                            "priceAsOf": "2026-07-17",
-                            "salesReference": {"role": "own", "roleLabel": "本品", "level": "gray", "levelLabel": "灰色待复核"},
+                            "price": None,
+                            "energyType": "",
+                            "bodyType": "",
+                            "engineDisplacementL": None,
+                            "priceSource": "",
+                            "priceAsOf": "",
+                            "salesReference": {},
                         }]
                     policy_models = []
                     for policy_profile in policy_profiles:
@@ -15830,24 +15945,35 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             "vehicleImpact": policy_snapshot["vehicleImpact"],
                             "opportunities": policy_snapshot["opportunities"],
                         })
+                    own_model_options = []
+                    for item in warning_models:
+                        option_profiles = build_sales_warning_policy_profiles(
+                            item,
+                            payload["salesWarnings"].get("source", {}).get("period") or "",
+                        )
+                        if not option_profiles:
+                            continue
+                        own_model_options.append({
+                            **{
+                                key: value
+                                for key, value in option_profiles[0].items()
+                                if key not in {"salesReference"}
+                            },
+                            "level": item.get("level"),
+                            "levelLabel": item.get("levelLabel"),
+                            "segmentLabel": item.get("segmentLabel"),
+                        })
                     payload["policyIntelligence"] = {
+                        "availability": availability,
                         "meta": policy_snapshot["meta"],
                         "summary": policy_snapshot["summary"],
                         "region": policy_region,
                         "scenario": policy_scenario,
                         "map": policy_snapshot["map"],
                         "models": policy_models,
-                        "ownModelOptions": [
-                            {
-                                "model": item.get("model"),
-                                "level": item.get("level"),
-                                "levelLabel": item.get("levelLabel"),
-                                "segmentLabel": item.get("segmentLabel"),
-                            }
-                            for item in warning_models
-                        ],
+                        "ownModelOptions": own_model_options,
                         "comparisonMethod": "本品当前销量预警细分市场：销量前三 + 剔除前三后最接近市场销量中位数的三台车",
-                        "salesContext": policy_profiles[0]["salesReference"],
+                        "salesContext": policy_profiles[0].get("salesReference") or {},
                     }
                 force_review = str(q.get("refresh_review", [""])[0]).lower() in {"1", "true", "yes", "on"}
                 payload["executiveBrief"] = executive_brief_state(force=force_review)
@@ -16615,7 +16741,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 auth = self.current_auth() or {}
-                model = str(body.get("model") or "奥迪E7X").strip()
+                model = str(body.get("model") or "").strip()
                 edition = edition_from(body.get("edition") or "china")
                 task_id = str(uuid.uuid4())
                 with ATTRIBUTION_REVIEW_LOCK:
@@ -16650,27 +16776,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = self.read_json()
                 auth = self.current_auth() or {}
                 persist = body.get("persist") is True
-                model = str(body.get("model") or "奥迪E7X").strip()
+                model = str(body.get("model") or "").strip()
                 region = str(body.get("region") or "上海").strip()
                 if region not in SUPPORTED_POLICY_REGIONS:
                     raise ValueError("区域必须为支持的省、自治区或直辖市。")
-                price, scenario, engine_displacement = validate_policy_vehicle_inputs(
-                    body.get("price", 280000),
+                _, scenario, _ = optional_policy_vehicle_inputs(
+                    None,
                     body.get("scenario", "置换更新"),
-                    body.get("engineDisplacementL"),
+                    None,
                 )
-                profile = {
-                    "model": model,
-                    "price": price,
-                    "energyType": str(body.get("energyType") or "新能源").strip(),
-                    "bodyType": str(body.get("bodyType") or "SUV").strip(),
-                    "engineDisplacementL": engine_displacement,
-                    "priceSource": str(body.get("priceSource") or "analyst_input").strip(),
-                    "priceAsOf": str(body.get("priceAsOf") or "").strip(),
-                    "scenario": scenario,
-                }
                 edition = edition_from(body.get("edition") or "china")
                 with db() as conn:
+                    profile = trusted_policy_vehicle_profile(
+                        conn,
+                        auth.get("org_id", "local"),
+                        edition,
+                        model,
+                        scenario,
+                    )
                     result = build_policy_dashboard_payload(
                         conn,
                         model=model,

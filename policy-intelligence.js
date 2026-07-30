@@ -2,24 +2,14 @@
   "use strict";
 
   const causalChainLabel = "政策 → 购车门槛 → 车型竞争力 → 营销机会";
-  const profiles = {
-    "奥迪E7X": { role: "own", price: 269800, energyType: "纯电动", bodyType: "SUV", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "奥迪E5 Sportback": { role: "own", price: 205900, energyType: "纯电动", bodyType: "轿车", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "智己LS8": { role: "own", price: 249800, energyType: "增程式", bodyType: "SUV", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "MG4": { role: "own", price: 65800, energyType: "纯电动", bodyType: "轿车", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "荣威i6": { role: "own", price: 61900, energyType: "燃油", bodyType: "轿车", engineDisplacementL: 1.5, engineDisplacementSource: "上汽集团公开产品信息：1.5L缸内直喷发动机", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "别克至境E7": { role: "own", price: 156900, energyType: "插电式混动", bodyType: "SUV", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "ID.ERA 9X": { role: "own", price: 299800, energyType: "增程式", bodyType: "SUV", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-    "尚界Z7": { role: "own", price: 219800, energyType: "纯电动", bodyType: "轿车", priceSource: "懂车帝重点车型监测/经销商报价起售价", priceAsOf: "2026-07" },
-  };
+  const profiles = {};
   const regions = ["北京", "天津", "上海", "重庆", "河北", "山西", "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "海南", "四川", "贵州", "云南", "陕西", "甘肃", "青海", "内蒙古", "广西", "西藏", "宁夏", "新疆"];
   const regionLabels = { 北京: "北京市", 天津: "天津市", 上海: "上海市", 重庆: "重庆市", 河北: "河北省", 山西: "山西省", 辽宁: "辽宁省", 吉林: "吉林省", 黑龙江: "黑龙江省", 江苏: "江苏省", 浙江: "浙江省", 安徽: "安徽省", 福建: "福建省", 江西: "江西省", 山东: "山东省", 河南: "河南省", 湖北: "湖北省", 湖南: "湖南省", 广东: "广东省", 海南: "海南省", 四川: "四川省", 贵州: "贵州省", 云南: "云南省", 陕西: "陕西省", 甘肃: "甘肃省", 青海: "青海省", 内蒙古: "内蒙古自治区", 广西: "广西壮族自治区", 西藏: "西藏自治区", 宁夏: "宁夏回族自治区", 新疆: "新疆维吾尔自治区" };
-  const providerLabels = { qwen: "Qwen 3.7 Max", deepseek: "DeepSeek V4 Pro", kimi: "Kimi K2.5" };
   const state = { loaded: false, loading: false, loadRequest: 0, model: "奥迪E7X", focusModel: "", region: "上海", scenario: "置换更新", data: null, comparisons: [], analysisId: "", strategyValidation: null, strategyLoading: false, strategyError: "", strategyRequest: 0 };
   const root = () => document.querySelector("#policy-intelligence-root");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-  const money = value => Number.isFinite(Number(value)) ? `¥${Math.round(Number(value)).toLocaleString("zh-CN")}` : "—";
-  const benefitOf = item => Number(item?.maxVerifiedBenefit || item?.maxConditionalBenefit || 0);
+  const money = value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) ? `¥${Math.round(Number(value)).toLocaleString("zh-CN")}` : "—";
+  const benefitOf = item => item?.evidenceStatus === "vehicle_profile_incomplete" ? null : Number(item?.maxVerifiedBenefit || item?.maxConditionalBenefit || 0);
   const priceOf = item => Number(item?.maxVerifiedBenefit || 0) > 0 ? item?.postPolicyReferencePrice : item?.postPolicyConditionalPrice;
   const priceBasisNote = item => Number(item?.profile?.baasDiscount || 0) > 0 ? `BaaS起售价 ${money(item.profile.price)}（含电池参考价 ${money(item.profile.listPrice)}，已减${money(item.profile.baasDiscount)}）` : "";
   const edition = () => { try { return activeEdition(); } catch (_) { return "china"; } };
@@ -35,9 +25,27 @@
     return data;
   }
 
+  function syncProfiles(options = []) {
+    options.forEach(item => {
+      const model = String(item?.model || "").trim(), price = Number(item?.price || 0);
+      if (!model || !Number.isFinite(price) || price <= 0) return;
+      profiles[model] = {
+        ...profiles[model],
+        ...item,
+        role: "own",
+        price,
+        energyType: item.energyType || "待核验",
+        bodyType: item.bodyType || "待核验",
+      };
+    });
+  }
+
   function dashboardUrl(model, region = state.region, scenario = state.scenario) {
-    const profile = profiles[model] || profiles["奥迪E7X"];
-    return `/api/policy-intelligence/dashboard?${new URLSearchParams({ edition: edition(), model, region, scenario, ...profile })}`;
+    const profile = profiles[model];
+    if (!profile) throw new Error("所选车型缺少销量预警政策输入，暂不能测算。");
+    const query = Object.fromEntries(Object.entries({ edition: edition(), model, region, scenario, ...profile })
+      .filter(([, value]) => value !== undefined && value !== null && value !== ""));
+    return `/api/policy-intelligence/dashboard?${new URLSearchParams(query)}`;
   }
 
   function comparisonUrl(model, region = state.region, scenario = state.scenario) {
@@ -51,13 +59,13 @@
     state.loading = true;
     if (root()) root().innerHTML = '<div class="policy-loading"><b>正在关联官方规则与车型价格</b><span></span><span></span><span></span></div>';
     try {
-      const [own, group] = await Promise.all([
-        jsonFetch(dashboardUrl(selection.model, selection.region, selection.scenario)),
-        jsonFetch(comparisonUrl(selection.model, selection.region, selection.scenario)),
-      ]);
+      const group = await jsonFetch(comparisonUrl(selection.model, selection.region, selection.scenario));
       if (requestId !== state.loadRequest) return;
       const comparisons = group?.policyIntelligence?.models || [];
       if (!comparisons.some(item => item?.role === "own" && item?.model === selection.model)) throw new Error("所选车型未进入当前销量预警细分市场，无法生成同场对比。");
+      syncProfiles(group?.policyIntelligence?.ownModelOptions || []);
+      const own = await jsonFetch(dashboardUrl(selection.model, selection.region, selection.scenario));
+      if (requestId !== state.loadRequest) return;
       state.data = own;
       state.comparisons = comparisons.map(item => item.vehicleImpact).filter(Boolean);
       state.loaded = true;
@@ -95,19 +103,22 @@
 
   function renderComparison(items) {
     if (!items.some(item => item.model !== state.model)) return "";
-    const maxBenefit = Math.max(1, ...items.map(benefitOf));
-    const prices = items.map(priceOf).filter(Boolean);
+    const chartItems = items.filter(item => item.evidenceStatus !== "vehicle_profile_incomplete" && priceOf(item) !== null);
+    const maxBenefit = Math.max(1, ...chartItems.map(benefitOf));
+    const prices = chartItems.map(priceOf).filter(value => value !== null && value !== undefined);
+    if (!chartItems.length || !prices.length) return `<section class="policy-panel policy-competition"><div class="policy-panel-head"><div><span>MODEL IMPACT</span><h3>车型竞争力对比</h3></div><em>待补充车型档案</em></div><p class="policy-empty">当前对比车型缺少精确动力形式、车身形式或价格，暂不计算权益与政策后价格。</p></section>`;
     const minPrice = Math.min(...prices) * .96, maxPrice = Math.max(...prices) * 1.04;
     return `<section class="policy-panel policy-competition"><div class="policy-panel-head"><div><span>MODEL IMPACT</span><h3>资格满足后的车型竞争力气泡</h3></div><em>${esc(state.region)} · ${esc(state.scenario)} · 点击仅查看对比</em></div>
       <div class="policy-causal-chain" aria-label="${causalChainLabel}"><span>已审核政策规则</span><b>→</b><span>测算购车成本变化</span><b>→</b><span>同场车型位置</span><b>→</b><span>可验证营销动作</span></div>
-      <div class="policy-bubble-chart"><div class="policy-axis-y"><span>条件满足后参考价高</span><span>条件满足后参考价低</span></div><div class="policy-bubble-stage">${items.map(item => { const price = priceOf(item); const basis = priceBasisNote(item); const x = 12 + (benefitOf(item) / maxBenefit) * 72; const y = 12 + ((price - minPrice) / Math.max(1, maxPrice-minPrice)) * 72; const size = 58 + item.verifiedPolicyCount * 12; return `<button type="button" class="policy-model-bubble ${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}" aria-pressed="${item.model === state.focusModel}" title="${esc(basis ? `${basis}；` : "")}点击只查看对比，不会切换本品" style="left:${x}%;top:${y}%;--model-size:${size}px" data-policy-model="${esc(item.model)}"><span>${item.model === state.model ? "本品" : "竞品"}</span><b>${esc(item.model)}</b><small>${money(price)}</small></button>`; }).join("")}</div><div class="policy-axis-x"><span>条件权益低</span><span>条件权益高</span></div></div>
-      <div class="policy-comparison-table">${items.map(item => { const basis = priceBasisNote(item); return `<article class="${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}"><div><span>${item.model === state.model ? "本品" : "同场竞品"}</span><b>${esc(item.model)}</b></div><strong>${money(benefitOf(item))}<small>满足条件时权益上限</small></strong><strong>${money(priceOf(item))}<small>条件满足后参考价</small></strong><em>${item.verifiedPolicyCount}项规则${basis ? `<small>${esc(basis)}</small>` : ""}</em></article>`; }).join("")}</div></section>`;
+      <div class="policy-bubble-chart"><div class="policy-axis-y"><span>条件满足后参考价高</span><span>条件满足后参考价低</span></div><div class="policy-bubble-stage">${chartItems.map(item => { const price = priceOf(item); const basis = priceBasisNote(item); const x = 12 + (benefitOf(item) / maxBenefit) * 72; const y = 12 + ((price - minPrice) / Math.max(1,maxPrice-minPrice)) * 72; const size = 58 + Number(item.verifiedPolicyCount || 0) * 12; return `<button type="button" class="policy-model-bubble ${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}" aria-pressed="${item.model === state.focusModel}" title="${esc(basis ? `${basis}；` : "")}点击只查看对比，不会切换本品" style="left:${x}%;top:${y}%;--model-size:${size}px" data-policy-model="${esc(item.model)}"><span>${item.model === state.model ? "本品" : "竞品"}</span><b>${esc(item.model)}</b><small>${money(price)}</small></button>`; }).join("")}</div><div class="policy-axis-x"><span>条件权益低</span><span>条件权益高</span></div></div>
+      <div class="policy-comparison-table">${items.map(item => { const basis = priceBasisNote(item), incomplete = item.evidenceStatus === "vehicle_profile_incomplete"; return `<article class="${item.model === state.model ? "own" : ""} ${item.model === state.focusModel ? "focus" : ""}"><div><span>${item.model === state.model ? "本品" : "同场竞品"}</span><b>${esc(item.model)}</b></div><strong>${money(benefitOf(item))}<small>${incomplete ? "车型档案待补充" : "满足条件时权益上限"}</small></strong><strong>${money(priceOf(item))}<small>${incomplete ? "暂不计算" : "条件满足后参考价"}</small></strong><em>${incomplete ? "待补充精确动力／车身／价格" : `${item.verifiedPolicyCount}项规则`}${basis ? `<small>${esc(basis)}</small>` : ""}</em></article>`; }).join("")}</div></section>`;
   }
 
   function renderImpact(impact) {
+    const incomplete = impact.evidenceStatus === "vehicle_profile_incomplete";
     return `<section class="policy-panel policy-impact"><div class="policy-panel-head"><div><span>CAUSAL TRACE</span><h3>${esc(impact.model)}在${esc(impact.region)}的规则影响链</h3></div><em>${money(benefitOf(impact))} 条件上限</em></div>
       <p class="policy-scenario-note">${esc(impact.scenarioLabel)}</p>
-      <div class="policy-effect-list">${impact.policyEffects.length ? impact.policyEffects.map(effect => `<article><div class="policy-effect-value"><span>${esc(effect.policyType)}</span><strong>${money(effect.benefit)}</strong><small>${effect.counted ? "计入本情景" : "同组规则未重复计入"}</small></div><div><b>${esc(effect.policyName)}</b><p>${esc(effect.sourceQuote)}</p><small>适用条件：${esc([...effect.consumerConditions, ...effect.vehicleConditions].join("；"))}</small><a href="${esc(effect.sourceUrl)}" target="_blank" rel="noopener">查看官方原文</a></div><time>${esc(effect.expiresAt || "长期有效")}</time></article>`).join("") : '<p class="policy-empty">当前车型与购车情景未匹配到已审核政策规则。</p>'}</div>
+      <div class="policy-effect-list">${impact.policyEffects.length ? impact.policyEffects.map(effect => `<article><div class="policy-effect-value"><span>${esc(effect.policyType)}</span><strong>${money(effect.benefit)}</strong><small>${effect.counted ? "计入本情景" : "同组规则未重复计入"}</small></div><div><b>${esc(effect.policyName)}</b><p>${esc(effect.sourceQuote)}</p><small>适用条件：${esc([...effect.consumerConditions, ...effect.vehicleConditions].join("；"))}</small><a href="${esc(effect.sourceUrl)}" target="_blank" rel="noopener">查看官方原文</a></div><time>${esc(effect.expiresAt || "长期有效")}</time></article>`).join("") : `<p class="policy-empty">${incomplete ? "车型档案未满足审核门槛，暂不计算；补充后会自动重新审核。" : "当前车型与购车情景未匹配到已审核政策规则。"}</p>`}</div>
       <div class="policy-boundary"><b>因果边界</b><span>${esc(impact.causalBoundary)}</span></div></section>`;
   }
 
@@ -115,11 +126,9 @@
     const validation = state.strategyValidation;
     const final = validation?.finalStrategy;
     const canEvaluate = state.analysisId && ["aligned", "manual_required"].includes(validation?.status);
-    const statusLabel = validation?.status === "aligned" ? "三模型一致" : validation?.status === "manual_required" ? "模型冲突·待人工判断" : validation?.status === "incomplete" ? "三模型未完成" : validation?.status === "insufficient_evidence" ? "证据不足" : "等待三模型复核";
-    const providerCards = validation?.providers ? Object.entries(validation.providers).map(([provider, item]) => `<article class="policy-model-review"><div><span>${esc(validation.modelNames?.[provider] || providerLabels[provider] || provider)}</span><b>${esc(item.policyJudgement)} · ${esc(item.strategyDirection)}</b></div><p>${esc(item.conclusion)}</p><small>置信度 ${Math.round(Number(item.confidence || 0) * 100)}% · 证据 ${item.evidenceIds.length} 项</small></article>`).join("") : "";
-    const strategyPanel = `<div class="policy-three-model" id="policy-eval-panel" aria-live="polite"><div class="policy-three-model-head"><div><span>MMN模型输出策略 · ${esc(state.region)}</span><b>${statusLabel}</b></div><button type="button" class="policy-eval-start" ${state.strategyLoading ? "disabled" : ""}>${state.strategyLoading ? "三模型分析中…" : "重新运行三模型复核"}</button></div>
-      ${state.strategyError ? `<p class="policy-eval-status error">${esc(state.strategyError)}</p>` : state.strategyLoading ? '<p class="policy-eval-status">Qwen、DeepSeek、Kimi 正在基于同一组已审核政策证据独立分析…</p>' : final ? `<div class="policy-final-strategy"><span>${esc(final.policyJudgement)} · ${esc(final.strategyDirection)} · 最低置信度 ${Math.round(Number(final.confidence || 0) * 100)}%</span><h4>${esc(final.conclusion)}</h4><dl><div><dt>目标人群</dt><dd>${esc(final.targetAudience)}</dd></div><div><dt>区域动作</dt><dd>${esc(final.action)}</dd></div><div><dt>领先指标</dt><dd>${esc(final.leadingIndicator)}</dd></div><div><dt>转化指标</dt><dd>${esc(final.conversionIndicator)}</dd></div><div><dt>停止条件</dt><dd>${esc(final.stopCondition)}</dd></div><div><dt>不确定性</dt><dd>${esc(final.uncertainty)}</dd></div></dl><small>共同政策证据：${final.evidenceIds.length}项 · ${esc(final.modelAgreement)}</small></div>` : `<div class="policy-strategy-boundary"><b>${statusLabel}</b><p>${esc((validation?.reasons || ["选择区域后自动生成三模型交叉验证策略。"])[0])}</p></div>`}
-      ${providerCards ? `<div class="policy-provider-grid">${providerCards}</div>` : ""}
+    const statusLabel = validation?.status === "aligned" ? "多方审核一致" : validation?.status === "manual_required" ? "审核冲突·待人工判断" : validation?.status === "incomplete" ? "独立审核未完成" : validation?.status === "insufficient_evidence" ? "证据不足" : "等待交叉复核";
+    const strategyPanel = `<div class="policy-three-model" id="policy-eval-panel" aria-live="polite"><div class="policy-three-model-head"><div><span>MMN交叉验证结论 · ${esc(state.region)}</span><b>${statusLabel}</b></div><button type="button" class="policy-eval-start" ${state.strategyLoading ? "disabled" : ""}>${state.strategyLoading ? "独立审核中…" : "重新运行交叉复核"}</button></div>
+      ${state.strategyError ? `<p class="policy-eval-status error">${esc(state.strategyError)}</p>` : state.strategyLoading ? '<p class="policy-eval-status">正在基于同一组已审核政策证据独立分析并交叉验证…</p>' : final ? `<div class="policy-final-strategy"><span>${esc(final.policyJudgement)} · ${esc(final.strategyDirection)} · 最低置信度 ${Math.round(Number(final.confidence || 0) * 100)}%</span><h4>${esc(final.conclusion)}</h4><dl><div><dt>目标人群</dt><dd>${esc(final.targetAudience)}</dd></div><div><dt>区域动作</dt><dd>${esc(final.action)}</dd></div><div><dt>领先指标</dt><dd>${esc(final.leadingIndicator)}</dd></div><div><dt>转化指标</dt><dd>${esc(final.conversionIndicator)}</dd></div><div><dt>停止条件</dt><dd>${esc(final.stopCondition)}</dd></div><div><dt>不确定性</dt><dd>${esc(final.uncertainty)}</dd></div></dl><small>共同政策证据：${final.evidenceIds.length}项 · ${esc(final.modelAgreement)}</small></div>` : `<div class="policy-strategy-boundary"><b>${statusLabel}</b><p>${esc((validation?.reasons || ["选择区域后自动生成多方交叉验证策略。"])[0])}</p></div>`}
       ${canEvaluate ? `<form class="policy-eval-form"><div><b>Policy Eval · 五维各20分</b><span>三模型一致可直接评分；模型冲突须由人工裁决；总分80分以上才进入可用知识版本</span></div>${[["sourceReliability","政策来源可靠性"],["parsingAccuracy","政策解析准确性"],["vehicleMatch","车型匹配合理性"],["marketingLogic","营销建议逻辑"],["actionValue","行动价值"]].map(([key,label]) => `<label><span>${label}</span><input name="${key}" type="number" min="0" max="20" step="1" value="16" required></label>`).join("")}<label class="policy-eval-note"><span>修改记录</span><input name="note" placeholder="写下评分依据或修改要求"></label><button type="submit">提交人工评分</button><p data-eval-message></p></form>` : state.analysisId ? '<p class="policy-eval-status">当前结果未通过完整性硬门槛，不能提交Policy Eval；请重新运行三模型复核。</p>' : ""}</div>`;
     return `<section class="policy-panel policy-opportunities"><div class="policy-panel-head"><div><span>POLICY OPPORTUNITY MAP</span><h3>政策变化对营销意味着什么</h3></div><em>${esc(regionLabels[state.region] || state.region)} · ${esc(state.scenario)}</em></div>${items.map(item => `<article><div class="policy-opportunity-tag"><span>窗口至</span><b>${esc(item.windowEnd)}</b><em>规则引擎草案</em></div><div class="policy-opportunity-body"><h4>${esc(item.label)}</h4><dl><div><dt>已知事实</dt><dd>${esc(item.inference)}</dd></div><div><dt>待验证假设</dt><dd>${esc(item.hypothesis)}</dd></div><div><dt>建议动作</dt><dd>${esc(item.action)}</dd></div></dl><div class="policy-metrics"><span>领先指标：${esc(item.leadingIndicator)}</span><span>转化指标：${esc(item.conversionIndicator)}</span><span>停止条件：${esc(item.stopCondition)}</span></div></div></article>`).join("") || '<p class="policy-empty">暂无满足证据门槛的政策营销机会；三模型不会在无证据时补写结论。</p>'}${strategyPanel}</section>`;
   }
@@ -145,6 +154,8 @@
       state.model = form.get("model"); state.focusModel = ""; state.region = form.get("region"); state.scenario = form.get("scenario"); resetStrategy(); state.loaded = false; load(true);
     });
     root()?.querySelector('select[name="region"]')?.addEventListener("change", event => event.currentTarget.form?.requestSubmit());
+    root()?.querySelector('select[name="model"]')?.addEventListener("change", event => event.currentTarget.form?.requestSubmit());
+    root()?.querySelector('select[name="scenario"]')?.addEventListener("change", event => event.currentTarget.form?.requestSubmit());
     root()?.querySelectorAll("[data-policy-region]").forEach(button => button.addEventListener("click", () => { state.region = button.dataset.policyRegion; resetStrategy(); state.loaded = false; load(true); }));
     root()?.querySelectorAll("[data-policy-model]").forEach(button => button.addEventListener("click", () => { state.focusModel = button.dataset.policyModel; render(); }));
     root()?.querySelectorAll("[data-policy-review]").forEach(button => button.addEventListener("click", () => review(button.dataset.policyReview, button.dataset.decision)));
@@ -169,7 +180,7 @@
     const profile = profiles[state.model];
     const panel = root()?.querySelector("#policy-eval-panel");
     state.strategyLoading = true; state.strategyError = "";
-    if (panel) panel.innerHTML = '<p class="policy-eval-status">Qwen、DeepSeek、Kimi 正在基于同一组已审核政策证据独立分析…</p>';
+    if (panel) panel.innerHTML = '<p class="policy-eval-status">正在基于同一组已审核政策证据独立分析并交叉验证…</p>';
     try {
       const result = await jsonFetch("/api/policy-intelligence/analyze", { method: "POST", body: JSON.stringify({ edition: edition(), model: state.model, region: state.region, scenario: state.scenario, persist: force, ...profile }) });
       if (requestId !== state.strategyRequest) return;
@@ -216,7 +227,7 @@
   window.PolicyIntelligenceModule = {
     load,
     select(model, region) {
-      if (profiles[model]?.role === "own") state.model = model;
+      if (String(model || "").trim()) state.model = String(model).trim();
       if (regions.includes(region)) state.region = region;
       resetStrategy();
       state.loaded = false;

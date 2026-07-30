@@ -3,7 +3,7 @@
   "source": "dongchedi_user_verified_observations",
   "period": "2026-06",
   "captured_at": "2026-07-17T01:23:40+08:00",
-  "scope_note": "仅记录正反向表内八款本品已经核验的懂车帝车型分类与月销量；不以局部榜单推算完整竞品池。",
+  "scope_note": "记录正反向表内八款本品与客户演示指定的智己LS6，车型分类、月销量和价格均来自已发布的懂车帝2026年6月完整榜单；不以局部榜单推算完整竞品池。",
   "vehicles": [
     {
       "series_id": 25058,
@@ -39,6 +39,22 @@
       "sales_volume": 1350,
       "price": "24.98—29.98万元",
       "evidence": {"type": "dongchedi_monthly_rank_feed", "period": "2026-06", "rank_type": "erev"}
+    },
+    {
+      "series_id": 9118,
+      "series_name": "智己LS6",
+      "manufacturer": "智己汽车",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "纯电动/增程式",
+      "energy_types": ["纯电动", "增程式"],
+      "energy_group": "新能源",
+      "sales_volume": 3661,
+      "price": "18.99—26.69万元",
+      "price_source": "dongchedi_dealer_price",
+      "segment_rank": 11,
+      "evidence": {"type": "dongchedi_public_rank_api", "period": "2026-06", "rank_type": "mid_large_suv", "field": "dealer_price", "has_dealer_price": true, "captured_at": "2026-07-17T02:01:15+08:00"},
+      "energy_evidence": {"source": "dongchedi_series_params", "series_id": 9118, "verification_status": "verified", "source_url": "https://www.dongchedi.com/auto/params-carIds-x-9118", "captured_at": "2026-07-30T14:00:00+08:00"}
     },
     {
       "series_id": 5828,

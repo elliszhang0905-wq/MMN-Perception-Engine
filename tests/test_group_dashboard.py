@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from group_dashboard import (
+    _apply_vertical_monitoring,
     _baas_price_view,
     build_group_dashboard_payload,
     build_market_dimensions,
@@ -23,6 +24,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class GroupDashboardTest(unittest.TestCase):
+    def test_global_sales_file_cannot_add_models_outside_org_monitoring_scope(self):
+        warning = {
+            "additionalMonitoredModels": ["客户甲车型"],
+            "saicModels": [
+                {"model": "企业本品", "performanceRate": 1, "level": "green"},
+                {"model": "客户甲车型", "performanceRate": 1, "level": "green"},
+            ],
+            "summary": {},
+        }
+        result = _apply_vertical_monitoring(
+            warning,
+            {"models": ["企业本品"], "scopeNote": "企业空间垂媒监测关系"},
+            {},
+        )
+
+        self.assertEqual(result["monitoring"]["models"], ["企业本品"])
+        self.assertEqual([item["model"] for item in result["saicModels"]], ["企业本品"])
+        self.assertNotIn("销量文件中明确核验", result["monitoring"]["scopeNote"])
+
     def test_e7x_loader_resolves_the_canonical_asset_at_call_time(self):
         canonical = ROOT / "data" / "modules" / "product_evaluation" / "e7x_product_evaluation_2026-06.json"
         with patch("group_dashboard.module_path", return_value=canonical) as resolver:
@@ -196,6 +216,15 @@ class GroupDashboardTest(unittest.TestCase):
             [item["series_name"] for item in expected_median],
         )
         self.assertTrue(all(item["startPriceWan"] > 0 for item in own["comparisonPeers"]))
+        raw_energy_by_id = {
+            item["series_id"]: item["energy_type"]
+            for item in raw_own["competitor_pool"]
+        }
+        self.assertEqual(
+            [item["energyType"] for item in own["comparisonPeers"]],
+            [raw_energy_by_id[item["seriesId"]] for item in own["comparisonPeers"]],
+        )
+        self.assertTrue(all(item["bodyType"] == own["bodyType"] for item in own["comparisonPeers"]))
         self.assertEqual(own["salesMedian"], raw_own["segment_median_sales"])
         self.assertEqual(len(own["benchmarkAuditPeers"]) + 1, own["marketModelCount"])
         self.assertTrue(all(item["startPriceWan"] > 0 for item in own["benchmarkAuditPeers"]))
@@ -251,7 +280,7 @@ class GroupDashboardTest(unittest.TestCase):
             result = load_sales_warning(path=path)
 
         self.assertEqual(result["mode"], "observed_focal_models")
-        self.assertEqual(len(result["saicModels"]), 8)
+        self.assertEqual(len(result["saicModels"]), 9)
         self.assertEqual(result["summary"]["calculableModelCount"], 2)
 
     def test_e7x_start_price_uses_dongchedi_dealer_quote(self):
@@ -540,10 +569,11 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertIsNone(mg4["voice"]["contentCount"])
         self.assertEqual(result["kpis"]["voiceReadyModels"], 1)
 
-    def test_sales_warning_monitors_only_latest_dongchedi_table_own_models_and_ignores_spaces(self):
+    def test_sales_warning_uses_current_org_vertical_monitoring_models(self):
         rows = [
             ("local", "china", "懂车帝", "2026.07.09", "奥迪 E5 Sportback", "小米SU7", 1, 3, 0.16, "上汽集团十二车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
             ("local", "china", "懂车帝", "2026.07.09", "MG 4", "海豚", 2, 4, 0.11, "上汽集团十二车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),
+            ("local", "china", "懂车帝", "2026.07.09", "智己LS6", "理想i6", 3, 5, 0.09, "微信图片_智己LS6.png", "2026-07-16T08:00:00Z"),
             ("local", "china", "懂车帝", "2026.07.02", "飞凡F7", "小鹏P7", 1, 1, 0.10, "旧表.xlsx", "2026-07-15T08:00:00Z"),
         ]
         self.conn.executemany("insert into vertical_rank_assets values (?,?,?,?,?,?,?,?,?,?,?)", rows)
@@ -552,11 +582,11 @@ class GroupDashboardTest(unittest.TestCase):
         warning = result["salesWarnings"]
         names = {item["model"] for item in warning["saicModels"]}
 
-        self.assertEqual(warning["monitoring"]["models"], ["奥迪E5 Sportback", "MG4"])
-        self.assertEqual(warning["summary"]["trackedModelCount"], 2)
-        self.assertEqual(names, {"奥迪E5 Sportback", "MG4"})
-        self.assertEqual(warning["summary"]["salesReadyModelCount"], 2)
-        self.assertEqual(warning["summary"]["calculableModelCount"], 2)
+        self.assertEqual(warning["monitoring"]["models"], ["奥迪E5 Sportback", "MG4", "智己LS6"])
+        self.assertEqual(warning["summary"]["trackedModelCount"], 3)
+        self.assertEqual(names, {"奥迪E5 Sportback", "MG4", "智己LS6"})
+        self.assertEqual(warning["summary"]["salesReadyModelCount"], 3)
+        self.assertEqual(warning["summary"]["calculableModelCount"], 3)
         self.assertEqual(warning["summary"]["pendingModelCount"], 0)
         self.assertNotIn("飞凡F7", names)
         e5 = next(item for item in warning["saicModels"] if item["model"] == "奥迪E5 Sportback")

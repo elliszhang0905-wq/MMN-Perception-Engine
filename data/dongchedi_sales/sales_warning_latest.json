@@ -8,8 +8,8 @@
     "fallback": "none"
   },
   "period": "2026-06",
-  "captured_at": "2026-07-16T18:01:15+00:00",
-  "generated_at": "2026-07-19T14:27:49+00:00",
+  "captured_at": "2026-07-30T05:50:48+00:00",
+  "generated_at": "2026-07-30T05:53:57+00:00",
   "complete": true,
   "thresholds": {
     "red_ratio": 0.25,
@@ -30,7 +30,7 @@
   },
   "required_page_count": 9,
   "market_count": 12,
-  "saic_vehicle_count": 8,
+  "saic_vehicle_count": 9,
   "markets": {
     "紧凑型车|非新能源": {
       "model_count": 37,
@@ -73,14 +73,14 @@
       "median_sales": 1148
     },
     "中大型SUV|新能源": {
-      "model_count": 38,
-      "total_sales": 87746,
-      "median_sales": 552
+      "model_count": 39,
+      "total_sales": 91407,
+      "median_sales": 562
     },
     "中大型SUV|非新能源": {
-      "model_count": 33,
-      "total_sales": 48639,
-      "median_sales": 436
+      "model_count": 32,
+      "total_sales": 44978,
+      "median_sales": 428.5
     },
     "大型SUV|非新能源": {
       "model_count": 7,
@@ -107,6 +107,7 @@
       "energy_group": "新能源",
       "segment_key": "中型车|新能源",
       "quality_status": "verified",
+      "classification_evidence": null,
       "segment_total_sales": 85558,
       "segment_model_count": 35,
       "segment_median_sales": 1333,
@@ -141,7 +142,7 @@
           "series_name": "极狐 贝塔S3",
           "manufacturer": "北汽新能源",
           "sales_volume": 7790,
-          "price": "7.98-12.08万",
+          "price": "8.08-12.18万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "纯电动",
           "energy_group": "新能源"
@@ -201,7 +202,7 @@
           "series_name": "银河A7 EM",
           "manufacturer": "吉利银河",
           "sales_volume": 3236,
-          "price": "7.88-12.38万",
+          "price": "7.88-12.08万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -487,7 +488,7 @@
           "series_name": "极狐 贝塔S3",
           "manufacturer": "北汽新能源",
           "sales_volume": 7790,
-          "price": "7.98-12.08万",
+          "price": "8.08-12.18万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "纯电动",
           "energy_group": "新能源"
@@ -496,10 +497,10 @@
       "benchmark_price_sample_count": 3,
       "vehicle_start_price_wan": 20.59,
       "vehicle_start_price_source": "dongchedi_dealer_price",
-      "benchmark_average_start_price_wan": 17.27,
-      "benchmark_minimum_start_price_wan": 7.98,
+      "benchmark_average_start_price_wan": 17.31,
+      "benchmark_minimum_start_price_wan": 8.08,
       "benchmark_maximum_start_price_wan": 23.55,
-      "start_price_premium_ratio": 0.1922,
+      "start_price_premium_ratio": 0.1895,
       "red_line_sales": 1959,
       "green_line_sales": 6270,
       "performance_ratio": 0.0345,
@@ -519,14 +520,15 @@
       "energy_group": "新能源",
       "segment_key": "中大型SUV|新能源",
       "quality_status": "verified",
-      "segment_total_sales": 87746,
-      "segment_model_count": 38,
-      "segment_median_sales": 542,
+      "classification_evidence": null,
+      "segment_total_sales": 91407,
+      "segment_model_count": 39,
+      "segment_median_sales": 552,
       "benchmark_sales": 15165,
-      "segment_rank": 14,
+      "segment_rank": 15,
       "competitor_pool_rule": "排除本品后，取同尺寸×新能源（纯电动、增程式、插电式混动）市场内销量前3名竞品的销量中位数；少于3款不计算",
-      "competitor_pool_count": 37,
-      "competitor_pool_sales": 86396,
+      "competitor_pool_count": 38,
+      "competitor_pool_sales": 90057,
       "competitor_pool": [
         {
           "series_id": 25557,
@@ -586,6 +588,16 @@
           "price": "35.68-50.08万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9118,
+          "series_name": "智己LS6",
+          "manufacturer": "智己汽车",
+          "sales_volume": 3661,
+          "price": "18.99-26.69万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式/纯电动",
           "energy_group": "新能源"
         },
         {
@@ -653,7 +665,7 @@
           "series_name": "红旗HS6 PHEV",
           "manufacturer": "一汽红旗",
           "sales_volume": 1639,
-          "price": "17.58-22.58万",
+          "price": "17.48-22.58万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -663,7 +675,7 @@
           "series_name": "传祺向往S7",
           "manufacturer": "广汽传祺",
           "sales_volume": 1060,
-          "price": "14.98-18.98万",
+          "price": "14.98-19.98万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -961,6 +973,7 @@
       "energy_group": "非新能源",
       "segment_key": "紧凑型车|非新能源",
       "quality_status": "non_nev_unresolved",
+      "classification_evidence": null,
       "segment_total_sales": 104452,
       "segment_model_count": 37,
       "segment_median_sales": 1226,
@@ -975,7 +988,7 @@
           "series_name": "朗逸",
           "manufacturer": "上汽大众",
           "sales_volume": 15444,
-          "price": "6.20-9.89万",
+          "price": "6.00-9.39万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "燃油",
           "energy_group": "非新能源"
@@ -1065,7 +1078,7 @@
           "series_name": "伊兰特",
           "manufacturer": "北京现代",
           "sales_volume": 4480,
-          "price": "6.18-8.58万",
+          "price": "6.68-8.58万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "燃油",
           "energy_group": "非新能源"
@@ -1341,7 +1354,7 @@
           "series_name": "朗逸",
           "manufacturer": "上汽大众",
           "sales_volume": 15444,
-          "price": "6.20-9.89万",
+          "price": "6.00-9.39万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "燃油",
           "energy_group": "非新能源"
@@ -1370,10 +1383,10 @@
       "benchmark_price_sample_count": 3,
       "vehicle_start_price_wan": 6.19,
       "vehicle_start_price_source": "dongchedi_dealer_price",
-      "benchmark_average_start_price_wan": 7.25,
-      "benchmark_minimum_start_price_wan": 6.19,
+      "benchmark_average_start_price_wan": 7.19,
+      "benchmark_minimum_start_price_wan": 6.0,
       "benchmark_maximum_start_price_wan": 9.37,
-      "start_price_premium_ratio": -0.1462,
+      "start_price_premium_ratio": -0.1391,
       "red_line_sales": 2582,
       "green_line_sales": 8263,
       "performance_ratio": 0.1363,
@@ -1393,6 +1406,7 @@
       "energy_group": "新能源",
       "segment_key": "大型SUV|新能源",
       "quality_status": "verified",
+      "classification_evidence": null,
       "segment_total_sales": 63419,
       "segment_model_count": 22,
       "segment_median_sales": 1652,
@@ -1537,7 +1551,7 @@
           "series_name": "领克900",
           "manufacturer": "领克",
           "sales_volume": 1107,
-          "price": "27.99-38.69万",
+          "price": "26.48-38.69万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -1663,26 +1677,33 @@
       "warning_reason": "车型销量3017辆，同一懂车帝细分市场头部3款竞品销量中位数8595辆，头部基准达成率35.1%"
     },
     {
-      "series_id": 25846,
-      "series_name": "奥迪E7X",
-      "manufacturer": "上汽奥迪",
-      "sales_volume": 4017,
-      "price": "26.98-35.98万",
+      "series_id": 9118,
+      "series_name": "智己LS6",
+      "manufacturer": "智己汽车",
+      "sales_volume": 3661,
+      "price": "18.99-26.69万",
       "price_source": "dongchedi_dealer_price",
       "body_type": "SUV",
       "size_class": "中大型SUV",
-      "energy_type": "纯电动",
+      "energy_type": "增程式/纯电动",
       "energy_group": "新能源",
       "segment_key": "中大型SUV|新能源",
-      "quality_status": "verified",
-      "segment_total_sales": 87746,
-      "segment_model_count": 38,
-      "segment_median_sales": 542,
+      "quality_status": "verified_vehicle_level_energy",
+      "classification_evidence": {
+        "source": "dongchedi_series_params",
+        "series_id": 9118,
+        "verification_status": "verified",
+        "source_url": "https://www.dongchedi.com/auto/params-carIds-x-9118",
+        "captured_at": "2026-07-30T14:00:00+08:00"
+      },
+      "segment_total_sales": 91407,
+      "segment_model_count": 39,
+      "segment_median_sales": 552,
       "benchmark_sales": 15165,
-      "segment_rank": 5,
+      "segment_rank": 7,
       "competitor_pool_rule": "排除本品后，取同尺寸×新能源（纯电动、增程式、插电式混动）市场内销量前3名竞品的销量中位数；少于3款不计算",
-      "competitor_pool_count": 37,
-      "competitor_pool_sales": 83729,
+      "competitor_pool_count": 38,
+      "competitor_pool_sales": 87746,
       "competitor_pool": [
         {
           "series_id": 25557,
@@ -1720,6 +1741,16 @@
           "manufacturer": "方程豹",
           "sales_volume": 4545,
           "price": "19.98-23.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25846,
+          "series_name": "奥迪E7X",
+          "manufacturer": "上汽奥迪",
+          "sales_volume": 4017,
+          "price": "26.98-35.98万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "纯电动",
           "energy_group": "新能源"
@@ -1799,7 +1830,7 @@
           "series_name": "红旗HS6 PHEV",
           "manufacturer": "一汽红旗",
           "sales_volume": 1639,
-          "price": "17.58-22.58万",
+          "price": "17.48-22.58万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -1819,7 +1850,460 @@
           "series_name": "传祺向往S7",
           "manufacturer": "广汽传祺",
           "sales_volume": 1060,
-          "price": "14.98-18.98万",
+          "price": "14.98-19.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 5845,
+          "series_name": "理想L6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 915,
+          "price": "24.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 10178,
+          "series_name": "理想i8",
+          "manufacturer": "理想汽车",
+          "sales_volume": 779,
+          "price": "33.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25211,
+          "series_name": "纵横G700",
+          "manufacturer": "奇瑞汽车",
+          "sales_volume": 736,
+          "price": "30.49-39.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 6095,
+          "series_name": "理想L8",
+          "manufacturer": "理想汽车",
+          "sales_volume": 562,
+          "price": "36.98-42.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25078,
+          "series_name": "唐L DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 542,
+          "price": "21.18-26.78万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9246,
+          "series_name": "豹8",
+          "manufacturer": "方程豹",
+          "sales_volume": 524,
+          "price": "41.98-42.78万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9211,
+          "series_name": "深蓝G318",
+          "manufacturer": "深蓝汽车",
+          "sales_volume": 488,
+          "price": "17.99-22.49万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25288,
+          "series_name": "传祺向往S9",
+          "manufacturer": "广汽传祺",
+          "sales_volume": 320,
+          "price": "19.19-27.49万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 5461,
+          "series_name": "小鹏G9",
+          "manufacturer": "小鹏汽车",
+          "sales_volume": 265,
+          "price": "24.88-27.88万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9345,
+          "series_name": "昊铂HT",
+          "manufacturer": "广汽埃安新能源",
+          "sales_volume": 240,
+          "price": "16.99-19.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 6271,
+          "series_name": "别克E5",
+          "manufacturer": "上汽通用别克",
+          "sales_volume": 186,
+          "price": "14.69-16.69万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25135,
+          "series_name": "海狮07DM",
+          "manufacturer": "比亚迪",
+          "sales_volume": 142,
+          "price": "16.98-20.58万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 24925,
+          "series_name": "星途揽月C-DM",
+          "manufacturer": "星途",
+          "sales_volume": 117,
+          "price": "19.49-21.89万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25185,
+          "series_name": "唐L EV",
+          "manufacturer": "比亚迪",
+          "sales_volume": 87,
+          "price": "22.28-27.28万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9825,
+          "series_name": "红旗HS7 PHEV",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 84,
+          "price": "23.98-29.18万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 5283,
+          "series_name": "领克09 EM-P",
+          "manufacturer": "领克",
+          "sales_volume": 54,
+          "price": "25.58万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 4869,
+          "series_name": "智己LS7",
+          "manufacturer": "智己汽车",
+          "sales_volume": 47,
+          "price": "32.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 6172,
+          "series_name": "沃尔沃EX90",
+          "manufacturer": "沃尔沃亚太",
+          "sales_volume": 45,
+          "price": "45.99-52.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9131,
+          "series_name": "极石01",
+          "manufacturer": "北京汽车制造厂",
+          "sales_volume": 35,
+          "price": "29.99-35.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9647,
+          "series_name": "北京越野BJ60增程",
+          "manufacturer": "北京汽车",
+          "sales_volume": 24,
+          "price": "25.98-30.48万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 5358,
+          "series_name": "IQ锐歌",
+          "manufacturer": "上汽通用凯迪拉克",
+          "sales_volume": 22,
+          "price": "39.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 8835,
+          "series_name": "红旗天工08",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 18,
+          "price": "17.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9187,
+          "series_name": "传祺ES9 PHEV",
+          "manufacturer": "广汽传祺",
+          "sales_volume": 14,
+          "price": "22.98-26.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        }
+      ],
+      "benchmark_method": "top_competitor_median",
+      "benchmark_top_n": 3,
+      "benchmark_minimum_count": 3,
+      "benchmark_pool_count": 3,
+      "benchmark_pool": [
+        {
+          "series_id": 25557,
+          "series_name": "理想i6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 21453,
+          "price": "24.98-26.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25559,
+          "series_name": "钛7 PHEV",
+          "manufacturer": "方程豹",
+          "sales_volume": 15165,
+          "price": "17.98-21.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 20041,
+          "series_name": "小米YU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 14324,
+          "price": "23.35-38.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        }
+      ],
+      "benchmark_price_sample_count": 3,
+      "vehicle_start_price_wan": 18.99,
+      "vehicle_start_price_source": "dongchedi_dealer_price",
+      "benchmark_average_start_price_wan": 22.1,
+      "benchmark_minimum_start_price_wan": 17.98,
+      "benchmark_maximum_start_price_wan": 24.98,
+      "start_price_premium_ratio": -0.1407,
+      "red_line_sales": 3791,
+      "green_line_sales": 12132,
+      "performance_ratio": 0.2414,
+      "warning_level": "red",
+      "warning_reason": "车型销量3661辆，同一懂车帝细分市场头部3款竞品销量中位数15165辆，头部基准达成率24.1%"
+    },
+    {
+      "series_id": 25846,
+      "series_name": "奥迪E7X",
+      "manufacturer": "上汽奥迪",
+      "sales_volume": 4017,
+      "price": "26.98-35.98万",
+      "price_source": "dongchedi_dealer_price",
+      "body_type": "SUV",
+      "size_class": "中大型SUV",
+      "energy_type": "纯电动",
+      "energy_group": "新能源",
+      "segment_key": "中大型SUV|新能源",
+      "quality_status": "verified",
+      "classification_evidence": null,
+      "segment_total_sales": 91407,
+      "segment_model_count": 39,
+      "segment_median_sales": 552,
+      "benchmark_sales": 15165,
+      "segment_rank": 5,
+      "competitor_pool_rule": "排除本品后，取同尺寸×新能源（纯电动、增程式、插电式混动）市场内销量前3名竞品的销量中位数；少于3款不计算",
+      "competitor_pool_count": 38,
+      "competitor_pool_sales": 87390,
+      "competitor_pool": [
+        {
+          "series_id": 25557,
+          "series_name": "理想i6",
+          "manufacturer": "理想汽车",
+          "sales_volume": 21453,
+          "price": "24.98-26.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25559,
+          "series_name": "钛7 PHEV",
+          "manufacturer": "方程豹",
+          "sales_volume": 15165,
+          "price": "17.98-21.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 20041,
+          "series_name": "小米YU7",
+          "manufacturer": "小米汽车",
+          "sales_volume": 14324,
+          "price": "23.35-38.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25994,
+          "series_name": "钛7 EV",
+          "manufacturer": "方程豹",
+          "sales_volume": 4545,
+          "price": "19.98-23.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25555,
+          "series_name": "ZEEKR 8X",
+          "manufacturer": "极氪",
+          "sales_volume": 3935,
+          "price": "35.68-50.08万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9118,
+          "series_name": "智己LS6",
+          "manufacturer": "智己汽车",
+          "sales_volume": 3661,
+          "price": "18.99-26.69万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式/纯电动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25485,
+          "series_name": "沃尔沃XC70",
+          "manufacturer": "沃尔沃亚太",
+          "sales_volume": 3051,
+          "price": "22.99-31.99万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25521,
+          "series_name": "银河M9",
+          "manufacturer": "吉利银河",
+          "sales_volume": 2743,
+          "price": "17.38-25.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 9636,
+          "series_name": "坦克700 Hi4-T",
+          "manufacturer": "长城汽车",
+          "sales_volume": 2515,
+          "price": "42.80-70.00万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25620,
+          "series_name": "iCAR V27",
+          "manufacturer": "奇瑞新能源",
+          "sales_volume": 2219,
+          "price": "16.48-19.18万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 5830,
+          "series_name": "坦克500 Hi4-T",
+          "manufacturer": "长城汽车",
+          "sales_volume": 1825,
+          "price": "33.50-36.50万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 10270,
+          "series_name": "坦克400 Hi4-T",
+          "manufacturer": "长城汽车",
+          "sales_volume": 1659,
+          "price": "28.58-29.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25598,
+          "series_name": "红旗HS6 PHEV",
+          "manufacturer": "一汽红旗",
+          "sales_volume": 1639,
+          "price": "17.48-22.58万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "插电式混动",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25877,
+          "series_name": "智己LS8",
+          "manufacturer": "智己汽车",
+          "sales_volume": 1350,
+          "price": "24.98-29.98万",
+          "price_source": "dongchedi_dealer_price",
+          "energy_type": "增程式",
+          "energy_group": "新能源"
+        },
+        {
+          "series_id": 25071,
+          "series_name": "传祺向往S7",
+          "manufacturer": "广汽传祺",
+          "sales_volume": 1060,
+          "price": "14.98-19.98万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -2117,6 +2601,7 @@
       "energy_group": "新能源",
       "segment_key": "中型SUV|新能源",
       "quality_status": "verified",
+      "classification_evidence": null,
       "segment_total_sales": 108774,
       "segment_model_count": 45,
       "segment_median_sales": 376.5,
@@ -2171,7 +2656,7 @@
           "series_name": "风云T9L",
           "manufacturer": "奇瑞汽车",
           "sales_volume": 4545,
-          "price": "12.99-18.69万",
+          "price": "12.59-18.29万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -2629,6 +3114,7 @@
       "energy_group": "新能源",
       "segment_key": "中大型车|新能源",
       "quality_status": "verified",
+      "classification_evidence": null,
       "segment_total_sales": 60471,
       "segment_model_count": 33,
       "segment_median_sales": 370,
@@ -2673,7 +3159,7 @@
           "series_name": "银河星耀8 PHEV",
           "manufacturer": "吉利银河",
           "sales_volume": 2735,
-          "price": "10.98-15.98万",
+          "price": "10.68-15.78万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "插电式混动",
           "energy_group": "新能源"
@@ -2863,7 +3349,7 @@
           "series_name": "银河E8",
           "manufacturer": "吉利银河",
           "sales_volume": 178,
-          "price": "14.18-19.08万",
+          "price": "13.38-19.08万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "纯电动",
           "energy_group": "新能源"
@@ -2923,7 +3409,7 @@
           "series_name": "昊铂GT",
           "manufacturer": "广汽埃安新能源",
           "sales_volume": 26,
-          "price": "14.58-17.79万",
+          "price": "14.58-20.39万",
           "price_source": "dongchedi_dealer_price",
           "energy_type": "纯电动",
           "energy_group": "新能源"
@@ -3021,6 +3507,7 @@
       "energy_group": "新能源",
       "segment_key": "紧凑型车|新能源",
       "quality_status": "verified",
+      "classification_evidence": null,
       "segment_total_sales": 73470,
       "segment_model_count": 23,
       "segment_median_sales": 841.5,
@@ -3301,5 +3788,21 @@
       "warning_reason": "车型销量14397辆，同一懂车帝细分市场头部3款竞品销量中位数10880辆，头部基准达成率132.3%"
     }
   ],
-  "quality_issues": []
+  "quality_issues": [
+    {
+      "series_id": 9118,
+      "type": "rank_energy_membership_missing_resolved_by_vehicle_evidence",
+      "values": [
+        "增程式",
+        "纯电动"
+      ],
+      "evidence": {
+        "source": "dongchedi_series_params",
+        "series_id": 9118,
+        "verification_status": "verified",
+        "source_url": "https://www.dongchedi.com/auto/params-carIds-x-9118",
+        "captured_at": "2026-07-30T14:00:00+08:00"
+      }
+    }
+  ]
 }

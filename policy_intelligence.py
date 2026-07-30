@@ -129,11 +129,7 @@ def build_sales_warning_policy_profiles(warning_model, period=""):
     if not own_model or not own_price_wan:
         return []
 
-    shared = {
-        "energyType": _text(warning_model.get("energyType")) or "待核验",
-        "bodyType": _text(warning_model.get("bodyType")) or "待核验",
-        "priceAsOf": _text(period),
-    }
+    shared = {"priceAsOf": _text(period)}
     own_reference = {
         "role": "own",
         "roleLabel": "本品",
@@ -157,6 +153,8 @@ def build_sales_warning_policy_profiles(warning_model, period=""):
         "model": own_model,
         "role": "own",
         **own_price,
+        "energyType": _text(warning_model.get("energyType")) or "待核验",
+        "bodyType": _text(warning_model.get("bodyType")) or "待核验",
         "engineDisplacementL": _number(warning_model.get("engineDisplacementL")),
         "salesReference": own_reference,
         **shared,
@@ -179,6 +177,8 @@ def build_sales_warning_policy_profiles(warning_model, period=""):
             "model": model,
             "role": role,
             **peer_price,
+            "energyType": _text(peer.get("energyType")) or "待核验",
+            "bodyType": _text(peer.get("bodyType")) or _text(warning_model.get("bodyType")) or "待核验",
             "engineDisplacementL": _number(peer.get("engineDisplacementL")),
             "salesReference": {
                 "role": role,
@@ -1181,6 +1181,30 @@ def _energy_matches(policy_energy, vehicle_energy):
     return policy_energy == vehicle_energy
 
 
+def _vehicle_energy_types(profile):
+    profile = dict(profile or {})
+    declared = profile.get("energyTypes")
+    if isinstance(declared, list):
+        values = [_text(value) for value in declared]
+    else:
+        values = re.split(r"[/／、]", _text(profile.get("energyType")))
+    allowed = {"新能源", "纯电", "纯电动", "插混", "插电式混动", "增程", "增程式", "燃油"}
+    return list(dict.fromkeys(value for value in values if value in allowed))
+
+
+def _vehicle_profile_gaps(profile):
+    profile = dict(profile or {})
+    gaps = []
+    if _number(profile.get("price")) is None or _number(profile.get("price")) <= 0:
+        gaps.append("price")
+    if not _vehicle_energy_types(profile):
+        gaps.append("energyType")
+    body_type = _text(profile.get("bodyType"))
+    if not body_type or body_type in {"待核验", "待复核"}:
+        gaps.append("bodyType")
+    return gaps
+
+
 def _vehicle_matches(row, profile):
     maximum = _number(_json(row["structured_json"], {}).get("maxEngineDisplacementL"))
     if maximum is None:
@@ -1218,13 +1242,44 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
     profile = dict(profile or {})
     price = _number(profile.get("price"))
     energy = _text(profile.get("energyType"))
+    energy_types = _vehicle_energy_types(profile)
     scenario = _text(profile.get("purchaseScenario") or profile.get("scenario")) or "置换更新"
+    profile_gaps = _vehicle_profile_gaps(profile)
+    if profile_gaps:
+        return {
+            "model": _text(model),
+            "region": _text(region),
+            "profile": {
+                "price": price,
+                "listPrice": _number(profile.get("listPrice")) or price,
+                "priceBasis": _text(profile.get("priceBasis")) or "含电池经销商报价起售价",
+                "baasDiscount": _number(profile.get("baasDiscount")) or 0,
+                "priceSource": _text(profile.get("priceSource")) or "analyst_input",
+                "priceAsOf": _text(profile.get("priceAsOf")),
+                "energyType": energy,
+                "energyTypes": energy_types,
+                "bodyType": _text(profile.get("bodyType")),
+                "engineDisplacementL": _number(profile.get("engineDisplacementL")),
+                "purchaseScenario": scenario,
+                "conditionsConfirmed": False,
+            },
+            "missingProfileFields": profile_gaps,
+            "verifiedPolicyCount": None,
+            "maxVerifiedBenefit": None,
+            "maxConditionalBenefit": None,
+            "postPolicyReferencePrice": None,
+            "postPolicyConditionalPrice": None,
+            "evidenceStatus": "vehicle_profile_incomplete",
+            "scenarioLabel": "车型档案不完整，补充精确动力形式、车身形式与价格后自动审核",
+            "causalBoundary": "车型档案缺失时不计算政策权益，不以0替代缺失结果",
+            "policyEffects": [],
+        }
     conditions_confirmed = False
     effects = []
     for row in _active_policy_rows(conn, org_id, edition, as_of or date.today().isoformat()):
         if (
             not _region_matches(row["region"], region)
-            or not _energy_matches(row["energy_scope"], energy)
+            or not all(_energy_matches(row["energy_scope"], value) for value in energy_types)
             or not _scenario_matches(row["policy_type"], scenario)
             or not _vehicle_matches(row, profile)
         ):
@@ -1264,7 +1319,7 @@ def build_vehicle_policy_impact(conn, *, model, region, profile, org_id="local",
     return {
         "model": _text(model),
         "region": _text(region),
-        "profile": {"price": price, "listPrice": _number(profile.get("listPrice")) or price, "priceBasis": _text(profile.get("priceBasis")) or "含电池经销商报价起售价", "baasDiscount": _number(profile.get("baasDiscount")) or 0, "priceSource": _text(profile.get("priceSource")) or "analyst_input", "priceAsOf": _text(profile.get("priceAsOf")), "energyType": energy, "bodyType": _text(profile.get("bodyType")), "engineDisplacementL": _number(profile.get("engineDisplacementL")), "purchaseScenario": scenario, "conditionsConfirmed": conditions_confirmed},
+        "profile": {"price": price, "listPrice": _number(profile.get("listPrice")) or price, "priceBasis": _text(profile.get("priceBasis")) or "含电池经销商报价起售价", "baasDiscount": _number(profile.get("baasDiscount")) or 0, "priceSource": _text(profile.get("priceSource")) or "analyst_input", "priceAsOf": _text(profile.get("priceAsOf")), "energyType": energy, "energyTypes": energy_types, "bodyType": _text(profile.get("bodyType")), "engineDisplacementL": _number(profile.get("engineDisplacementL")), "purchaseScenario": scenario, "conditionsConfirmed": conditions_confirmed},
         "verifiedPolicyCount": len(effects),
         "maxVerifiedBenefit": verified_total,
         "maxConditionalBenefit": conditional_total,

@@ -359,6 +359,8 @@ def build_sales_warning_full(payload):
                 "model": model,
                 "manufacturer": manufacturer,
                 "sales": int(peer.get("sales_volume") or 0),
+                "energyType": str(peer.get("energy_type") or "待核验"),
+                "bodyType": body_type,
                 **price_view,
                 "role": role,
                 "roleLabel": {
@@ -488,6 +490,7 @@ def build_sales_warning_full(payload):
             "greenRatio": green_ratio,
         },
         "qualityIssues": payload.get("quality_issues") or [],
+        "additionalMonitoredModels": payload.get("additional_monitored_models") or [],
         "saicModels": saic_models,
         "ranking": [],
     }
@@ -1059,9 +1062,31 @@ def _vertical_signals(conn, org_id, edition):
     if latest_source:
         rows = [row for row in rows if str(row["source_file"] or "") == latest_source]
 
+    monitoring_sql = """
+        select platform, period, own_model, competitor_model, positive_rank, negative_rank,
+               compare_share, source_file, updated_at
+        from vertical_rank_assets
+        where org_id=? and edition=? and platform='懂车帝'
+        order by updated_at desc, period desc, own_model, competitor_model
+    """
+    monitoring_rows, monitoring_fallback = _rows_with_demo_fallback(
+        conn, monitoring_sql, org_id, edition
+    )
+    base_updated_day = (
+        str(rows[0]["updated_at"] or "")[:10]
+        if rows
+        else str(monitoring_rows[0]["updated_at"] or "")[:10] if monitoring_rows else ""
+    )
+    if base_updated_day:
+        monitoring_rows = [
+            row for row in monitoring_rows
+            if str(row["source_file"] or "") == latest_source
+            or str(row["updated_at"] or "")[:10] >= base_updated_day
+        ]
+    fallback = fallback or monitoring_fallback
     raw_models = []
     seen_models = set()
-    for row in rows:
+    for row in monitoring_rows:
         key = _model_identity_key(row["own_model"])
         if not key or key in seen_models:
             continue
@@ -1133,20 +1158,28 @@ def _vertical_signals(conn, org_id, edition):
         "status": "available" if monitored_models else "missing",
         "platform": "懂车帝",
         "source": latest_source,
+        "sources": sorted({
+            str(row["source_file"] or "").strip()
+            for row in monitoring_rows
+            if str(row["source_file"] or "").strip()
+        }),
         "models": monitored_models,
         "modelCount": len(monitored_models),
-        "updatedAt": str(rows[0]["updated_at"] or "") if rows else "",
+        "updatedAt": str(monitoring_rows[0]["updated_at"] or "") if monitoring_rows else "",
         "scopeNote": "监测对象仅取最新正反向表的本品车型；空格差异不影响车型匹配。",
     }
     return output, fallback, monitoring
 
 
 def _apply_vertical_monitoring(sales_warning, monitoring, signals):
-    """以表内本品收敛预警对象；销量事实与预警等级保持原计算结果。"""
+    """Only the current org/edition vertical-monitoring relation defines models."""
     warning = dict(sales_warning or {})
     summary = dict(warning.get("summary") or {})
+    monitoring = dict(monitoring or {})
     monitored_models = list(monitoring.get("models") or [])
     monitored_keys = {_model_identity_key(model) for model in monitored_models}
+    monitoring["models"] = monitored_models
+    monitoring["modelCount"] = len(monitored_models)
     items = []
     for source_item in warning.get("saicModels") or []:
         canonical = _canonical_launch(source_item.get("model")) or str(source_item.get("model") or "").strip()
@@ -1178,6 +1211,14 @@ def _apply_vertical_monitoring(sales_warning, monitoring, signals):
     warning["saicModels"] = items
     warning["monitoring"] = monitoring
     return warning
+
+
+def trusted_policy_warning_models(conn, org_id="local", edition="china"):
+    """Return vehicle records whose identity is verified inside this org/edition."""
+    warning = load_sales_warning()
+    signals, _, monitoring = _vertical_signals(conn, org_id, edition)
+    scoped = _apply_vertical_monitoring(warning, monitoring, signals)
+    return list(scoped.get("saicModels") or [])
 
 
 def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="china", fuel_market=None):

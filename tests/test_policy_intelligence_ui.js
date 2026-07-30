@@ -32,7 +32,7 @@ for (const contract of [
   assert(source.includes(contract), `政策看板缺少契约：${contract}`);
 }
 assert(!source.includes("政策新闻"), "政策智能模块不能退化为政策新闻列表");
-assert(source.includes('role: "own"'), "本品候选必须在车型配置中显式标记为上汽集团车型");
+assert(source.includes('role: "own"'), "动态车型档案必须显式标记本品身份");
 assert(source.includes('profile.role === "own"'), "本品选择器只能展示上汽集团重点监测车型");
 assert(source.includes("/api/group-dashboard-demo"), "车型对比必须请求销量预警细分市场的动态竞品池");
 assert(source.includes("policy_model: model"), "动态竞品池必须随所选本品车型切换");
@@ -48,19 +48,20 @@ for (const region of ["北京", "上海", "重庆", "广东", "内蒙古", "新�
   assert(source.includes(`\"${region}\"`) || source.includes(`${region}:`), `区域选择器缺少：${region}`);
 }
 for (const model of ["Qwen 3.7 Max", "DeepSeek V4 Pro", "Kimi K2.5"]) {
-  assert(source.includes(model), `三模型策略区缺少：${model}`);
+  assert(!source.includes(model), `客户界面不应暴露内部模型名称：${model}`);
 }
 assert(source.includes('select[name="region"]'), "切换区域后应自动触发区域政策和三模型策略刷新");
+assert(source.includes('select[name="model"]'), "切换车型后应自动触发车型政策审核");
+assert(source.includes('select[name="scenario"]'), "切换购车情景后应自动触发政策审核");
+assert(source.includes("syncProfiles"), "车型档案必须从当前销量预警车型清单动态同步");
+assert(!source.includes('profiles[model] || profiles["奥迪E7X"]'), "缺少车型档案时不得回退成其他车型");
 assert(source.includes("strategyValidation"), "前端应展示后端三模型交叉验证状态");
 assert(source.includes("persist: force"), "自动预览不得保存政策分析，只有人工重新运行才允许持久化");
 assert(!source.includes("void startEvaluation();"), "打开政策看板不得自动写入分析记录");
 assert(source.includes('["aligned", "manual_required"].includes(validation?.status)'), "只有一致或明确进入人工裁决的结果才能开放Policy Eval");
 assert(source.includes("loadRequest"), "区域快速切换必须使用请求序号阻止旧响应覆盖新选择");
-assert(source.includes("MMN模型输出策略"), "区域策略结论必须使用MMN既定输出措辞");
-assert(source.includes("engineDisplacementL: 1.5"), "燃油车型必须携带发动机排量，才能校验2.0L门槛");
-for (const monitoredModel of ["奥迪E7X", "奥迪E5 Sportback", "智己LS8", "MG4", "荣威i6", "别克至境E7", "ID.ERA 9X", "尚界Z7"]) {
-  assert(source.includes(`"${monitoredModel}"`), `政策模块本品列表缺少现有重点监测车型：${monitoredModel}`);
-}
+assert(source.includes("MMN交叉验证结论"), "区域策略结论必须使用中立的MMN输出措辞");
+assert(source.includes("const profiles = {};"), "本品清单必须来自服务端当前监测车型，不得在前端固化");
 assert(!source.includes('state.model = button.dataset.policyModel'), "点击竞品气泡不得改变本品身份");
 assert(source.includes("state.focusModel = button.dataset.policyModel"), "点击气泡只应切换对比焦点");
 assert(source.includes('target.dataset.submitting === "true" || target.dataset.submitted === "true"'), "Policy Eval必须阻止请求中和已成功评分的重复提交");
@@ -81,5 +82,9 @@ assert(groupSource.includes("policy_model=${encodeURIComponent(uiState.policyMod
 assert(groupSource.includes("data-group-policy-region"), "管理看板应提供省／直辖市选择器");
 assert(groupSource.includes("policy_region=${encodeURIComponent(uiState.policyRegion)}"), "切换区域后应按省／直辖市重新请求政策测算");
 assert(groupSource.includes("省／直辖市"), "区域口径不得继续写成城市");
+assert(groupSource.includes("/api/policy-intelligence/analyze"), "管理看板选择车型后必须自动发起政策交叉审核");
+assert(groupSource.includes("persist:false"), "管理看板自动审核只能预览，不得写入分析记录");
+assert(groupSource.includes("strategyValidation"), "管理看板结论卡必须消费交叉验证结果");
+assert(groupSource.includes("MMN交叉验证结论"), "管理看板不得把规则草案冒充最终策略结论");
 
 console.log("policy intelligence UI contract tests passed");

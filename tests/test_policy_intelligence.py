@@ -86,7 +86,52 @@ class PolicySchemaTest(unittest.TestCase):
             [item["model"] for item in profiles[1:]],
             [item["model"] for item in own["comparisonPeers"]],
         )
+        self.assertEqual(
+            [item["energyType"] for item in profiles[1:]],
+            [item["energyType"] for item in own["comparisonPeers"]],
+        )
+        self.assertTrue(all("/" not in item["energyType"] for item in profiles))
         self.assertNotIn("蔚来ES6", [item["model"] for item in profiles])
+
+    def test_incomplete_vehicle_profile_never_becomes_zero_policy_value(self):
+        impact = build_vehicle_policy_impact(
+            self.conn,
+            model="待核验车型",
+            region="上海",
+            profile={
+                "price": 189900,
+                "energyType": "待核验",
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            as_of="2026-07-18",
+        )
+
+        self.assertEqual(impact["evidenceStatus"], "vehicle_profile_incomplete")
+        self.assertIn("energyType", impact["missingProfileFields"])
+        self.assertIsNone(impact["maxVerifiedBenefit"])
+        self.assertIsNone(impact["maxConditionalBenefit"])
+        self.assertIsNone(impact["postPolicyReferencePrice"])
+        self.assertIsNone(impact["postPolicyConditionalPrice"])
+
+    def test_multi_powertrain_series_matches_only_policy_scope_covering_every_powertrain(self):
+        seed_policy_mvp(self.conn)
+        impact = build_vehicle_policy_impact(
+            self.conn,
+            model="多动力车型",
+            region="上海",
+            profile={
+                "price": 189900,
+                "energyType": "增程式/纯电动",
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            as_of="2026-07-18",
+        )
+
+        self.assertEqual(impact["profile"]["energyTypes"], ["增程式", "纯电动"])
+        self.assertGreater(impact["verifiedPolicyCount"], 0)
+        self.assertEqual(impact["evidenceStatus"], "conditional_eligibility")
 
     def test_nio_peer_uses_baas_base_price_before_policy_calculation(self):
         profiles = build_sales_warning_policy_profiles({

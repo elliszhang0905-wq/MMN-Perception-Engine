@@ -41,7 +41,10 @@ const context = {
     const region = parsed.searchParams.get("region") || parsed.searchParams.get("policy_region");
     await new Promise(resolve => setTimeout(resolve, region === "上海" ? 30 : 1));
     if (parsed.pathname === "/api/group-dashboard-demo") {
-      return response({ policyIntelligence: { models: [{ role: "own", model, vehicleImpact: dashboard(model, region).vehicleImpact }] } });
+      return response({ policyIntelligence: {
+        models: [{ role: "own", model, vehicleImpact: dashboard(model, region).vehicleImpact }],
+        ownModelOptions: [{ role: "own", model, price: 219800, energyType: "纯电动", bodyType: "轿车" }],
+      } });
     }
     return response(dashboard(model, region));
   },
