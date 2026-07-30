@@ -18,6 +18,9 @@ MIN_FREE_MB="${MMN_DEPLOY_MIN_FREE_MB:-4096}"
 BUILD_TIMEOUT_SECONDS="${MMN_DEPLOY_BUILD_TIMEOUT_SECONDS:-1200}"
 
 release_lock() {
+  if [[ -n "${NGINX_BASE_CONFIG:-}" ]] && [[ -f "$NGINX_BASE_CONFIG" ]]; then
+    rm -f "$NGINX_BASE_CONFIG"
+  fi
   if [[ -f "$DEPLOY_LOCK_DIR/pid" ]] && [[ "$(cat "$DEPLOY_LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]]; then
     rm -f "$DEPLOY_LOCK_DIR/pid"
     rmdir "$DEPLOY_LOCK_DIR" 2>/dev/null || true
@@ -112,9 +115,19 @@ wait_for_container_health() {
 
 route_web_to() {
   local upstream_name="$1"
-  compose cp deploy/nginx.conf mmn-web:/tmp/mmn-release-base.conf
-  compose exec -T mmn-web sh -lc \
-    "sed 's#http://mmn-app:8765#http://${upstream_name}:8765#g' /tmp/mmn-release-base.conf > /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload"
+  local routed_config=""
+  routed_config="$(mktemp /tmp/mmn-nginx-route.XXXXXX)"
+  sed "s#http://mmn-app:8765#http://${upstream_name}:8765#g" "$NGINX_BASE_CONFIG" > "$routed_config"
+  cp "$routed_config" deploy/nginx.conf
+  rm -f "$routed_config"
+  if ! compose exec -T mmn-web nginx -t || ! compose exec -T mmn-web nginx -s reload; then
+    echo "反向代理切换到 ${upstream_name} 失败。" >&2
+    return 1
+  fi
+  if ! compose exec -T mmn-web grep -q "proxy_pass http://${upstream_name}:8765" /etc/nginx/conf.d/default.conf; then
+    echo "反向代理配置未指向 ${upstream_name}。" >&2
+    return 1
+  fi
   if ! compose exec -T mmn-web wget -qO- "http://${upstream_name}:8765/api/health" >/dev/null 2>&1; then
     echo "反向代理目标 ${upstream_name} 健康检查失败。" >&2
     return 1
@@ -146,6 +159,8 @@ CANDIDATE_IMAGE_TAG="candidate-$(date '+%Y%m%d%H%M%S')"
 ROLLBACK_IMAGE_TAG="rollback"
 CANDIDATE_CONTAINER_NAME="mmn-app-candidate"
 APP_WAS_RUNNING="false"
+NGINX_BASE_CONFIG="$(mktemp /tmp/mmn-nginx-base.XXXXXX)"
+cp deploy/nginx.conf "$NGINX_BASE_CONFIG"
 
 if compose ps --services --filter status=running 2>/dev/null | grep -qx "mmn-app"; then
   APP_WAS_RUNNING="true"
