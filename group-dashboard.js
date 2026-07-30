@@ -4,7 +4,7 @@
  let loading=false,refreshingWeekly=false,loadedEdition="",cachedDashboardData=null,attributionWarningEvidence=null,attributionProductEvaluation=null,attributionSalesPeriod="",policyStrategyRequest=0,policyStrategyController=null;
  const PRODUCT_EVALUATION_BOOTSTRAP_MODELS=new Set(["奥迪E7X"]);
  const uiState={viewKey:"brief",brand:"",vehicleId:"",marketDimension:"",warningModel:"奥迪E5 Sportback",warningSeriesId:"",policyCompareModel:"",policyRegion:"上海"};
- uiState.policyModel="奥迪E7X";
+ uiState.policyModel="";
  const POLICY_REGIONS=[{value:"北京",label:"北京市"},{value:"上海",label:"上海市"},{value:"广东",label:"广东省"},{value:"浙江",label:"浙江省"},{value:"四川",label:"四川省"},{value:"湖北",label:"湖北省"},{value:"江苏",label:"江苏省"}];
  const policyRegionLabel=value=>POLICY_REGIONS.find(item=>item.value===value)?.label||value;
  const SALES_WARNING_CYCLE_STORAGE_KEY="mmnSalesWarningCyclesV1";

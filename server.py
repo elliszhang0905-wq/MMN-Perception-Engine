@@ -330,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260731-policy-energy-contract-1"
+APP_VERSION_CODE = "beta-1.03-20260731-policy-demo-ready-1"
 APP_RELEASE_DATE = "2026-07-30"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -15935,11 +15935,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         if str(item.get("model") or "").strip() in monitored_policy_models
                         and item.get("vehicleStartPriceWan") not in (None, "")
                     ]
-                    requested_policy_model = str(q.get("policy_model", ["奥迪E7X"])[0] or "奥迪E7X").strip()
-                    selected_warning = next(
-                        (item for item in warning_models if item.get("model") == requested_policy_model),
-                        {},
+                    requested_policy_model = str(q.get("policy_model", [""])[0] or "").strip()
+                    selected_warning = (
+                        next(
+                            (item for item in warning_models if item.get("model") == requested_policy_model),
+                            {},
+                        )
+                        if requested_policy_model
+                        else (warning_models[0] if warning_models else {})
                     )
+                    requested_policy_model = str(
+                        selected_warning.get("model") or requested_policy_model
+                    ).strip()
                     policy_profiles = build_sales_warning_policy_profiles(
                         selected_warning,
                         payload["salesWarnings"].get("source", {}).get("period") or "",

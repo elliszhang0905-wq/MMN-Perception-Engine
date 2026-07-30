@@ -35,9 +35,11 @@ const context = {
   activeEdition: () => "china",
   authHeaders: () => ({ "Content-Type": "application/json" }),
   fetch: async (url, options = {}) => {
-    if (options.method === "POST") return new Promise(() => {});
+    if (options.method === "POST") {
+      return { ok: false, status: 502, json: async () => { throw new SyntaxError("Unexpected token '<'"); } };
+    }
     const parsed = new URL(url, "http://localhost");
-    const model = parsed.searchParams.get("model") || parsed.searchParams.get("policy_model");
+    const model = parsed.searchParams.get("model") || parsed.searchParams.get("policy_model") || "智己LS6";
     const region = parsed.searchParams.get("region") || parsed.searchParams.get("policy_region");
     await new Promise(resolve => setTimeout(resolve, region === "上海" ? 30 : 1));
     if (parsed.pathname === "/api/group-dashboard-demo") {
@@ -55,7 +57,12 @@ const context = {
 vm.runInNewContext(source, context, { filename: "policy-intelligence.js" });
 
 (async () => {
-  const first = context.window.PolicyIntelligenceModule.load(true);
+  await context.window.PolicyIntelligenceModule.load(true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert(root.innerHTML.includes("智己LS6在上海"), "首次进入政策页应自动选择当前可审核车型");
+  assert(root.innerHTML.includes("交叉复核暂未完成，可安全重试。"), "非JSON网关错误必须转换成中文安全重试提示");
+  assert(!root.innerHTML.includes("Unexpected token"), "客户界面不得暴露响应解析错误");
+  const first = context.window.PolicyIntelligenceModule.select("智己LS6", "上海");
   const second = context.window.PolicyIntelligenceModule.select("尚界Z7", "广东");
   await Promise.all([first, second]);
   assert(root.innerHTML.includes("尚界Z7在广东"), "较慢的旧请求不得覆盖较新的车型与区域结果");

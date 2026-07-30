@@ -81,6 +81,9 @@ class PolicyIntelligenceApiContractTest(unittest.TestCase):
         self.assertIn('"salesReference": policy_profile["salesReference"]', group_route)
         self.assertNotIn("蔚来ES6", group_route)
         self.assertNotIn("理想L6", group_route)
+        self.assertIn('q.get("policy_model", [""])', group_route)
+        self.assertIn("else (warning_models[0] if warning_models else {})", group_route)
+        self.assertNotIn('q.get("policy_model", ["奥迪E7X"])', group_route)
 
     def test_regional_strategy_runs_three_flagship_providers_on_same_evidence(self):
         calls = []
