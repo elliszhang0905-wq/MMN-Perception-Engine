@@ -48,6 +48,13 @@ class SafeDeployScriptTest(unittest.TestCase):
         self.assertNotIn("compose restart mmn-app", self.script)
         self.assertNotIn("compose restart mmn-web", self.script)
 
+    def test_cutover_updates_read_only_bind_mount_from_host_and_fails_closed(self):
+        self.assertIn('NGINX_BASE_CONFIG="$(mktemp /tmp/mmn-nginx-base.', self.script)
+        self.assertIn('"$NGINX_BASE_CONFIG" > "$staged_config"', self.script)
+        self.assertIn('cp "$staged_config" deploy/nginx.conf', self.script)
+        self.assertIn("if ! compose exec -T mmn-web nginx -t", self.script)
+        self.assertNotIn("> /etc/nginx/conf.d/default.conf", self.script)
+
     def test_deploy_has_lock_disk_gate_and_post_build_cleanup(self):
         self.assertIn("acquire_lock", self.script)
         self.assertIn("MMN_DEPLOY_MIN_FREE_MB", self.script)

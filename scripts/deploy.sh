@@ -24,10 +24,17 @@ release_lock() {
   fi
 }
 
+cleanup_deploy() {
+  if [[ -n "${NGINX_BASE_CONFIG:-}" ]]; then
+    rm -f "$NGINX_BASE_CONFIG"
+  fi
+  release_lock
+}
+
 acquire_lock() {
   if mkdir "$DEPLOY_LOCK_DIR" 2>/dev/null; then
     printf '%s\n' "$$" > "$DEPLOY_LOCK_DIR/pid"
-    trap release_lock EXIT
+    trap cleanup_deploy EXIT
     return
   fi
 
@@ -43,7 +50,7 @@ acquire_lock() {
   rmdir "$DEPLOY_LOCK_DIR" 2>/dev/null || true
   mkdir "$DEPLOY_LOCK_DIR"
   printf '%s\n' "$$" > "$DEPLOY_LOCK_DIR/pid"
-  trap release_lock EXIT
+  trap cleanup_deploy EXIT
 }
 
 available_disk_mb() {
@@ -112,11 +119,28 @@ wait_for_container_health() {
 
 route_web_to() {
   local upstream_name="$1"
-  compose cp deploy/nginx.conf mmn-web:/tmp/mmn-release-base.conf
-  compose exec -T mmn-web sh -lc \
-    "sed 's#http://mmn-app:8765#http://${upstream_name}:8765#g' /tmp/mmn-release-base.conf > /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload"
+  local staged_config=""
+  staged_config="$(mktemp "${ROOT}/deploy/.nginx-release.XXXXXX")"
+  sed "s#http://mmn-app:8765#http://${upstream_name}:8765#g" \
+    "$NGINX_BASE_CONFIG" > "$staged_config"
+  if ! cp "$staged_config" deploy/nginx.conf; then
+    rm -f "$staged_config"
+    echo "无法更新反向代理配置，保持当前流量目标。" >&2
+    return 1
+  fi
+  rm -f "$staged_config"
+  if ! compose exec -T mmn-web nginx -t || ! compose exec -T mmn-web nginx -s reload; then
+    echo "反向代理配置校验或重载失败。" >&2
+    cp "$NGINX_BASE_CONFIG" deploy/nginx.conf
+    compose exec -T mmn-web nginx -t >/dev/null 2>&1 \
+      && compose exec -T mmn-web nginx -s reload >/dev/null 2>&1 || true
+    return 1
+  fi
   if ! compose exec -T mmn-web wget -qO- "http://${upstream_name}:8765/api/health" >/dev/null 2>&1; then
     echo "反向代理目标 ${upstream_name} 健康检查失败。" >&2
+    cp "$NGINX_BASE_CONFIG" deploy/nginx.conf
+    compose exec -T mmn-web nginx -t >/dev/null 2>&1 \
+      && compose exec -T mmn-web nginx -s reload >/dev/null 2>&1 || true
     return 1
   fi
 }
@@ -139,6 +163,9 @@ fi
 set -a
 source .env
 set +a
+
+NGINX_BASE_CONFIG="$(mktemp /tmp/mmn-nginx-base.XXXXXX)"
+cp deploy/nginx.conf "$NGINX_BASE_CONFIG"
 
 ensure_build_capacity
 
