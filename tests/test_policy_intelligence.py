@@ -651,6 +651,29 @@ class PolicyAnalysisTest(unittest.TestCase):
         self.assertEqual(result["causalBoundary"], "规则影响链，不代表已验证销量因果")
         self.assertTrue(all(item["policyId"] for item in result["policyEffects"]))
 
+    def test_national_nev_rules_apply_to_shanxi_mixed_energy_series(self):
+        self.add_policy()
+        result = build_vehicle_policy_impact(
+            self.conn,
+            model="智己LS6",
+            region="山西",
+            profile={
+                "energyType": "增程式/纯电动",
+                "energyTypes": ["增程式", "纯电动"],
+                "price": 189900,
+                "bodyType": "SUV",
+                "purchaseScenario": "置换更新",
+            },
+            org_id="local",
+            edition="china",
+            as_of="2026-07-31",
+        )
+        self.assertEqual(result["verifiedPolicyCount"], 1)
+        self.assertEqual(result["maxConditionalBenefit"], 15000)
+        self.assertEqual(result["postPolicyConditionalPrice"], 174900)
+        self.assertEqual(result["evidenceStatus"], "conditional_eligibility")
+        self.assertEqual(result["policyEffects"][0]["region"], "全国")
+
     def test_new_energy_aliases_match_reviewed_nev_policy(self):
         self.add_policy()
         for energy_type in ("纯电", "纯电动", "插混", "插电式混动", "增程", "增程式"):

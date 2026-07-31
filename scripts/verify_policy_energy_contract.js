@@ -14,6 +14,8 @@ const chromePath = process.env.CHROME_PATH || "/Applications/Google Chrome.app/C
 const username = process.env.MMN_USERNAME || "";
 const password = process.env.MMN_PASSWORD || "";
 const outputDir = process.env.MMN_ACCEPTANCE_OUTPUT || "output/playwright";
+const targetRegion = process.env.MMN_POLICY_REGION || "上海";
+const expectedVersion = process.env.MMN_EXPECTED_VERSION || "beta-1.03-20260731-policy-demo-ready-1";
 const viewports = [
   { width: 1440, height: 1000 },
   { width: 390, height: 844 },
@@ -66,6 +68,13 @@ async function verifyViewport(browser, viewport) {
   await page.evaluate(() => localStorage.setItem("mmnEngineEdition", "china"));
   await page.reload({ waitUntil: "domcontentloaded" });
   await authenticate(page);
+  const health = await page.evaluate(async () => {
+    const response = await fetch("/api/health");
+    return response.json();
+  });
+  if (health.versionCode !== expectedVersion) {
+    throw new Error(`Wrong local runtime: expected ${expectedVersion}, received ${health.versionCode || "unknown"}`);
+  }
   await page.locator("#dashboard").waitFor({ state: "visible", timeout: 30000 });
   await page.waitForTimeout(500);
   await page.locator('#nav button[data-page="policyintelligence"]').click();
@@ -79,7 +88,7 @@ async function verifyViewport(browser, viewport) {
       && response.status() === 200,
     { timeout: 30000 },
   );
-  await page.evaluate(() => window.PolicyIntelligenceModule.select("智己LS6", "上海"));
+  await page.evaluate(region => window.PolicyIntelligenceModule.select("智己LS6", region), targetRegion);
   await page.waitForFunction(() =>
     document.querySelector("#policy-controls") || document.querySelector(".policy-error"),
   );
@@ -89,10 +98,10 @@ async function verifyViewport(browser, viewport) {
   await form.waitFor({ state: "visible", timeout: 30000 });
   const response = await responsePromise;
   const payload = await response.json();
-  await page.waitForFunction(() => {
+  await page.waitForFunction(region => {
     const impact = document.querySelector(".policy-impact");
-    return impact?.textContent?.includes("智己LS6在上海");
-  }, null, { timeout: 30000 });
+    return impact?.textContent?.includes(`智己LS6在${region}`);
+  }, targetRegion, { timeout: 30000 });
 
   const ui = await page.evaluate(() => {
     const root = document.querySelector("#policy-intelligence-root");
@@ -113,6 +122,7 @@ async function verifyViewport(browser, viewport) {
     viewport: viewport.width,
     ui,
     api: {
+      runtimeVersion: health.versionCode,
       evidenceStatus: impact.evidenceStatus,
       verifiedPolicyCount: impact.verifiedPolicyCount,
       conditionalBenefit: impact.conditionalBenefit,
@@ -126,7 +136,7 @@ async function verifyViewport(browser, viewport) {
   };
 
     const valid = ui.model === "智己LS6"
-    && ui.region === "上海"
+    && ui.region === targetRegion
     && ui.scenario === "置换更新"
     && ui.impactText?.includes("¥23,403")
     && ui.ownText?.includes("¥166,497")
