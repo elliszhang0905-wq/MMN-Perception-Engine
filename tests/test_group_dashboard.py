@@ -15,11 +15,13 @@ from group_dashboard import (
     build_segment_cards,
     parse_cpca_ice_market,
     load_e7x_product_evaluation,
+    load_ls6_evidence_evaluation,
     load_sales_warning,
     _latest_sales_warning_observed_path,
     merge_sales_payloads,
     trusted_policy_warning_models,
 )
+from product_evaluation_catalog import validate_dataset
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,6 +62,85 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(result["monitoring"]["models"], ["企业本品"])
         self.assertEqual([item["model"] for item in result["saicModels"]], ["企业本品"])
         self.assertNotIn("销量文件中明确核验", result["monitoring"]["scopeNote"])
+
+    def test_ls6_evidence_loader_reuses_valid_catalog_attributes(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("create table product_evaluation_datasets (org_id text, edition text, source_model text, dataset_json text, fingerprint text, updated_at text)")
+        dataset = {
+            "datasetVersion": "ls6-v1",
+            "productEvaluationSourceModel": "智己LS6",
+            "models": ["智己LS6", "极氪7X"],
+            "rows": [
+                ["智己LS6", "本品", "全网", "空间", "空间", "", "", "", 1, 1, 1, 1, "", "", 0.8],
+                ["极氪7X", "竞品", "全网", "空间", "空间", "", "", "", 1, 1, 1, 1, "", "", 0.6],
+            ],
+            "summaryMetrics": {"智己LS6": {"overallNsr": 0.7}, "极氪7X": {"overallNsr": 0.5}},
+            "summaryHeat": {
+                "智己LS6": {
+                    "volume": 100,
+                    "interaction": 20,
+                    "platformVolume": {"抖音": 60},
+                    "platformInteraction": {"抖音": 12},
+                },
+                "极氪7X": {
+                    "volume": 90,
+                    "interaction": 18,
+                    "platformVolume": {"抖音": 50},
+                    "platformInteraction": {"抖音": 10},
+                },
+            },
+            "summaryPlatformNsr": {"智己LS6": {"全网": 0.7}, "极氪7X": {"全网": 0.5}},
+            "importQuality": {"attributeNsrAvailable": True, "attributeNsrSources": ["全网"], "timeRange": "2026-07"},
+        }
+        normalized, _, _, fingerprint, raw = validate_dataset(dataset)
+        conn.execute("insert into product_evaluation_datasets values (?,?,?,?,?,?)", ("local", "china", "智己LS6", raw, fingerprint, "2026-07-30"))
+
+        result = load_ls6_evidence_evaluation(conn)
+
+        self.assertEqual(result["attributeStatus"]["status"], "available")
+        self.assertEqual(result["productModels"], ["智己LS6", "极氪7X"])
+        self.assertEqual(result["productEvaluationModels"][0]["voice"], 100)
+        self.assertEqual(result["productEvaluationModels"][0]["engagement"], 20)
+        self.assertEqual(result["productEvaluationModels"][0]["voiceRank"], 1)
+        self.assertEqual(result["productEvaluationModels"][0]["platformVolume"]["抖音"], 60)
+        self.assertEqual(result["productEvaluationModels"][0]["platformInteraction"]["抖音"], 12)
+        self.assertEqual(result["attributes"][0]["attribute"], "空间")
+        self.assertAlmostEqual(result["attributes"][0]["ownNsr"], 0.8)
+        self.assertAlmostEqual(result["attributes"][0]["averageNsr"], 0.7)
+
+    def test_ls6_evidence_loader_keeps_direct_and_shared_comparison_metrics_separate(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("create table douyin_vehicle_radar_projects (id text, org_id text, edition text, subject text)")
+        conn.execute("create table douyin_vehicle_radar_runs (project_id text, status text, result_json text, completed_at text, updated_at text)")
+        conn.execute("create table vertical_rank_assets (org_id text, edition text, platform text, period text, own_model text, competitor_model text, positive_rank integer, negative_rank integer, updated_at text)")
+        result = {
+            "subject": "智己LS6",
+            "competitors": ["理想i6", "问界M6", "极氪7X"],
+            "publicationStatus": "ready",
+            "counts": {"pendingReview": 0, "viewsVerified": 3, "rankingEligible": 3, "viewCoveragePct": 100},
+            "window": {"start": "2026-07-22T00:00:00Z", "end": "2026-07-29T00:00:00Z"},
+            "lists": {
+                "own": [{"matchedModels": ["智己LS6"], "rankingEligible": True, "metrics": {"views": 100}, "interactionScore": 20}],
+                "competitor": [{"matchedModels": ["极氪7X"], "rankingEligible": True, "metrics": {"views": 80}, "interactionScore": 12}],
+                "comparison": [{"matchedModels": ["理想i6", "问界M6", "极氪7X"], "rankingEligible": True, "metrics": {"views": 60}, "interactionScore": 9}],
+            },
+        }
+        conn.execute("insert into douyin_vehicle_radar_projects values (?,?,?,?)", ("p1", "local", "china", "智己LS6"))
+        conn.execute("insert into douyin_vehicle_radar_runs values (?,?,?,?,?)", ("p1", "completed", json.dumps(result), "2026-07-29", "2026-07-29"))
+        conn.execute("insert into vertical_rank_assets values (?,?,?,?,?,?,?,?,?)", ("local", "china", "懂车帝", "2026-07-13至2026-07-19", "智己LS6", "极氪7X", 1, 1, "2026-07-23"))
+
+        evaluation = load_ls6_evidence_evaluation(conn)
+        by_model = {item["model"]: item for item in evaluation["models"]}
+
+        self.assertEqual(evaluation["status"], "available")
+        self.assertEqual(by_model["智己LS6"]["voice"], 100)
+        self.assertEqual(by_model["极氪7X"]["voice"], 80)
+        self.assertEqual(by_model["问界M6"]["evidenceStatus"], "comparison_only")
+        self.assertEqual(evaluation["comparisonEvidence"]["voice"], 60)
+        self.assertEqual(evaluation["comparisons"][0]["positiveRank"], 1)
+        self.assertEqual(evaluation["attributeStatus"]["status"], "missing")
 
     def test_e7x_loader_resolves_the_canonical_asset_at_call_time(self):
         canonical = ROOT / "data" / "modules" / "product_evaluation" / "e7x_product_evaluation_2026-06.json"
@@ -611,6 +692,25 @@ class GroupDashboardTest(unittest.TestCase):
         e5 = next(item for item in warning["saicModels"] if item["model"] == "奥迪E5 Sportback")
         self.assertEqual(e5["comparisonSignal"]["activeCompetitor"], "小米SU7")
         self.assertEqual(e5["comparisonSignal"]["reverseCompetitor"], "小米SU7")
+
+    def test_sales_warning_adds_only_explicitly_verified_new_monitoring_models(self):
+        warning = {
+            "summary": {},
+            "additionalMonitoredModels": ["智己LS6"],
+            "saicModels": [
+                {"model": "奥迪E7X", "performanceRate": 0.4, "level": "yellow"},
+                {"model": "智己LS6", "performanceRate": 0.24, "level": "red"},
+                {"model": "未声明车型", "performanceRate": 0.9, "level": "green"},
+            ],
+        }
+        monitoring = {"models": ["奥迪E7X"], "modelCount": 1, "scopeNote": "表内本品"}
+
+        result = _apply_vertical_monitoring(warning, monitoring, {})
+
+        self.assertEqual(result["monitoring"]["models"], ["奥迪E7X", "智己LS6"])
+        self.assertEqual(result["summary"]["trackedModelCount"], 2)
+        self.assertEqual([item["model"] for item in result["saicModels"]], ["奥迪E7X", "智己LS6"])
+        self.assertNotIn("未声明车型", {item["model"] for item in result["saicModels"]})
 
     def test_sales_warning_prefills_latest_mmn_database_cycle_and_leaves_missing_models_manual(self):
         self.conn.executemany("insert into vertical_rank_assets values (?,?,?,?,?,?,?,?,?,?,?)", [

@@ -10,11 +10,13 @@ import json
 import math
 import os
 import re
+import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mmn_data import module_path
+from product_evaluation_catalog import validate_dataset
 from statistics import median
 
 
@@ -174,6 +176,265 @@ def load_e7x_product_evaluation(path=None):
     payload["status"] = "available"
     payload["validVerticalModels"] = len(valid_vertical)
     return payload
+
+
+def load_ls6_evidence_evaluation(conn, org_id="local", edition="china"):
+    """Build the LS6 customer-demo views from verified, model-specific evidence."""
+    missing = {
+        "status": "missing",
+        "contract": "ls6_verified_evidence_v1",
+        "ownModel": "智己LS6",
+        "source": {},
+        "models": [],
+        "platforms": [],
+        "attributes": [],
+        "comparisons": [],
+    }
+    try:
+        run_row = conn.execute(
+            """
+            select r.result_json
+              from douyin_vehicle_radar_runs r
+              join douyin_vehicle_radar_projects p on p.id = r.project_id
+             where p.org_id = ? and p.edition = ? and p.subject = ?
+               and r.status = 'completed'
+             order by coalesce(r.completed_at, r.updated_at) desc
+             limit 1
+            """,
+            (org_id, edition, "智己LS6"),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        run_row = None
+    try:
+        period_row = conn.execute(
+            """
+            select period
+              from vertical_rank_assets
+             where org_id = ? and edition = ? and platform = ? and own_model = ?
+             order by updated_at desc
+             limit 1
+            """,
+            (org_id, edition, "懂车帝", "智己LS6"),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        period_row = None
+    vertical_period = str(period_row["period"] if period_row else "")
+    try:
+        comparison_rows = conn.execute(
+            """
+            select competitor_model, positive_rank, negative_rank
+              from vertical_rank_assets
+             where org_id = ? and edition = ? and platform = ? and own_model = ?
+               and period = ?
+             order by positive_rank asc, competitor_model asc
+            """,
+            (org_id, edition, "懂车帝", "智己LS6", vertical_period),
+        ).fetchall() if vertical_period else []
+    except sqlite3.OperationalError:
+        comparison_rows = []
+    try:
+        dataset_row = conn.execute(
+            """
+            select dataset_json, fingerprint
+              from product_evaluation_datasets
+             where org_id = ? and edition = ? and source_model = ?
+             order by updated_at desc
+             limit 1
+            """,
+            (org_id, edition, "智己LS6"),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        dataset_row = None
+
+    product_dataset = {}
+    if dataset_row:
+        try:
+            candidate = json.loads(dataset_row["dataset_json"] or "{}")
+            normalized, source_model, _, fingerprint, _ = validate_dataset(candidate)
+            quality = normalized.get("importQuality") or {}
+            if (
+                source_model == "智己LS6"
+                and fingerprint == str(dataset_row["fingerprint"] or "")
+                and quality.get("attributeNsrAvailable") is True
+                and "全网" in list(quality.get("attributeNsrSources") or [])
+            ):
+                product_dataset = normalized
+        except (TypeError, ValueError, json.JSONDecodeError):
+            product_dataset = {}
+
+    radar = {}
+    if run_row:
+        try:
+            radar = json.loads(run_row["result_json"] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            radar = {}
+    counts = radar.get("counts") or {}
+    radar_ready = (
+        radar.get("publicationStatus") == "ready"
+        and int(counts.get("pendingReview") or 0) == 0
+        and int(counts.get("viewsVerified") or 0)
+        == int(counts.get("rankingEligible") or 0)
+        and int(counts.get("rankingEligible") or 0) > 0
+    )
+    if not radar_ready and not comparison_rows and not product_dataset:
+        return missing
+
+    lists = radar.get("lists") or {}
+    expected_models = []
+    for model in [str(radar.get("subject") or "智己LS6")] + [
+        str(value) for value in radar.get("competitors") or []
+    ] + list(product_dataset.get("models") or []):
+        if model and model not in expected_models:
+            expected_models.append(model)
+
+    def metrics_for(model):
+        source_items = (lists.get("own") or []) if model == "智己LS6" else (lists.get("competitor") or [])
+        items = [
+            item for item in source_items
+            if list(item.get("matchedModels") or []) == [model]
+            and item.get("rankingEligible") is True
+        ]
+        views = sum(float((item.get("metrics") or {}).get("views") or 0) for item in items)
+        engagement = sum(float(item.get("interactionScore") or 0) for item in items)
+        return {
+            "model": model,
+            "isOwn": model == "智己LS6",
+            "contentCount": len(items),
+            "voice": int(round(views)),
+            "engagement": round(engagement, 1),
+            "evidenceStatus": "verified" if items else "comparison_only",
+        }
+
+    model_rows = [metrics_for(model) for model in expected_models]
+    product_metrics = product_dataset.get("summaryMetrics") or {}
+    product_heat = product_dataset.get("summaryHeat") or {}
+    product_platform_nsr = product_dataset.get("summaryPlatformNsr") or {}
+    for model in model_rows:
+        name = model["model"]
+        metric = product_metrics.get(name) or {}
+        heat = product_heat.get(name) or {}
+        model["overallNsr"] = metric.get("overallNsr")
+        model["productVolume"] = heat.get("volume")
+        model["productInteraction"] = heat.get("interaction")
+        model["platformNsr"] = product_platform_nsr.get(name) or {}
+    product_evaluation_models = []
+    for name in list(product_dataset.get("models") or []):
+        metric = product_metrics.get(name) or {}
+        heat = product_heat.get(name) or {}
+        product_evaluation_models.append({
+            "model": name,
+            "isOwn": name == "智己LS6",
+            "voice": int(heat.get("volume") or 0),
+            "engagement": int(heat.get("interaction") or 0),
+            "overallNsr": metric.get("overallNsr"),
+            "platformNsr": product_platform_nsr.get(name) or {},
+            "platformVolume": heat.get("platformVolume") or {},
+            "platformInteraction": heat.get("platformInteraction") or {},
+        })
+    for metric_key, rank_key in (
+        ("voice", "voiceRank"),
+        ("engagement", "engagementRank"),
+        ("overallNsr", "overallNsrRank"),
+    ):
+        ranked = sorted(
+            product_evaluation_models,
+            key=lambda item: float(item.get(metric_key) or 0),
+            reverse=True,
+        )
+        for rank, item in enumerate(ranked, 1):
+            item[rank_key] = rank
+    comparison_items = [
+        item for item in lists.get("comparison") or []
+        if item.get("rankingEligible") is True
+    ]
+    shared_views = sum(float((item.get("metrics") or {}).get("views") or 0) for item in comparison_items)
+    shared_engagement = sum(float(item.get("interactionScore") or 0) for item in comparison_items)
+    window = radar.get("window") or {}
+    comparisons = [
+        {
+            "model": str(row["competitor_model"] or ""),
+            "positiveRank": int(row["positive_rank"]) if row["positive_rank"] is not None else None,
+            "negativeRank": int(row["negative_rank"]) if row["negative_rank"] is not None else None,
+        }
+        for row in comparison_rows
+    ]
+    attribute_rows = defaultdict(dict)
+    for row in product_dataset.get("rows") or []:
+        if not isinstance(row, list) or len(row) < 15 or str(row[2] or "") != "全网":
+            continue
+        model = str(row[0] or "").strip()
+        attribute = str(row[4] or "").strip()
+        try:
+            score = float(row[14])
+        except (TypeError, ValueError):
+            continue
+        if model and attribute:
+            attribute_rows[attribute][model] = score
+    attributes = []
+    dataset_models = list(product_dataset.get("models") or [])
+    for attribute, scores in sorted(attribute_rows.items()):
+        if "智己LS6" not in scores:
+            continue
+        peer_values = [scores[model] for model in dataset_models if model in scores]
+        if not peer_values:
+            continue
+        own_nsr = scores["智己LS6"]
+        average_nsr = sum(peer_values) / len(peer_values)
+        attributes.append({
+            "attribute": attribute,
+            "ownNsr": round(own_nsr, 4),
+            "averageNsr": round(average_nsr, 4),
+            "deltaVsAverage": round(own_nsr - average_nsr, 4),
+        })
+    product_quality = product_dataset.get("importQuality") or {}
+    return {
+        "status": "available",
+        "contract": "ls6_verified_evidence_v1",
+        "ownModel": "智己LS6",
+        "source": {
+            "period": f"{str(window.get('start') or '')[:10]}—{str(window.get('end') or '')[:10]}",
+            "scope": "近7日已核验短视频内容与最新已确认垂媒自然周排名",
+            "voiceFormula": "播放量采用已核验公开内容统计；互动量采用现有加权规则",
+            "coveragePct": float(counts.get("viewCoveragePct") or 0),
+            "productPeriod": str(product_quality.get("timeRange") or ""),
+            "productSourceNote": str(product_dataset.get("sourceNote") or ""),
+        },
+        "models": model_rows,
+        "platforms": [
+            {
+                "platform": "短视频",
+                "status": "available" if radar_ready else "missing",
+                "period": f"{str(window.get('start') or '')[:10]}—{str(window.get('end') or '')[:10]}",
+                "sampleCount": int(counts.get("rankingEligible") or 0),
+                "coveragePct": float(counts.get("viewCoveragePct") or 0),
+            },
+            {
+                "platform": "垂直媒体",
+                "status": "available" if comparisons else "missing",
+                "period": vertical_period,
+                "sampleCount": len(comparisons),
+            },
+        ],
+        "attributes": attributes,
+        "attributeStatus": {
+            "status": "available" if attributes else "missing",
+            "message": (
+                f"已通过现有产品评价门禁，按全网口径计算{len(attributes)}项LS6属性NSR及四车平均。"
+                if attributes
+                else "当前没有通过复核的LS6属性级NSR，不使用E7X属性值或零值代填。"
+            ),
+        },
+        "productModels": dataset_models,
+        "productEvaluationModels": product_evaluation_models,
+        "productPlatformNsr": product_platform_nsr,
+        "comparisons": comparisons,
+        "comparisonEvidence": {
+            "contentCount": len(comparison_items),
+            "voice": int(round(shared_views)),
+            "engagement": round(shared_engagement, 1),
+            "models": list(radar.get("competitors") or []),
+        },
+    }
 
 
 def _warning_level(performance_rate):
@@ -1229,6 +1490,10 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
     market_dimensions = build_market_dimensions(sales_payload)
     apply_cpca_fuel_market(market_dimensions, fuel_market)
     product_evaluation = load_e7x_product_evaluation()
+    product_evaluations = {
+        "奥迪E7X": product_evaluation,
+        "智己LS6": load_ls6_evidence_evaluation(conn, org_id, edition),
+    }
     sales_warning = load_sales_warning()
     social, social_fallback = _latest_social_by_model(conn, org_id, edition)
     voc, vertical_fallback, monitoring = _vertical_signals(conn, org_id, edition)
@@ -1288,6 +1553,7 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
         "salesWarnings": sales_warning,
         "launches": launches,
         "productEvaluation": product_evaluation,
+        "productEvaluations": product_evaluations,
         "methodology": [
             "市场结构：纯电、插混、增程及车身级别采用懂车帝 Top10；燃油采用乘联会 ICE 零售整体市场月度数据。",
             "燃油卡的销量、环比与份额来自乘联会 FuelMarket；上汽车型名次仅来自懂车帝全国总榜，不表述为燃油榜名次。",
@@ -1295,6 +1561,7 @@ def build_group_dashboard_payload(conn, sales_payload, org_id="local", edition="
             "VOC：懂车帝与汽车之家正反向对比排名，仅作为用户比较行为信号。",
             "E7X产品评价：来自 AUDI E7X等5车产品评价_0710_v2.xlsx，数据期为2026年6月；声量、互动量和NSR均沿用工作簿定义。",
             "属性星图：横轴为E7X属性NSR，纵轴为E7X相对五车平均NSR的差值；工作簿未提供属性样本量，因此点大小不编码样本量。",
+            "LS6跨板块：销量沿用完整细分市场预警规则；传播采用近7日已核验短视频播放与互动；用户之声采用已确认垂媒周榜，缺失属性级NSR时明确留空。",
             sales_warning_methodology(sales_warning),
         ],
     }

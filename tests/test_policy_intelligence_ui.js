@@ -34,6 +34,10 @@ for (const contract of [
 assert(!source.includes("政策新闻"), "政策智能模块不能退化为政策新闻列表");
 assert(source.includes('role: "own"'), "动态车型档案必须显式标记本品身份");
 assert(source.includes('profile.role === "own"'), "本品选择器只能展示上汽集团重点监测车型");
+assert(source.includes("syncProfiles(group?.policyIntelligence?.ownModelOptions || [])"), "独立政策页必须从销量预警权威车型目录同步本品，不得依赖手写名单");
+assert(source.indexOf("jsonFetch(comparisonUrl(selection.model") < source.indexOf("jsonFetch(dashboardUrl(selection.model"), "政策页必须先核验销量预警车型并取得政策输入，再计算独立页面");
+assert(source.includes('value !== undefined && value !== null && value !== ""'), "缺失的车型可选字段不得以undefined字符串传入政策接口");
+assert(source.includes('if (!profile) throw new Error("所选车型缺少销量预警政策输入，暂不能测算。")'), "缺少权威车型输入时必须失败关闭，不能借用E7X默认值");
 assert(source.includes("/api/group-dashboard-demo"), "车型对比必须请求销量预警细分市场的动态竞品池");
 assert(source.includes("policy_model: model"), "动态竞品池必须随所选本品车型切换");
 assert(source.includes("policy_scenario: scenario"), "动态竞品池必须使用请求快照中的购车情景重新测算");

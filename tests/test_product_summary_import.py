@@ -41,9 +41,12 @@ def product_summary_cells(include_attributes=True, include_platform_nsr=True):
         cells[(row, 17)] = 0.6 + offset * 0.03
 
     cells[(19, 1)] = "互动量"
+    for col in range(2, 12):
+        cells[(19, col)] = cells[(11, col)]
     for offset, model in enumerate(MODELS):
         cells[(20 + offset, 1)] = model
-        cells[(20 + offset, 2)] = (offset + 1) * 1000
+        for col in range(2, 12):
+            cells[(20 + offset, col)] = (offset + 1) * 1000 + col
 
     if include_attributes:
         for start_row, source in ((11, "全网"), (29, "垂媒车主口碑"), (47, "抖音")):
@@ -113,7 +116,7 @@ class ProductSummaryImportTest(unittest.TestCase):
             dataset["summaryHeat"]["奥迪E7X"],
             {
                 "volume": 402,
-                "interaction": 4000,
+                "interaction": 4002,
                 "platformVolume": {
                     "抖音": 403,
                     "小红书": 404,
@@ -125,9 +128,21 @@ class ProductSummaryImportTest(unittest.TestCase):
                     "汽车垂媒": 410,
                     "其他": 411,
                 },
+                "platformInteraction": {
+                    "抖音": 4003,
+                    "小红书": 4004,
+                    "微博": 4005,
+                    "B站": 4006,
+                    "视频号": 4007,
+                    "快手": 4008,
+                    "今日头条": 4009,
+                    "汽车垂媒": 4010,
+                    "其他": 4011,
+                },
             },
         )
         self.assertTrue(dataset["importQuality"]["platformVolumeAvailable"])
+        self.assertTrue(dataset["importQuality"]["platformInteractionAvailable"])
 
     def test_summary_import_exposes_any_structurally_valid_attribute_platform(self):
         cells = add_attribute_block(product_summary_cells(), 60, "微博")
@@ -217,7 +232,7 @@ class ProductSummaryImportTest(unittest.TestCase):
         self.assertAlmostEqual(dataset["summaryMetrics"]["奥迪E7X"]["overallNsr"], 0.69)
         self.assertEqual(dataset["summaryPlatformNsr"]["奥迪E7X"], {"全网": 0.69})
         self.assertEqual(dataset["summaryHeat"]["奥迪E7X"]["volume"], 402)
-        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"]["interaction"], 4000)
+        self.assertEqual(dataset["summaryHeat"]["奥迪E7X"]["interaction"], 4002)
         self.assertFalse(dataset["importQuality"]["attributeNsrAvailable"])
         self.assertEqual(dataset["importQuality"]["attributeNsrSources"], [])
         self.assertIn("源表未提供属性NSR", dataset["importQuality"]["message"])

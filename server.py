@@ -8297,6 +8297,13 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
     }
     interaction_header = next((i for i, row in enumerate(rows) if cell_text(row[0] if row else "") == "互动量"), None)
     if interaction_header is not None:
+        interaction_platform_cols = []
+        for col in range(1, len(rows[interaction_header])):
+            name = cell_text(rows[interaction_header][col])
+            if not name:
+                break
+            if name != "全网":
+                interaction_platform_cols.append((col, "B站" if name.lower() == "bilibili" else name))
         for row_idx in range(interaction_header + 1, len(rows)):
             raw_model = cell_text(rows[row_idx][0] if rows[row_idx] else "")
             if not raw_model:
@@ -8305,6 +8312,10 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             if model not in summary_heat:
                 continue
             summary_heat[model]["interaction"] = summary_count(rows[row_idx][1] if len(rows[row_idx]) > 1 else 0)
+            summary_heat[model]["platformInteraction"] = {
+                platform: summary_count(rows[row_idx][col] if len(rows[row_idx]) > col else 0)
+                for col, platform in interaction_platform_cols
+            }
 
     overall_nsr = summary_overall_nsr(rows, models)
     if len(overall_nsr) < len(models):
@@ -8386,6 +8397,9 @@ def build_dataset_from_summary_workbook(cells, filename, sheets=None):
             "attributeVolumeAvailable": False,
             "attributeNsrAvailable": attribute_nsr_available,
             "platformVolumeAvailable": True,
+            "platformInteractionAvailable": any(
+                bool(item.get("platformInteraction")) for item in summary_heat.values()
+            ),
             "platformNsrAvailable": bool(platform_nsr),
             "platformNsrSources": platform_nsr_sources,
             "attributeNsrSources": attribute_nsr_sources,
