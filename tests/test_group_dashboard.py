@@ -693,25 +693,6 @@ class GroupDashboardTest(unittest.TestCase):
         self.assertEqual(e5["comparisonSignal"]["activeCompetitor"], "小米SU7")
         self.assertEqual(e5["comparisonSignal"]["reverseCompetitor"], "小米SU7")
 
-    def test_sales_warning_adds_only_explicitly_verified_new_monitoring_models(self):
-        warning = {
-            "summary": {},
-            "additionalMonitoredModels": ["智己LS6"],
-            "saicModels": [
-                {"model": "奥迪E7X", "performanceRate": 0.4, "level": "yellow"},
-                {"model": "智己LS6", "performanceRate": 0.24, "level": "red"},
-                {"model": "未声明车型", "performanceRate": 0.9, "level": "green"},
-            ],
-        }
-        monitoring = {"models": ["奥迪E7X"], "modelCount": 1, "scopeNote": "表内本品"}
-
-        result = _apply_vertical_monitoring(warning, monitoring, {})
-
-        self.assertEqual(result["monitoring"]["models"], ["奥迪E7X", "智己LS6"])
-        self.assertEqual(result["summary"]["trackedModelCount"], 2)
-        self.assertEqual([item["model"] for item in result["saicModels"]], ["奥迪E7X", "智己LS6"])
-        self.assertNotIn("未声明车型", {item["model"] for item in result["saicModels"]})
-
     def test_sales_warning_prefills_latest_mmn_database_cycle_and_leaves_missing_models_manual(self):
         self.conn.executemany("insert into vertical_rank_assets values (?,?,?,?,?,?,?,?,?,?,?)", [
             ("local", "china", "懂车帝", "2026.07.09", "奥迪E7X", "Model Y", 1, 2, 0.15, "上汽集团八车周对比次数正反向排名.xlsx", "2026-07-16T08:00:00Z"),

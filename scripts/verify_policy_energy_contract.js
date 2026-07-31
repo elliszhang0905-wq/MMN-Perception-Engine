@@ -15,7 +15,7 @@ const username = process.env.MMN_USERNAME || "";
 const password = process.env.MMN_PASSWORD || "";
 const outputDir = process.env.MMN_ACCEPTANCE_OUTPUT || "output/playwright";
 const targetRegion = process.env.MMN_POLICY_REGION || "上海";
-const expectedVersion = process.env.MMN_EXPECTED_VERSION || "beta-1.03-20260731-policy-demo-ready-1";
+const expectedVersion = process.env.MMN_EXPECTED_VERSION || "beta-1.03-20260731-ls6-cognition-quadrant-1";
 const viewports = [
   { width: 1440, height: 1000 },
   { width: 390, height: 844 },

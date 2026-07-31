@@ -253,9 +253,9 @@ assert.doesNotMatch(ui, /return evaluation\.status==="available"\?renderLs6Platf
 assert.doesNotMatch(ui, /function renderLs6Momentum/);
 assert.doesNotMatch(ui, /function renderLs6Platforms/);
 assert.match(ui, /\$\{esc\(ownModel\)\} 产品认知星图/);
-assert.match(server, /"price": round\(float\(item\.get\("dealerStartPriceWan"\) or 0\) \* 10000\)/);
-assert.match(server, /"energyType": item\.get\("energyType"\)/);
-assert.match(server, /"bodyType": item\.get\("bodyType"\)/);
+assert.match(server, /option_profiles = build_sales_warning_policy_profiles\(/);
+assert.match(server, /for key, value in option_profiles\[0\]\.items\(\)/);
+assert.match(server, /"ownModelOptions": own_model_options/);
 assert.match(ui, /chartCanvas=\(minWidth,height\)/);
 assert.match(ui, /chartCanvas\(1180,330\)/);
 assert.match(ui, /chartCanvas\(1180,360\)/);
