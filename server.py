@@ -330,7 +330,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260810-weekly-market-scan-1"
+APP_VERSION_CODE = "beta-1.03-20260810-lead-import-vertical-template-1"
 APP_RELEASE_DATE = "2026-08-10"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -12084,7 +12084,7 @@ def lead_dashboard_rows_from_file(data, filename):
             sheet: sheet_rows(cells)
             for sheet, cells in read_xlsx_cells(data).items()
         }
-        return extract_lead_dashboard_rows(sheets)
+        return extract_lead_dashboard_rows(sheets, model_normalizer=clean_model_name)
     return generic_rows_from_file(data, filename)
 
 def field_value(row, aliases, default=""):

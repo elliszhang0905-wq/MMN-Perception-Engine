@@ -25,6 +25,21 @@ STATUS_ALIASES = {
     "in_progress": "in_progress",
     "in progress": "in_progress",
 }
+VERTICAL_SECTION_LABEL = "分阶段转化"
+VERTICAL_METRIC_FIELDS = {
+    "线索目标": "线索目标",
+    "目标线索": "线索目标",
+    "线索达成": "实际线索",
+    "实际线索": "实际线索",
+    "线索实际": "实际线索",
+    "订单目标": "订单目标",
+    "目标订单": "订单目标",
+    "订单达成": "实际订单",
+    "实际订单": "实际订单",
+    "订单实际": "实际订单",
+}
+VERTICAL_REQUIRED_METRICS = ("线索目标", "实际线索", "订单目标", "实际订单")
+GENERIC_SHEET_NAMES = {"sheet", "sheet1", "工作表", "工作表1", "线索看板", "数据"}
 
 
 def _now():
@@ -62,7 +77,80 @@ def _lead_header_fields(row):
     }
 
 
-def extract_rows_from_sheets(sheets):
+def _vertical_phase_rows(sheet, rows, model_normalizer=None):
+    section_index = next(
+        (
+            index
+            for index, row in enumerate(rows)
+            if isinstance(row, (list, tuple))
+            and any(_canonical_header(value) == VERTICAL_SECTION_LABEL for value in row[:4])
+        ),
+        None,
+    )
+    if section_index is None:
+        return []
+
+    raw_model = str(sheet or "").strip()
+    model = model_normalizer(raw_model) if callable(model_normalizer) else raw_model
+    model = str(model or "").strip()
+    if not model or _canonical_header(model) in GENERIC_SHEET_NAMES:
+        raise ValueError(f"工作表“{raw_model or '未命名'}”无法确认车型，请将工作表命名为车型名称。")
+
+    phases = []
+    current_phase = ""
+    current_metrics = {}
+
+    def finish_phase():
+        if not current_phase:
+            return
+        missing = [field for field in VERTICAL_REQUIRED_METRICS if field not in current_metrics]
+        if missing:
+            raise ValueError(
+                f"工作表“{raw_model}”阶段“{current_phase}”缺少指标：{'、'.join(missing)}。"
+            )
+        phases.append((current_phase, dict(current_metrics)))
+
+    for offset, row in enumerate(rows[section_index:]):
+        if not isinstance(row, (list, tuple)):
+            continue
+        values = list(row) + [None] * max(0, 4 - len(row))
+        if offset > 0 and str(values[0] or "").strip():
+            break
+        phase = str(values[1] or "").strip()
+        metric_label = _canonical_header(values[2])
+        metric = VERTICAL_METRIC_FIELDS.get(metric_label)
+        if phase:
+            finish_phase()
+            current_phase = phase
+            current_metrics = {}
+        if not metric:
+            continue
+        if not current_phase:
+            raise ValueError(f"工作表“{raw_model}”的{values[2]}未归属任何阶段。")
+        if metric in current_metrics:
+            raise ValueError(f"工作表“{raw_model}”阶段“{current_phase}”重复填写{metric}。")
+        if values[3] is not None and str(values[3]).strip():
+            current_metrics[metric] = values[3]
+    finish_phase()
+
+    if not phases:
+        raise ValueError(f"工作表“{raw_model}”的分阶段转化区域没有可用阶段。")
+    records = []
+    for index, (phase, metrics) in enumerate(phases):
+        records.append(
+            {
+                "_sheet": raw_model,
+                "_template": "vertical_phase_matrix",
+                "车型": model,
+                "阶段": phase,
+                **metrics,
+                "阶段状态": "进行中" if index == len(phases) - 1 else "已完成",
+            }
+        )
+    return records
+
+
+def extract_rows_from_sheets(sheets, model_normalizer=None):
     """Extract lead rows from worksheet matrices without assuming row 1 is the header."""
     if not isinstance(sheets, dict):
         raise ValueError("线索工作簿结构无效。")
@@ -80,6 +168,7 @@ def extract_rows_from_sheets(sheets):
             None,
         )
         if header_index is None:
+            records.extend(_vertical_phase_rows(sheet, rows, model_normalizer))
             continue
         headers = [str(value or "").strip() for value in rows[header_index]]
         for row in rows[header_index + 1:]:
@@ -149,6 +238,7 @@ def build_datasets_from_rows(rows, filename):
         raise ValueError("线索数据文件没有可用记录。")
     source_label = _text(filename, "文件名", 240)
     grouped = {}
+    model_templates = {}
     missing_fields = set()
     for row_number, row in enumerate(rows, start=2):
         if not isinstance(row, dict):
@@ -159,6 +249,8 @@ def build_datasets_from_rows(rows, filename):
         if row_missing:
             continue
         model = _text(values["model"], f"第{row_number}行车型")
+        if row.get("_template"):
+            model_templates.setdefault(model, set()).add(str(row["_template"]))
         phase_name = _text(values["phase"], f"第{row_number}行阶段")
         status_key = _canonical_header(values["status"])
         status = STATUS_ALIASES.get(status_key)
@@ -195,6 +287,8 @@ def build_datasets_from_rows(rows, filename):
         raise ValueError("车型数量为空或超出100个限制。")
     datasets = []
     for model, phases in grouped.items():
+        templates = model_templates.get(model, set())
+        source_template = next(iter(templates)) if len(templates) == 1 else ("mixed" if templates else "")
         if len(phases) > MAX_PHASES_PER_MODEL:
             raise ValueError(f"{model}阶段数量超出{MAX_PHASES_PER_MODEL}个限制。")
         names = [phase["name"] for phase in phases]
@@ -202,13 +296,17 @@ def build_datasets_from_rows(rows, filename):
             raise ValueError(f"{model}存在阶段重复。")
         if sum(phase["status"] == "in_progress" for phase in phases) > 1:
             raise ValueError(f"{model}只能有一个进行中阶段。")
+        source = {
+            "label": source_label,
+            "scope": "阶段目标、实际线索与实际订单",
+            "asOf": "文件导入时间",
+        }
+        if source_template:
+            source["template"] = source_template
+            source["statusBasis"] = "latest_phase_in_file"
         dataset = {
             "model": model,
-            "source": {
-                "label": source_label,
-                "scope": "阶段目标、实际线索与实际订单",
-                "asOf": "文件导入时间",
-            },
+            "source": source,
             "phases": phases,
         }
         canonical = json.dumps(dataset, ensure_ascii=False, separators=(",", ":"), sort_keys=True)

@@ -33,6 +33,22 @@ def lead_rows(model="测试车型A"):
     ]
 
 
+def legacy_phase_matrix(phases):
+    rows = [["新车上市流量表现指标统计表"]]
+    rows.extend([[] for _ in range(46)])
+    for index, (phase, lead_target, lead_actual, order_target, order_actual) in enumerate(phases):
+        category = "分阶段转化" if index == 0 else None
+        rows.extend(
+            [
+                [category, phase, "线索目标", lead_target],
+                [None, None, "线索达成", lead_actual],
+                [None, None, "订单目标", order_target],
+                [None, None, "订单达成", order_actual],
+            ]
+        )
+    return rows
+
+
 class LeadDashboardCatalogTest(unittest.TestCase):
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
@@ -105,6 +121,86 @@ class LeadDashboardCatalogTest(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(datasets[0]["model"], "车型C")
         self.assertAlmostEqual(datasets[0]["phases"][1]["leadRate"], 1.125)
+
+    def test_legacy_vertical_phase_matrix_supports_0716_and_0806_continuity(self):
+        versions = {
+            "0716": [
+                ("小订期", 225000, 183822, 10000, 9419),
+                ("大定期", 230208, 218414, 6000, 6375),
+                ("平销期（6.16-6.30）", 143758, 169212, 2000, 1293),
+                ("平销期（7.1-7.31）", 457142.857142856, 131838, 4000, 837),
+            ],
+            "0806": [
+                ("小订期", 225000, 183822, 10000, 9419),
+                ("大定期", 230208, 218414, 6000, 6375),
+                ("平销期（6.16-6.30）", 143758, 169212, 2000, 1293),
+                ("平销期（7.1-7.31）", 457142.857142856, 273736, 4000, 1867),
+                ("平销期（8.1-8.31）", 377143, 40440, 3300, 272),
+            ],
+        }
+
+        latest_dataset = None
+        for version, phases in versions.items():
+            with self.subTest(version=version):
+                rows = extract_rows_from_sheets(
+                    {"AUDI E7X": legacy_phase_matrix(phases)},
+                    model_normalizer=lambda value: value.replace("AUDI ", "奥迪"),
+                )
+                datasets = build_datasets_from_rows(rows, f"E7X {version}.xlsx")
+
+                self.assertEqual(len(rows), len(phases))
+                self.assertEqual(datasets[0]["model"], "奥迪E7X")
+                self.assertEqual(datasets[0]["source"]["template"], "vertical_phase_matrix")
+                self.assertTrue(all(item["status"] == "completed" for item in datasets[0]["phases"][:-1]))
+                self.assertEqual(datasets[0]["phases"][-1]["status"], "in_progress")
+                latest_dataset = datasets[0]
+
+        latest = latest_dataset["phases"][-1]
+        self.assertEqual(latest["leadActual"], 40440)
+        self.assertEqual(latest["orderActual"], 272)
+
+    def test_legacy_vertical_phase_matrix_rejects_incomplete_phase(self):
+        rows = legacy_phase_matrix([("平销期（8.1-8.31）", 377143, 40440, 3300, None)])
+
+        with self.assertRaisesRegex(ValueError, "平销期（8.1-8.31）.*实际订单"):
+            extract_rows_from_sheets({"AUDI E7X": rows})
+
+    def test_invalid_legacy_update_does_not_overwrite_saved_dataset(self):
+        original_rows = extract_rows_from_sheets(
+            {"测试车型A": legacy_phase_matrix([("第一阶段", 1000, 900, 100, 92)])}
+        )
+        original = build_datasets_from_rows(original_rows, "第一版.xlsx")
+        save_datasets(self.conn, org_id="org-a", edition="china", datasets=original)
+        invalid_rows = legacy_phase_matrix([("第二阶段", 2000, 1500, 200, None)])
+
+        with self.assertRaisesRegex(ValueError, "第二阶段.*实际订单"):
+            extract_rows_from_sheets({"测试车型A": invalid_rows})
+
+        restored = get_dataset(self.conn, org_id="org-a", edition="china", model="测试车型A")
+        self.assertEqual(restored["source"]["label"], "第一版.xlsx")
+        self.assertEqual(restored["phases"][0]["leadActual"], 900)
+
+    def test_legacy_vertical_phase_matrix_requires_model_sheet_name(self):
+        rows = legacy_phase_matrix([("第一阶段", 1000, 900, 100, 92)])
+
+        with self.assertRaisesRegex(ValueError, "无法确认车型"):
+            extract_rows_from_sheets({"Sheet1": rows})
+
+    def test_mixed_workbook_keeps_template_metadata_scoped_to_vertical_model(self):
+        standard_rows = [
+            ["车型", "阶段", "线索目标", "实际线索", "订单目标", "实际订单", "阶段状态"],
+            ["标准车型", "第一阶段", 1000, 900, 100, 92, "进行中"],
+        ]
+        rows = extract_rows_from_sheets(
+            {
+                "标准数据": standard_rows,
+                "纵向车型": legacy_phase_matrix([("第一阶段", 2000, 1800, 200, 184)]),
+            }
+        )
+        datasets = {item["model"]: item for item in build_datasets_from_rows(rows, "混合格式.xlsx")}
+
+        self.assertNotIn("template", datasets["标准车型"]["source"])
+        self.assertEqual(datasets["纵向车型"]["source"]["template"], "vertical_phase_matrix")
 
 
 if __name__ == "__main__":
