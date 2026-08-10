@@ -84,6 +84,72 @@ class WeeklyMarketRefreshTests(unittest.TestCase):
         self.assertEqual(payload["source"]["naturalWeekPeriod"], "2026年7月13—19日")
         self.assertEqual(payload["source"]["period"], "截至2026年7月19日 · 7月月内累计")
 
+    def test_latest_official_article_accepts_yoy_without_repeated_month(self):
+        index = '<a href="newslist.php?types=csjd&id=4291">【周度分析】车市扫描(20260727-0731)</a>'
+        article = """<h1>【周度分析】车市扫描(20260727-0731)</h1><p>发布时间：2026-08-05 16:20:12</p>
+        <p>初步统计：7月1-31日，全国乘用车市场零售150.6万辆，同比去年同期下降18%；
+        7月1-31日，全国乘用车厂商批发224.1万辆，同比去年同期增长1%。
+        初步统计：7月1-31日，全国乘用车新能源市场零售97万辆，同比去年同期下降2%。
+        渗透率：7月1-31日，全国新能源市场零售渗透率64.4%；
+        全国乘用车厂商新能源批发渗透率65.3%。</p>"""
+        payload = fetch_latest_official_market_payload(
+            fetch_text=lambda url: article if "id=4291" in url else index
+        )
+        facts = {item["id"]: item for item in payload["facts"]}
+        self.assertEqual(facts["retail"]["value"], 150.6)
+        self.assertEqual(facts["retail"]["yoy"], -0.18)
+        self.assertEqual(facts["wholesale"]["value"], 224.1)
+        self.assertEqual(facts["wholesale"]["yoy"], 0.01)
+        self.assertEqual(facts["nev_retail"]["value"], 97.0)
+        self.assertEqual(facts["nev_retail"]["yoy"], -0.02)
+        self.assertEqual(facts["nev_penetration"]["value"], 64.4)
+        self.assertEqual(payload["source"]["naturalWeekPeriod"], "2026年7月27—31日")
+        self.assertEqual(payload["source"]["period"], "截至2026年7月31日 · 7月月内累计")
+
+    def test_month_end_truncated_week_is_publishable_for_that_completed_week(self):
+        index = '<a href="newslist.php?types=csjd&id=4291">【周度分析】车市扫描(20260727-0731)</a>'
+        article = """<h1>【周度分析】车市扫描(20260727-0731)</h1>
+        7月1-31日，全国乘用车市场零售150.6万辆，同比去年同期下降18%；
+        全国乘用车厂商批发224.1万辆，同比去年同期增长1%。
+        全国乘用车新能源市场零售97万辆，同比去年同期下降2%。
+        全国新能源市场零售渗透率64.4%。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            status = refresh_weekly_market_snapshot(
+                directory,
+                official_fetcher=lambda url: article if "id=4291" in url else index,
+                today=__import__("datetime").date(2026, 8, 6),
+            )
+            snapshot, refresh = load_weekly_market_snapshot(directory, BASELINE)
+        self.assertEqual(status["status"], "published")
+        self.assertEqual(snapshot["source"]["naturalWeekEndDate"], "2026-07-31")
+        self.assertEqual(refresh["naturalWeekPeriod"], "2026年7月27—31日")
+
+    def test_month_end_snapshot_is_carried_forward_while_next_week_is_unpublished(self):
+        payload = fetch_latest_official_market_payload(
+            fetch_text=lambda url: (
+                """<h1>【周度分析】车市扫描(20260727-0731)</h1>
+                7月1-31日，全国乘用车市场零售150.6万辆，同比去年同期下降18%；
+                全国乘用车厂商批发224.1万辆，同比去年同期增长1%。
+                全国乘用车新能源市场零售97万辆，同比去年同期下降2%。
+                全国新能源市场零售渗透率64.4%。"""
+                if "id=4291" in url
+                else '<a href="newslist.php?types=csjd&id=4291">【周度分析】车市扫描(20260727-0731)</a>'
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            first = refresh_weekly_market_snapshot(
+                directory, payload=payload, today=__import__("datetime").date(2026, 8, 6)
+            )
+            second = refresh_weekly_market_snapshot(
+                directory, payload=payload, today=__import__("datetime").date(2026, 8, 10)
+            )
+            snapshot, refresh = load_weekly_market_snapshot(directory, BASELINE)
+        self.assertEqual(first["status"], "published")
+        self.assertEqual(second["status"], "awaiting_publication")
+        self.assertEqual(snapshot["source"]["naturalWeekEndDate"], "2026-07-31")
+        self.assertEqual(refresh["naturalWeekPeriod"], "2026年7月27—31日")
+
     def test_fixed_weekly_index_ignores_newer_non_market_scan_categories(self):
         index = """
         <a href="newslist.php?types=csjd&id=4273">【联合发布】一周新车快讯(2026年7月11日-7月17日）</a>

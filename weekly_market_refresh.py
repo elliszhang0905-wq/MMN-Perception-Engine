@@ -130,15 +130,16 @@ def parse_official_market_article(article_html, url, title=""):
     if not week_parts:
         raise ValueError("官方车市扫描缺少可识别的自然周标题")
     year, _, _, _, _ = week_parts
-    retail = _metric_match(text, r"(\d{1,2})月1[-—至](\d{1,2})日，全国乘用车市场零售([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%", "乘用车零售")
+    yoy_comparison = r"同比去年(?:\d{1,2}月)?同期"
+    retail = _metric_match(text, rf"(\d{{1,2}})月1[-—至](\d{{1,2}})日，全国乘用车市场零售([\d.]+)万辆，{yoy_comparison}(下降|增长)([\d.]+)%", "乘用车零售")
     month, end_day, retail_value, retail_direction, retail_yoy = retail.groups()
-    wholesale = _metric_match(text, r"全国乘用车厂商批发([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%", "乘用车厂商批发")
+    wholesale = _metric_match(text, rf"全国乘用车厂商批发([\d.]+)万辆，{yoy_comparison}(下降|增长)([\d.]+)%", "乘用车厂商批发")
     nev = _metric_match(
         text,
-        r"全国乘用车(?:市场新能源|新能源市场)零售([\d.]+)万辆，同比去年\d+月同期(下降|增长)([\d.]+)%",
+        rf"全国乘用车(?:市场新能源|新能源市场)零售([\d.]+)万辆，{yoy_comparison}(下降|增长)([\d.]+)%",
         "新能源零售",
     )
-    penetration = _metric_match(text, r"新能源零售渗透率([\d.]+)%", "新能源零售渗透率")
+    penetration = _metric_match(text, r"新能源(?:市场)?零售渗透率([\d.]+)%", "新能源零售渗透率")
     published = re.search(r"时间[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", text)
     natural_week = _format_week_period(week_parts)
     metric_period = f"{year}年{int(month)}月1—{int(end_day)}日"
@@ -186,6 +187,13 @@ def fetch_latest_official_market_payload(fetch_text=None, index_url=OFFICIAL_IND
 def _expected_completed_week_end(today=None):
     current = today or datetime.now().astimezone().date()
     return current - timedelta(days=(current.weekday() + 1) % 7)
+
+
+def _covers_expected_completed_week(natural_week_end, expected_end):
+    if natural_week_end >= expected_end:
+        return True
+    closes_month = (natural_week_end + timedelta(days=1)).day == 1
+    return closes_month and expected_end - natural_week_end <= timedelta(days=6)
 
 
 def _normalize_source(source):
@@ -292,7 +300,7 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
         snapshot = _validate(payload)
         natural_week_end = snapshot["source"].get("naturalWeekEndDate")
         expected_end = _expected_completed_week_end(today)
-        if natural_week_end and date.fromisoformat(natural_week_end) < expected_end:
+        if natural_week_end and not _covers_expected_completed_week(date.fromisoformat(natural_week_end), expected_end):
             raise RuntimeError(
                 f"最近自然周数据待发布：官网最新为{snapshot['source'].get('naturalWeekPeriod')}，"
                 f"待发布周截至{expected_end.isoformat()}"
