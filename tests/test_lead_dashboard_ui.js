@@ -21,7 +21,11 @@ assert.match(ui, /leadActual:169212[\s\S]*orderActual:1293/);
 assert.match(ui, /leadActual:131838[\s\S]*orderActual:837/);
 assert.match(ui, /lead-dashboard-overview/);
 assert.match(ui, /lead-stage-chart/);
-assert.match(ui, /线索与订单阶段达成/);
+assert.match(ui, /月度线索与订单达成/);
+assert.match(ui, /lead-month-filter/);
+assert.match(ui, /data-month-action="all"/);
+assert.match(ui, /data-month-action="clear"/);
+assert.match(ui, /已选\$\{monthState\.selected\.size\}个月/);
 assert.match(ui, /目标 100%/);
 assert.match(ui, /isCurrent\?" current":""/);
 assert.match(ui, /当前阶段进度/);
@@ -49,7 +53,7 @@ assert.match(ui, /三路独立复核已完成 · 裁决一致/);
 assert.match(ui, /存在分歧或未全部完成，本轮不发布模型最终结论/);
 assert.match(ui, /aria-expanded="\$\{attributionBubbleOpen\}"/);
 assert.match(ui, /setAttributionBubble/);
-assert.match(ui, /event\.key==="Escape"/);
+assert.match(ui, /event\.key!=="Escape"/);
 assert.match(ui, /loadGroupDashboardDemo/);
 assert.match(ui, /现有T周期、正反向、NSR和策略模块统一读取同一车型上下文/);
 assert.match(ui, /mmn:sales-warning-model-selected/);
@@ -59,7 +63,8 @@ assert.match(ui, /clearImportMessage/);
 assert.doesNotMatch(ui, /<select/);
 assert.match(css, /@media\(max-width:900px\)/);
 assert.match(css, /\.lead-dashboard-overview\{grid-template-columns:1fr\}/);
-assert.match(css, /\.lead-chart-plot\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+assert.match(css, /grid-template-columns:repeat\(var\(--lead-month-count/);
+assert.match(css, /\.lead-month-menu\[hidden\]\{display:none\}/);
 assert.match(css, /\.lead-stage-group\.current/);
 assert.match(css, /--lead-rate/);
 assert.match(css, /\.lead-attribution-trigger/);
@@ -92,6 +97,52 @@ const context = vm.createContext({
   clearTimeout,
 });
 vm.runInContext(ui, context, { filename: "lead-dashboard.js" });
+
+const monthlyModel = windowStub.MMNLeadDashboard.registerModelData("月度车型", {
+  source: { label: "月度车型 0806.xlsx", scope: "阶段目标、实际线索与实际订单", year: 2026, asOf: "2026-08-06" },
+  phases: [
+    { name: "小订期", leadTarget: 225000, leadActual: 183822, orderTarget: 10000, orderActual: 9419, status: "completed" },
+    { name: "平销期（6.16-6.30）", leadTarget: 143758, leadActual: 169212, orderTarget: 2000, orderActual: 1293, status: "completed" },
+    { name: "平销期（7.1-7.31）", leadTarget: 457143, leadActual: 273736, orderTarget: 4000, orderActual: 1867, status: "completed" },
+    { name: "平销期（8.1-8.31）", leadTarget: 377143, leadActual: 40440, orderTarget: 3300, orderActual: 272, status: "in_progress" },
+  ],
+});
+assert.equal(monthlyModel.ok, true);
+windowStub.MMNLeadDashboard.renderModel("月度车型");
+assert.deepEqual([...windowStub.MMNLeadDashboard.getSelectedMonths()], ["2026-06", "2026-07", "2026-08"]);
+assert.match(dashboardRoot.innerHTML, /月度线索与订单达成/);
+assert.match(dashboardRoot.innerHTML, /全部月份/);
+assert.match(dashboardRoot.innerHTML, /2026年6月/);
+assert.match(dashboardRoot.innerHTML, /2026年7月/);
+assert.match(dashboardRoot.innerHTML, /2026年8月/);
+assert.match(dashboardRoot.innerHTML, /40,440 \/ 377,143/);
+assert.match(dashboardRoot.innerHTML, /截至8月6日，数据持续更新/);
+assert.doesNotMatch(dashboardRoot.innerHTML, /<h4>小订期<\/h4>/);
+windowStub.MMNLeadDashboard.setSelectedMonths(["2026-06", "2026-08"]);
+assert.deepEqual([...windowStub.MMNLeadDashboard.getSelectedMonths()], ["2026-06", "2026-08"]);
+assert.doesNotMatch(dashboardRoot.innerHTML, /<h4>2026年7月/);
+assert.match(dashboardRoot.innerHTML, /已选2个月/);
+
+const incrementalSource = { label: "增量车型 0806.xlsx", scope: "阶段目标、实际线索与实际订单", year: 2026, asOf: "2026-08-06" };
+windowStub.MMNLeadDashboard.registerModelData("增量车型", {
+  source: incrementalSource,
+  phases: [
+    { name: "平销期（6.1-6.30）", leadTarget: 100, leadActual: 80, orderTarget: 10, orderActual: 8, status: "completed" },
+    { name: "平销期（7.1-7.31）", leadTarget: 100, leadActual: 70, orderTarget: 10, orderActual: 7, status: "in_progress" },
+  ],
+});
+windowStub.MMNLeadDashboard.renderModel("增量车型");
+assert.match(dashboardRoot.innerHTML, /2026年7月（进行中）/);
+windowStub.MMNLeadDashboard.registerModelData("增量车型", {
+  source: incrementalSource,
+  phases: [
+    { name: "平销期（6.1-6.30）", leadTarget: 100, leadActual: 80, orderTarget: 10, orderActual: 8, status: "completed" },
+    { name: "平销期（7.1-7.31）", leadTarget: 100, leadActual: 90, orderTarget: 10, orderActual: 9, status: "completed" },
+    { name: "平销期（8.1-8.31）", leadTarget: 100, leadActual: 20, orderTarget: 10, orderActual: 2, status: "in_progress" },
+  ],
+});
+assert.match(dashboardRoot.innerHTML, /2026年8月（进行中）/);
+assert.deepEqual([...windowStub.MMNLeadDashboard.getSelectedMonths()], ["2026-06", "2026-07", "2026-08"]);
 
 const secondModel = windowStub.MMNLeadDashboard.registerModelData("测试车型A", {
   source: { label: "测试车型A线索表", scope: "阶段目标、实际线索与实际订单" },

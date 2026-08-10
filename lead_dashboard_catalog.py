@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import re
 from datetime import datetime, timezone
 
 
@@ -44,6 +45,19 @@ GENERIC_SHEET_NAMES = {"sheet", "sheet1", "工作表", "工作表1", "线索看�
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _source_period(filename):
+    now = datetime.now(timezone.utc)
+    matches = list(re.finditer(r"(?:^|\D)(0[1-9]|1[0-2])([0-3]\d)(?=\D|$)", str(filename or "")))
+    if not matches:
+        return {"year": now.year, "asOf": "文件导入时间"}
+    month, day = (int(value) for value in matches[-1].groups())
+    try:
+        date = datetime(now.year, month, day, tzinfo=timezone.utc)
+    except ValueError:
+        return {"year": now.year, "asOf": "文件导入时间"}
+    return {"year": date.year, "asOf": date.date().isoformat()}
 
 
 def _text(value, field, limit=160):
@@ -296,10 +310,11 @@ def build_datasets_from_rows(rows, filename):
             raise ValueError(f"{model}存在阶段重复。")
         if sum(phase["status"] == "in_progress" for phase in phases) > 1:
             raise ValueError(f"{model}只能有一个进行中阶段。")
+        source_period = _source_period(source_label)
         source = {
             "label": source_label,
             "scope": "阶段目标、实际线索与实际订单",
-            "asOf": "文件导入时间",
+            **source_period,
         }
         if source_template:
             source["template"] = source_template

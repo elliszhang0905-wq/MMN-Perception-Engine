@@ -158,6 +158,8 @@ class LeadDashboardCatalogTest(unittest.TestCase):
         latest = latest_dataset["phases"][-1]
         self.assertEqual(latest["leadActual"], 40440)
         self.assertEqual(latest["orderActual"], 272)
+        self.assertEqual(latest_dataset["source"]["asOf"], "2026-08-06")
+        self.assertEqual(latest_dataset["source"]["year"], 2026)
 
     def test_legacy_vertical_phase_matrix_rejects_incomplete_phase(self):
         rows = legacy_phase_matrix([("平销期（8.1-8.31）", 377143, 40440, 3300, None)])

@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
-    RELEASE_VERSION = "beta-1.03-20260810-lead-import-vertical-template-1"
+    RELEASE_VERSION = "beta-1.03-20260811-lead-month-trend-1"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")
@@ -45,7 +45,7 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn(f"group-dashboard.js?v={self.RELEASE_VERSION}", index)
         self.assertIn(f"lead-dashboard.js?v={self.RELEASE_VERSION}", index)
         self.assertIn(f'APP_VERSION_CODE = "{self.RELEASE_VERSION}"', server)
-        self.assertIn('APP_RELEASE_DATE = "2026-08-10"', server)
+        self.assertIn('APP_RELEASE_DATE = "2026-08-11"', server)
 
 
 if __name__ == "__main__":
