@@ -46,6 +46,32 @@ async function auditViewport(browser, viewport) {
       failedResponses.push(`${viewport.name}: ${response.status()} ${response.request().method()} ${url}`);
     }
   });
+  await page.route("**/api/product-evaluation-catalog", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data: { isolated: true } }),
+    });
+  });
+  await page.route("**/api/bf/projects", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    const payload = route.request().postDataJSON() || {};
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          id: `release-gate-${viewport.name}`,
+          name: payload.name || "发布门禁隔离项目",
+          brand: payload.brand || "",
+          model: payload.model || "",
+          client_key: payload.clientKey || "release-gate",
+        },
+      }),
+    });
+  });
 
   try {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });

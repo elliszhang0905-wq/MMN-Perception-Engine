@@ -45,6 +45,14 @@ async function main() {
   const add = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
   page.on("pageerror", error => runtimeErrors.push(String(error.message || error)));
   page.on("console", message => { if (message.type() === "error") runtimeErrors.push(message.text()); });
+  await page.route("**/api/product-evaluation-catalog", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data: { isolated: true } }),
+    });
+  });
 
   try {
     // The cockpit intentionally starts background API work (including model-backed modules).
