@@ -150,6 +150,42 @@ class WeeklyMarketRefreshTests(unittest.TestCase):
         self.assertEqual(snapshot["source"]["naturalWeekEndDate"], "2026-07-31")
         self.assertEqual(refresh["naturalWeekPeriod"], "2026年7月27—31日")
 
+    def test_missed_refresh_window_backfills_newer_official_snapshot_once(self):
+        previous = json.loads(json.dumps(BASELINE, ensure_ascii=False))
+        previous["source"] = {
+            "label": "官方周报《车市扫描（2026年7月20日—7月26日）》",
+            "url": "https://example.com/week-previous",
+            "period": "2026年7月1—26日",
+            "naturalWeekPeriod": "2026年7月20—26日",
+            "naturalWeekEndDate": "2026-07-26",
+        }
+        latest = json.loads(json.dumps(BASELINE, ensure_ascii=False))
+        latest["source"] = {
+            "label": "官方周报《车市扫描（2026年7月27日—7月31日）》",
+            "url": "https://www.cpcaauto.com/newslist.php?types=csjd&id=4291",
+            "period": "2026年7月1—31日",
+            "naturalWeekPeriod": "2026年7月27—31日",
+            "naturalWeekEndDate": "2026-07-31",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            refresh_weekly_market_snapshot(
+                directory, payload=previous, today=__import__("datetime").date(2026, 7, 30)
+            )
+            first = refresh_weekly_market_snapshot(
+                directory, payload=latest, today=__import__("datetime").date(2026, 8, 10)
+            )
+            snapshot, _ = load_weekly_market_snapshot(directory, BASELINE)
+            second = refresh_weekly_market_snapshot(
+                directory, payload=latest, today=__import__("datetime").date(2026, 8, 10)
+            )
+
+        self.assertEqual(first["status"], "published")
+        self.assertEqual(first["statusLabel"], "官网最新一期已补录 · 下一自然周待发布")
+        self.assertTrue(first["nextNaturalWeekPending"])
+        self.assertEqual(first["expectedNaturalWeekEndDate"], "2026-08-09")
+        self.assertEqual(snapshot["source"]["naturalWeekEndDate"], "2026-07-31")
+        self.assertEqual(second["status"], "awaiting_publication")
+
     def test_fixed_weekly_index_ignores_newer_non_market_scan_categories(self):
         index = """
         <a href="newslist.php?types=csjd&id=4273">【联合发布】一周新车快讯(2026年7月11日-7月17日）</a>

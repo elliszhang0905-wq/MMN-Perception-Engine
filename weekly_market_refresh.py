@@ -291,6 +291,18 @@ def load_weekly_market_snapshot(data_dir, baseline):
     return snapshot, refresh
 
 
+def _stored_natural_week_end(data_dir):
+    path = Path(data_dir) / SNAPSHOT_FILE
+    if not path.exists():
+        return None
+    try:
+        stored = _validate(json.loads(path.read_text(encoding="utf-8")))
+        raw_end = stored["source"].get("naturalWeekEndDate")
+        return date.fromisoformat(raw_end) if raw_end else None
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
 def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetcher=None, official_fetcher=None, today=None):
     data_dir = Path(data_dir)
     attempted_at = _now()
@@ -300,15 +312,24 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
         snapshot = _validate(payload)
         natural_week_end = snapshot["source"].get("naturalWeekEndDate")
         expected_end = _expected_completed_week_end(today)
-        if natural_week_end and not _covers_expected_completed_week(date.fromisoformat(natural_week_end), expected_end):
-            raise RuntimeError(
-                f"最近自然周数据待发布：官网最新为{snapshot['source'].get('naturalWeekPeriod')}，"
-                f"待发布周截至{expected_end.isoformat()}"
-            )
+        pending_next_week = False
+        if natural_week_end:
+            candidate_end = date.fromisoformat(natural_week_end)
+            if not _covers_expected_completed_week(candidate_end, expected_end):
+                stored_end = _stored_natural_week_end(data_dir)
+                if stored_end is None or candidate_end <= stored_end:
+                    raise RuntimeError(
+                        f"最近自然周数据待发布：官网最新为{snapshot['source'].get('naturalWeekPeriod')}，"
+                        f"待发布周截至{expected_end.isoformat()}"
+                    )
+                pending_next_week = True
         _atomic_json(data_dir / SNAPSHOT_FILE, snapshot)
         status = {
             "status": "published",
-            "statusLabel": "最近自然周已发布 · 指标为月内累计",
+            "statusLabel": (
+                "官网最新一期已补录 · 下一自然周待发布"
+                if pending_next_week else "最近自然周已发布 · 指标为月内累计"
+            ),
             "lastAttemptAt": attempted_at,
             "lastSuccessAt": attempted_at,
             "batchId": snapshot["batchId"],
@@ -316,6 +337,9 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
             "naturalWeekPeriod": snapshot["source"].get("naturalWeekPeriod", ""),
             "error": "",
         }
+        if pending_next_week:
+            status["nextNaturalWeekPending"] = True
+            status["expectedNaturalWeekEndDate"] = expected_end.isoformat()
     except Exception as exc:
         error = str(exc)
         awaiting = error.startswith("最近自然周数据待发布")
