@@ -1,5 +1,13 @@
 # MMN Perception Engine 智能体研发交接手册
 
+## 2026-08-10｜线索看板纵向业务模板生产交接
+
+- 当前生产版本为`beta-1.03-20260810-lead-import-vertical-template-1`，应用提交为`7224c135d5f5bb96b2993c88360498ebd6ec746b`；GitHub `main`、同名标签、本地8765、ECS源码与正式容器已同步。
+- 解析器先走标准表头，再兼容“分阶段转化”纵向矩阵；车型只由统一车型归一化确定，禁止增加E7X专属判断。缺车型、缺指标、重复指标或非法值必须失败关闭，且不得覆盖旧合法数据。
+- 0716真实文件应得到4阶段，0806真实文件应得到5阶段；0806当前阶段必须为平销期（8.1-8.31），线索40,440 / 377,143、订单272 / 3,300。刷新后必须恢复同一业务载荷。
+- 本地与生产组织ID参与数据指纹，因此完整指纹可不同；跨环境一致性应比较规范化`phases`载荷，本轮SHA-256为`17d759cb1382841daae70eefa504b49791dddeb89a21bc99b4ee57882f71bbb6`。
+- ECS回滚目录为`/opt/mmn-perception-engine/backups/releases/lead_vertical_20260810_231953_pre`。生产验收副作用4条`project_snapshots`已按主键及整行哈希清理，最终只保留`lead_dashboard_datasets`的E7X真实导入。
+
 ## 2026-07-23｜竞品格局与社媒可靠性发布交接
 
 - 当前生产版本为 `beta-1.03-20260723-vertical-social-reliability-2`，应用运行提交 `f3b35738e2327026e65fe1e6d944325c54210844`；GitHub `main`、发布分支和 ECS 已同步。

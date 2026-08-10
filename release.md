@@ -2,11 +2,15 @@
 
 ## 2026-08-10｜beta 1.03 线索看板纵向业务模板兼容
 
-- 发布候选：`beta-1.03-20260810-lead-import-vertical-template-1`；最终提交、归档SHA-256、本地与ECS部署证据在发布完成后回填。
+- 生产版本：`beta-1.03-20260810-lead-import-vertical-template-1`；应用提交 `7224c135d5f5bb96b2993c88360498ebd6ec746b` 已进入 GitHub `main`，同名标签精确锁定该提交。发布归档 SHA-256 为 `66aafc8b274e185110f24a336503c7e2568570de7d327305703ffce2355dfb4e`。
 - 兼容既有“分阶段转化”纵向xlsx，复用工作表名的统一车型归一化，不增加E7X专属判断；标准表头xlsx/csv/json继续沿用原路径。
 - 纵向模板按文件连续性将最后阶段标记为进行中、其余阶段标记为已完成，并记录模板和状态依据；缺车型、缺指标、重复指标与非法值均失败关闭，不覆盖已保存合法数据。
 - 真实0716与0806文件已在隔离端口连续上传：0716恢复4阶段，0806更新为5阶段，8月显示线索40,440 / 377,143、订单272 / 3,300，刷新后持久恢复，两个请求均为201且浏览器控制台0错误。
 - 完整发布门禁使用仓库版本化数据文件和业务SQLite只读备份通过：全量Python、全部JavaScript合同、数据优先流程、19个客户入口、8个管理视图、1440px/390px均无失败；启动、浏览器与源库86张表逻辑零漂移。
+- 本地8765已切换到发布工作树并继续读取原业务库；发布前备份位于`china-auto-marketing-engine/backups/releases/lead_vertical_20260810_230736`。0806真实文件导入和刷新恢复通过，最终仅`lead_dashboard_datasets`发生预期变化，其他85张表不变，`quick_check=ok`。本地截图为`output/playwright/lead-import-release-20260810/local-import.png`和`local-reload.png`。
+- ECS发布前源码、环境和SQLite在线备份位于`/opt/mmn-perception-engine/backups/releases/lead_vertical_20260810_231953_pre`；源码备份SHA-256为`5546412711d4b06a0ad2c6aa15942a38cdeeec081864f40e95e849bf6e8be0d0`，主库在线备份SHA-256为`d06c883cb712e81dc32cfddc7bb9aea80db4b6ca3bcca93911251b48b2175a56`。部署脚本另生成`backups/mmn_backup_20260810_232017.tar.gz`和`backups/mmn_backup_20260810_232043.tar.gz`。
+- 蓝绿部署完成，六个Compose服务运行，应用、任务服务、数据库、缓存和调度器健康；内部与公网健康接口均返回精确版本，服务器源码与正式容器`server.py`、`lead_dashboard_catalog.py`、`index.html`哈希一致，近10分钟应用/任务/调度严重日志为0。
+- 生产真实管理员从页面上传0806文件，导入返回201；导入后及刷新后均显示5阶段和平销期线索40,440 / 377,143、订单272 / 3,300，浏览器错误与5xx均为0。验收产生的4条`project_snapshots`已按主键和整行SHA-256精确清理；最终84张表仅`lead_dashboard_datasets`发生预期变化，其余83张表不变，`quick_check=ok`。本地与生产5阶段业务载荷规范化SHA-256同为`17d759cb1382841daae70eefa504b49791dddeb89a21bc99b4ee57882f71bbb6`。
 
 ## 2026-08-10｜beta 1.03 管理层周度车市扫描自动抓取恢复
 
