@@ -1,7 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from douyin_vehicle_radar import (
@@ -71,7 +71,9 @@ class DouyinVehicleRadarTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def item(self, text, published="2026-07-28T08:00:00+00:00", views=100):
+    def item(self, text, published=None, views=100):
+        if published is None:
+            published = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         key = str(abs(hash((text, published))))
         return {
             "id": key,
@@ -88,8 +90,12 @@ class DouyinVehicleRadarTest(unittest.TestCase):
     def test_full_model_is_verified_but_short_alias_requires_review(self):
         profiles = build_profiles("智己LS6", ["理想i6"])
         window = date_window(7, now_value=NOW)
-        exact = classify_candidate(self.item("智己LS6深度测评"), profiles, [], window)
-        short = classify_candidate(self.item("LS6深度测评"), profiles, [], window)
+        exact = classify_candidate(
+            self.item("智己LS6深度测评", published="2026-07-28T08:00:00+00:00"), profiles, [], window
+        )
+        short = classify_candidate(
+            self.item("LS6深度测评", published="2026-07-28T08:00:00+00:00"), profiles, [], window
+        )
         self.assertEqual("verified", exact["verificationStatus"])
         self.assertEqual("pending_review", short["verificationStatus"])
 
@@ -102,17 +108,28 @@ class DouyinVehicleRadarTest(unittest.TestCase):
         )
         self.assertEqual(
             "no_vehicle_evidence",
-            classify_candidate(self.item("一条普通汽车资讯"), profiles, [], window)["reason"],
+            classify_candidate(
+                self.item("一条普通汽车资讯", published="2026-07-28T08:00:00+00:00"),
+                profiles,
+                [],
+                window,
+            )["reason"],
         )
 
     def test_comparison_and_attribute_buckets_are_deterministic(self):
         profiles = build_profiles("智己LS6", ["理想i6"])
         window = date_window(7, now_value=NOW)
         comparison = classify_candidate(
-            self.item("智己LS6与理想i6怎么选"), profiles, ["动力与操控"], window
+            self.item("智己LS6与理想i6怎么选", published="2026-07-28T08:00:00+00:00"),
+            profiles,
+            ["动力与操控"],
+            window,
         )
         attribute = classify_candidate(
-            self.item("智己LS6动力与操控实测"), profiles, ["动力与操控"], window
+            self.item("智己LS6动力与操控实测", published="2026-07-28T08:00:00+00:00"),
+            profiles,
+            ["动力与操控"],
+            window,
         )
         self.assertEqual("comparison", comparison["bucket"])
         self.assertEqual("attribute", attribute["bucket"])
