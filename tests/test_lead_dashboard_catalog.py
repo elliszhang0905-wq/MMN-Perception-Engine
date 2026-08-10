@@ -6,6 +6,7 @@ from lead_dashboard_catalog import (
     extract_rows_from_sheets,
     get_dataset,
     init_schema,
+    list_models,
     save_datasets,
 )
 
@@ -74,6 +75,20 @@ class LeadDashboardCatalogTest(unittest.TestCase):
         self.assertEqual(get_dataset(self.conn, org_id="org-a", edition="china", model="车型B")["model"], "车型B")
         self.assertIsNone(get_dataset(self.conn, org_id="org-b", edition="china", model="车型A"))
         self.assertIsNone(get_dataset(self.conn, org_id="org-a", edition="global", model="车型A"))
+
+    def test_available_models_are_listed_by_scope_and_latest_update(self):
+        datasets = build_datasets_from_rows(lead_rows("车型A") + lead_rows("车型B"), "双车型.xlsx")
+        save_datasets(self.conn, org_id="org-a", edition="china", datasets=datasets)
+        save_datasets(
+            self.conn,
+            org_id="org-b",
+            edition="china",
+            datasets=build_datasets_from_rows(lead_rows("车型C"), "另一企业.xlsx"),
+        )
+
+        self.assertEqual(list_models(self.conn, org_id="org-a", edition="china"), ["车型A", "车型B"])
+        self.assertEqual(list_models(self.conn, org_id="org-b", edition="china"), ["车型C"])
+        self.assertEqual(list_models(self.conn, org_id="org-a", edition="global"), [])
 
     def test_invalid_import_does_not_overwrite_existing_model(self):
         original = build_datasets_from_rows(lead_rows(), "第一版.csv")

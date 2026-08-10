@@ -395,3 +395,20 @@ def get_dataset(conn, *, org_id, edition, model):
         return None
     dataset["updatedAt"] = row["updated_at"]
     return dataset
+
+
+def list_models(conn, *, org_id, edition):
+    org_id = _text(org_id, "企业空间")
+    edition = _text(edition, "版本", 20)
+    if edition not in VALID_EDITIONS:
+        raise ValueError("线索数据版本范围无效。")
+    rows = conn.execute(
+        """
+        select model
+        from lead_dashboard_datasets
+        where org_id=? and edition=?
+        order by updated_at desc, model asc
+        """,
+        (org_id, edition),
+    ).fetchall()
+    return [str(row["model"]) for row in rows if str(row["model"] or "").strip()]

@@ -19,7 +19,7 @@ assert.match(
 );
 assert.match(
   html,
-  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260811-lead-month-trend-1/,
+  /douyin-vehicle-radar\.(?:css|js)\?v=beta-1\.03-20260811-lead-dashboard-entry-1/,
   "radar assets should use the cache-busting customer-UI revision",
 );
 assert.match(script, /待补热度/, "missing view metrics should be isolated from formal rankings");

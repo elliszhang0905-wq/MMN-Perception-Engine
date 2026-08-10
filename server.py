@@ -66,6 +66,7 @@ from lead_dashboard_catalog import (
     extract_rows_from_sheets as extract_lead_dashboard_rows,
     get_dataset as get_lead_dashboard_dataset,
     init_schema as init_lead_dashboard_schema,
+    list_models as list_lead_dashboard_models,
     save_datasets as save_lead_dashboard_datasets,
 )
 from opportunity_pipeline import (
@@ -330,7 +331,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260811-lead-month-trend-1"
+APP_VERSION_CODE = "beta-1.03-20260811-lead-dashboard-entry-1"
 APP_RELEASE_DATE = "2026-08-11"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -15932,12 +15933,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 with db() as conn:
                     policy_region = str(q.get("policy_region", ["上海"])[0] or "上海").strip()
                     policy_scenario = str(q.get("policy_scenario", ["置换更新"])[0] or "置换更新").strip()
+                    dashboard_edition = edition_from(q.get("edition", ["china"])[0])
                     payload = build_group_dashboard_payload(
                         conn,
                         sales_payload,
                         auth.get("org_id", "local"),
-                        edition_from(q.get("edition", ["china"])[0]),
+                        dashboard_edition,
                         fuel_market=fuel_market,
+                    )
+                    payload["leadDashboardModels"] = list_lead_dashboard_models(
+                        conn,
+                        org_id=auth.get("org_id", "local"),
+                        edition=dashboard_edition,
                     )
                     monitored_policy_models = {
                         str(model).strip()

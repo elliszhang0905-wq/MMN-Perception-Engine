@@ -8,7 +8,7 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const ui = fs.readFileSync(path.join(root, "lead-dashboard.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "lead-dashboard.css"), "utf8");
 
-assert.match(html, /id="management-dashboard-panel"[\s\S]*id="lead-dashboard-panel"[\s\S]*class="project-strip"/);
+assert.match(html, /id="lead-dashboard-panel"[\s\S]*id="management-dashboard-panel"[\s\S]*class="project-strip"/);
 assert.match(ui, /"奥迪E7X"/);
 assert.match(ui, /registerModelData/);
 assert.match(ui, /normalizeModelData/);

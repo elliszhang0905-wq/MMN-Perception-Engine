@@ -15,6 +15,12 @@
  const saveSalesWarningCycles=value=>{try{localStorage.setItem(SALES_WARNING_CYCLE_STORAGE_KEY,JSON.stringify(value))}catch(_){}};
  const salesWarningCycleContext=item=>window.MMNSalesWarningCycleContext?.adapt?.(item,{serverCycles:persistedSalesWarningCycles,localCycles:loadLocalSalesWarningCycles(),databaseRecord:item?.cycleEvidence||null})||{model:item?.model||"",seriesId:String(item?.seriesId||""),status:"missing",source:"sales-warning"};
  const selectedDashboardModel=()=>window.MMNVehicleContext?.getModel?.()||"";
+ const preferredWarningItem=data=>{
+  const items=data?.salesWarnings?.saicModels||[],selectedSeries=items.find(item=>String(item.seriesId||"")===String(uiState.warningSeriesId||""));
+  if(selectedSeries)return selectedSeries;
+  const leadModels=new Set((data?.leadDashboardModels||[]).map(model=>String(model||"").trim()).filter(Boolean)),leadReady=items.find(item=>leadModels.has(item.model));
+  return leadReady||items.find(item=>item.model===uiState.warningModel)||items[0]||null;
+ };
  const marketPositioningForWarning=(item,fallback={})=>{
   if(!item?.model)return{...fallback,model:fallback.model||"奥迪E7X"};
   const energy=String(item.energyType||"").trim(),size=String(item.sizeClass||"").replace(/\s+/g,"").trim(),body=String(item.bodyType||"").toUpperCase();
@@ -345,7 +351,8 @@ function renderFullSegmentWarnings(warning){
 
 function render(data){
 	  const dashboardModel=selectedDashboardModel()||"奥迪E7X",evaluation=data.productEvaluations?.[dashboardModel]||(dashboardModel==="奥迪E7X"?data.productEvaluation:null)||{status:"missing",ownModel:dashboardModel,models:[],platforms:[],attributes:[]};attributionProductEvaluation=evaluation;attributionSalesPeriod=data.salesWarnings?.source?.period||"";if(evaluation.contract!=="ls6_verified_evidence_v1")window.MMNVehicleContext?.registerProductEvaluation?.(evaluation);const own=(evaluation.models||[]).find(item=>item.isOwn)||{},source=evaluation.source||{},brief=data.executiveBrief||{},pulse=executivePulseFrom(brief),weeklyRefresh=brief.weeklyRefresh||data.refreshCadence?.weekly||{},factMap=Object.fromEntries((brief.facts||[]).map(item=>[item.id,item]));
-  const warningItems=data.salesWarnings?.saicModels||[],selectedWarning=warningItems.find(item=>String(item.seriesId)===String(uiState.warningSeriesId))||warningItems.find(item=>item.model===dashboardModel)||warningItems[0]||null,marketPositioning=marketPositioningForWarning(selectedWarning,evaluation.positioning||{});
+  const warningItems=data.salesWarnings?.saicModels||[],selectedWarning=preferredWarningItem(data)||warningItems.find(item=>item.model===dashboardModel)||warningItems[0]||null,marketPositioning=marketPositioningForWarning(selectedWarning,evaluation.positioning||{});
+  if(selectedWarning){uiState.warningSeriesId=String(selectedWarning.seriesId||"");uiState.warningModel=selectedWarning.model||""}
   if(data.salesWarnings)data.salesWarnings.refreshCadence=data.refreshCadence?.monthlySalesWarning||{};
   const views=[
    {key:"brief",label:"高管摘要",kicker:"高管摘要",content:renderExecutiveOverview(data.executiveBrief||{})},
@@ -428,7 +435,7 @@ function render(data){
   deck?.addEventListener("keydown",event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){event.preventDefault();activateView(activeView+(event.key==="ArrowLeft"?-1:1),true)}});
   deck?.addEventListener("pointerdown",event=>{if(event.isPrimary!==false)pointerStartX=event.clientX});
   deck?.addEventListener("pointerup",event=>{if(pointerStartX===null)return;const delta=event.clientX-pointerStartX;pointerStartX=null;if(Math.abs(delta)>=48)activateView(activeView+(delta<0?1:-1))});
-  const initialWarningItem=(data.salesWarnings?.saicModels||[]).find(item=>String(item.seriesId||"")===String(uiState.warningSeriesId||""))||(data.salesWarnings?.saicModels||[]).find(item=>item.model===uiState.warningModel);
+  const initialWarningItem=preferredWarningItem(data);
   emitWarningModelSelection(initialWarningItem,{notify:false});
  }
 
