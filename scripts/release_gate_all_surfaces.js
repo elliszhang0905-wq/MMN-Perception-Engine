@@ -72,6 +72,14 @@ async function auditViewport(browser, viewport) {
       }),
     });
   });
+  await page.route("**/api/bf/documents?**", async route => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true, data: [] }),
+    });
+  });
 
   try {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
