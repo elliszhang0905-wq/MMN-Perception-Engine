@@ -5989,7 +5989,7 @@ def call_qwen(messages, temperature=.35, profile="fast", timeout=None, max_token
         raise ValueError(f"千问请求超时或网络不可用：{exc}")
     return data["choices"][0]["message"]["content"]
 
-def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_tokens=None, response_format=None):
+def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_tokens=None, response_format=None, enable_thinking=None):
     cfg = deepseek_config(profile)
     api_key = env_value("DEEPSEEK_API_KEY")
     if not api_key:
@@ -5999,7 +5999,9 @@ def call_deepseek(messages, temperature=.25, profile="fast", timeout=None, max_t
         "messages": messages,
     }
     is_v4 = str(cfg["model"]).startswith("deepseek-v4-")
-    thinking_enabled = is_v4 and (profile or "").lower() == "deep"
+    thinking_enabled = is_v4 and (
+        (profile or "").lower() == "deep" if enable_thinking is None else bool(enable_thinking)
+    )
     if is_v4:
         body["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
     if thinking_enabled:
@@ -6706,6 +6708,7 @@ def run_sales_warning_dual_review(packet=None):
                     timeout=MMN_CRITIC_TIMEOUT,
                     max_tokens=8000,
                     response_format={"type": "json_object"},
+                    enable_thinking=False,
                 )
             return "verified" if normalize_sales_warning_review(raw, packet) else "rejected"
         except Exception:

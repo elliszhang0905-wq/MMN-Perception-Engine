@@ -308,6 +308,8 @@ assert.match(douyinHotCss, /\.douyin-ranking-close/);
 assert.match(douyinHotCss, /\.douyin-manual-review/);
 assert.match(douyinHotCss, /\.douyin-manual-edit/);
 assert.match(app, /repeated\.map\(t=>`<span>\$\{escapeHtml\(t\)\}<\/span>`\)/, "sales ticker must escape external crawler text");
+assert.match(css, /\.sales-marquee-track\{[^}]*animation:mmnSalesMarquee 60\.8s linear infinite/, "sales ticker should run at half of its previous speed");
+assert.match(css, /\.sales-marquee:hover \.sales-marquee-track\{animation-duration:86\.8s\}/, "hovered sales ticker should preserve the same 50% slowdown");
 assert.match(douyinHot, /freshCount/);
 assert.match(douyinHotCss, /\.douyin-entity-radar/);
 assert.match(douyinHotCss, /\.douyin-entity-status\.conflict/);

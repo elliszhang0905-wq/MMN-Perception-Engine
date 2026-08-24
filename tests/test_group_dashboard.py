@@ -349,6 +349,8 @@ class GroupDashboardTest(unittest.TestCase):
                 "乐道L60",
                 "乐道L80",
                 "乐道L90",
+                "firefly萤火虫",
+                "蔚来EC7",
                 "蔚来EC6",
                 "蔚来ES6",
                 "蔚来ES8",

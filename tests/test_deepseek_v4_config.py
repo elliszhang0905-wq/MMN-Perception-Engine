@@ -17,7 +17,7 @@ class _Response:
 
 
 class DeepSeekV4ConfigTest(unittest.TestCase):
-    def _request_body(self, profile):
+    def _request_body(self, profile, **kwargs):
         captured = {}
 
         def fake_urlopen(request, timeout):
@@ -31,7 +31,7 @@ class DeepSeekV4ConfigTest(unittest.TestCase):
             "DEEPSEEK_DEEP_MODEL": "deepseek-v4-pro",
         }
         with patch.dict(server.os.environ, environment, clear=False), patch.object(server, "urlopen", side_effect=fake_urlopen):
-            self.assertEqual(server.call_deepseek([{"role": "user", "content": "test"}], profile=profile), "ok")
+            self.assertEqual(server.call_deepseek([{"role": "user", "content": "test"}], profile=profile, **kwargs), "ok")
         return captured["body"]
 
     def test_default_models_use_supported_v4_ids(self):
@@ -51,6 +51,13 @@ class DeepSeekV4ConfigTest(unittest.TestCase):
         self.assertEqual(body["thinking"], {"type": "enabled"})
         self.assertEqual(body["reasoning_effort"], "high")
         self.assertNotIn("temperature", body)
+
+    def test_deep_profile_can_disable_thinking_for_structured_output(self):
+        body = self._request_body("deep", enable_thinking=False)
+        self.assertEqual(body["model"], "deepseek-v4-pro")
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertIn("temperature", body)
+        self.assertNotIn("reasoning_effort", body)
 
     def test_empty_final_content_is_rejected(self):
         class EmptyResponse(_Response):

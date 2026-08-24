@@ -97,11 +97,12 @@ class SalesWarningReviewTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(server, "sales_warning_review_cache_path", return_value=Path(tmp) / "review.json"), \
              patch.object(server, "call_qwen", return_value=response), \
-             patch.object(server, "call_deepseek", return_value=response):
+             patch.object(server, "call_deepseek", return_value=response) as deepseek:
             state = server.run_sales_warning_dual_review(packet)
         self.assertEqual(state["status"], "verified")
         self.assertTrue(state["managementConclusionPublished"])
         self.assertEqual(state["providerChecks"], {"flagshipA": "verified", "flagshipB": "verified"})
+        self.assertFalse(deepseek.call_args.kwargs["enable_thinking"])
 
     def test_one_model_failure_keeps_management_conclusion_private(self):
         packet = server.sales_warning_evidence_packet()

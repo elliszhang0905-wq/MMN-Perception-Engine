@@ -152,8 +152,8 @@ h1,h2,p{margin:0}h1{font-size:25px}
 .sales-marquee-window:before,.sales-marquee-window:after{content:"";position:absolute;top:0;bottom:0;width:34px;z-index:1;pointer-events:none}
 .sales-marquee-window:before{left:0;background:linear-gradient(90deg,#f3f5f6,transparent)}
 .sales-marquee-window:after{right:0;background:linear-gradient(270deg,#f3f5f6,transparent)}
-.sales-marquee-track{display:inline-flex;align-items:center;gap:18px;white-space:nowrap;padding-left:100%;font-size:12px;color:#20262b;font-weight:820;animation:mmnSalesMarquee 30.4s linear infinite;font-variant-numeric:tabular-nums}
-.sales-marquee:hover .sales-marquee-track{animation-duration:43.4s}
+.sales-marquee-track{display:inline-flex;align-items:center;gap:18px;white-space:nowrap;padding-left:100%;font-size:12px;color:#20262b;font-weight:820;animation:mmnSalesMarquee 60.8s linear infinite;font-variant-numeric:tabular-nums}
+.sales-marquee:hover .sales-marquee-track{animation-duration:86.8s}
 .sales-marquee-track span{display:inline-flex;align-items:center;gap:7px}
 .sales-marquee-track span:before{content:"";width:5px;height:5px;border-radius:50%;background:#18805d;box-shadow:0 0 0 4px rgba(24,128,93,.08)}
 .sales-marquee-track span:after{content:"";width:1px;height:14px;background:#cbd0d4;margin-left:11px}
