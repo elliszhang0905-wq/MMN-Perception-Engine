@@ -1,5 +1,14 @@
 # MMN Perception Engine 智能体研发交接手册
 
+## 2026-08-24｜MMN公网HTTPS入口P0阻塞交接
+
+- 工单 `MMN-INFRA-HTTPS-P0-20260824-01` 已开工。`mmnsh.com` 与 `www.mmnsh.com` 已解析到ECS，但公网HTTP在到达宿主Nginx前被阿里云 `Non-compliance ICP Filing` 页面返回403。
+- 宿主当前只有Credo独立443虚拟主机，证书SAN仅为 `credo.mmnsh.net`；MMN没有独立443入口。不得复用、替换或重载Credo证书/路由来临时承载MMN。
+- 服务器发布前备份位于 `/root/infra-backups/mmn_https_20260824_173336`，目录权限700；其中记录了共享Nginx配置、Credo证书、MMN环境、生产数据库及SHA-256基线。数据库基线84张表、`quick_check=ok`。
+- 当前阿里云控制台会话未登录。下一执行人必须先由域名所有者完成登录，并只读确认 `mmnsh.com` 的ICP备案订单、接入状态与云侧放行条件；不得绕过实名、短信、扫码或验证码。
+- 云侧放行和有效MMN证书就绪前，保持HTTP现状，不启用HTTPS跳转、安全Cookie或HSTS，不宣称公网、管理员/试用或1440px/390px验收通过。
+- 详细证据、恢复门禁和完成标准见 `docs/研发档案/2026-08-24_beta-1.03_MMN公网HTTPS入口P0工单.md`。
+
 ## 2026-08-10｜线索看板纵向业务模板生产交接
 
 - 当前生产版本为`beta-1.03-20260810-lead-import-vertical-template-1`，应用提交为`7224c135d5f5bb96b2993c88360498ebd6ec746b`；GitHub `main`、同名标签、本地8765、ECS源码与正式容器已同步。
