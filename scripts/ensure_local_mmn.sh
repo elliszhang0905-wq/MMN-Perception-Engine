@@ -54,7 +54,7 @@ load_local_env() {
 load_local_env
 
 PORT="${MMN_PORT:-8765}"
-HOST="${MMN_HOST:-0.0.0.0}"
+HOST="${MMN_HOST:-127.0.0.1}"
 LOCAL_URL="http://127.0.0.1:${PORT}"
 LOG_DIR="${PROJECT_DIR}/logs"
 LOG_FILE="${LOG_DIR}/local_mmn.log"

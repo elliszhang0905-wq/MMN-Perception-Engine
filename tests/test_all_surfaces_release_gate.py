@@ -6,7 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
-    RELEASE_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
+    ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
+    RELEASE_VERSION = "beta-1.03-20260824-p0-security-1"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")
@@ -38,14 +39,14 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
     def test_global_release_version_busts_changed_customer_assets(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         server = (ROOT / "server.py").read_text(encoding="utf-8")
-        self.assertIn(f"style.css?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"group-dashboard.css?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"lead-dashboard.css?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"app.js?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"group-dashboard.js?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"lead-dashboard.js?v={self.RELEASE_VERSION}", index)
+        self.assertIn(f"style.css?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"group-dashboard.css?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"lead-dashboard.css?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"app.js?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"group-dashboard.js?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"lead-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f'APP_VERSION_CODE = "{self.RELEASE_VERSION}"', server)
-        self.assertIn('APP_RELEASE_DATE = "2026-08-11"', server)
+        self.assertIn('APP_RELEASE_DATE = "2026-08-24"', server)
 
 
 if __name__ == "__main__":

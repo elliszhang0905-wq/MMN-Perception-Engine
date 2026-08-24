@@ -10,6 +10,8 @@ assert.match(source, /SCRIPT_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd -P\)"/);
 assert.match(source, /PROJECT_DIR="\$\(cd "\$\{SCRIPT_DIR\}\/\.\." && pwd -P\)"/);
 assert.match(watchdog, /SCRIPT_DIR="\$\(cd "\$\(dirname "\$0"\)" && pwd -P\)"/);
 assert.match(watchdog, /PROJECT_DIR="\$\(cd "\$\{SCRIPT_DIR\}\/\.\." && pwd -P\)"/);
+assert.match(source, /HOST="\$\{MMN_HOST:-127\.0\.0\.1\}"/);
+assert.match(watchdog, /MMN_HOST="\$\{MMN_HOST:-127\.0\.0\.1\}"/);
 for (const script of [source, watchdog]) {
   assert.match(script, /load_local_env\(\)/);
   assert.match(script, /git -C "\$\{PROJECT_DIR\}" rev-parse --git-common-dir/);

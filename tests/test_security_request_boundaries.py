@@ -26,8 +26,8 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
         cls.patchers = [
             patch.object(server, "cloud_login_required", return_value=True),
             patch.dict(server.os.environ, {
-                "MMN_AUTH_SECRET": "test-auth-secret",
-                "MMN_SCHEDULER_SECRET": "test-scheduler-secret",
+                "MMN_AUTH_SECRET": "test-auth-secret-0123456789-ABCDEFGHIJK",
+                "MMN_SCHEDULER_SECRET": "test-scheduler-secret-0123456789-ABCDE",
                 "MMN_TRUSTED_PROXY_CIDRS": "127.0.0.0/8",
             }, clear=False),
             patch.object(server, "cloud_accounts", return_value={
@@ -201,7 +201,7 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
     def test_valid_scheduler_signature_is_accepted(self):
         timestamp = str(int(time.time()))
         signed = f"POST\n/api/group-dashboard/refresh-weekly\n{timestamp}".encode("utf-8")
-        signature = hmac.new(b"test-scheduler-secret", signed, hashlib.sha256).hexdigest()
+        signature = hmac.new(b"test-scheduler-secret-0123456789-ABCDE", signed, hashlib.sha256).hexdigest()
         body = b"{}"
         with patch.object(server, "run_weekly_group_dashboard_refresh", return_value={"status": "verified"}) as refresh:
             conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=3)
@@ -230,7 +230,7 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
             "POST",
             path,
             timestamp,
-            secret="test-scheduler-secret",
+            secret="test-scheduler-secret-0123456789-ABCDE",
         )
         body = json.dumps({"edition": "china"}).encode("utf-8")
         with patch.object(server, "run_founder_weekly_crawl", return_value={"ok": True}) as crawl:
@@ -259,7 +259,7 @@ class SecurityRequestBoundaryTest(unittest.TestCase):
             "POST",
             "/api/group-dashboard/refresh-weekly",
             timestamp,
-            secret="test-scheduler-secret",
+            secret="test-scheduler-secret-0123456789-ABCDE",
         )
         self.assertFalse(server.valid_scheduler_signature(
             {

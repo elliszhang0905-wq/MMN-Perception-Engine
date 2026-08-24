@@ -131,7 +131,7 @@ print(int(payload.get("activeLocalJobs", payload.get("activeSocialTrendJobs", 0)
 
 while true; do
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] 启动 MMN 本地服务" >>"${LOG_FILE}"
-  MMN_HOST="${MMN_HOST:-0.0.0.0}" \
+  MMN_HOST="${MMN_HOST:-127.0.0.1}" \
   MMN_PORT="${MMN_PORT:-8765}" \
   MMN_CLOUD_LOGIN_REQUIRED="${MMN_CLOUD_LOGIN_REQUIRED:-false}" \
   MMN_AUTO_OPEN_BROWSER="false" \

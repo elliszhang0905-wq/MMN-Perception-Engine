@@ -17,6 +17,7 @@ import hashlib
 import time
 import base64
 import hmac
+import secrets
 import ipaddress
 import socket
 import html as html_lib
@@ -27,7 +28,7 @@ from http.cookies import CookieError, SimpleCookie
 from io import BytesIO
 from pathlib import Path
 from threading import Lock, Thread, Timer, Semaphore
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from urllib.error import HTTPError, URLError
 import urllib.robotparser as robotparser
@@ -331,7 +332,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260824-monthly-sales-1"
+APP_VERSION_CODE = "beta-1.03-20260824-p0-security-1"
 APP_RELEASE_DATE = "2026-08-24"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -408,6 +409,10 @@ LEGACY_VERTICAL_CLAIM_LOCK = Lock()
 LEGACY_VERTICAL_CLAIM_CHECKED = set()
 LOGIN_RATE_LIMIT_LOCK = Lock()
 LOGIN_RATE_LIMITS = {}
+TRIAL_USAGE_LOCK = Lock()
+TRIAL_USAGE = {}
+LOCAL_EPHEMERAL_AUTH_SECRET = secrets.token_urlsafe(48)
+LOCAL_EPHEMERAL_SCHEDULER_SECRET = secrets.token_urlsafe(48)
 OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-5.5"
 MMN_STRATEGY_MODEL = {
@@ -4133,6 +4138,88 @@ def robots_allowed(url, user_agent="MMNFounderCrawler/1.0"):
     except Exception:
         return False
 
+
+class _PublicContentNoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def validated_public_content_url(url, resolver=socket.getaddrinfo):
+    parsed = urlparse(str(url or "").strip())
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or (port and port not in {80, 443})
+    ):
+        return False
+    host = parsed.hostname.rstrip(".").lower()
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return False
+    try:
+        literal = ipaddress.ip_address(host)
+        return literal.is_global
+    except ValueError:
+        pass
+    try:
+        addresses = {
+            item[4][0]
+            for item in resolver(
+                host,
+                port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
+        return bool(addresses) and all(ipaddress.ip_address(address).is_global for address in addresses)
+    except (ValueError, OSError, socket.gaierror):
+        return False
+
+
+def fetch_public_content_page(url, *, user_agent, max_bytes=1024 * 768, delay_seconds=10):
+    current = str(url or "").strip()
+    opener = build_opener(_PublicContentNoRedirect)
+    for _ in range(4):
+        if not validated_public_content_url(current):
+            raise ValueError("公开链接未通过公网地址安全校验。")
+        if not robots_allowed(current, user_agent=user_agent):
+            raise ValueError("该公开链接的 robots.txt 权限无法确认或不允许读取。")
+        time.sleep(max(0, delay_seconds))
+        req = Request(current, headers={
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        })
+        try:
+            with opener.open(req, timeout=18) as resp:
+                final_url = resp.geturl() or current
+                if not validated_public_content_url(final_url):
+                    raise ValueError("公开链接最终地址未通过公网地址安全校验。")
+                data = resp.read(max_bytes + 1)
+                if len(data) > max_bytes:
+                    raise ValueError("公开页面响应超过大小限制。")
+                return {
+                    "url": final_url,
+                    "status": getattr(resp, "status", 200),
+                    "content_type": resp.headers.get("Content-Type", ""),
+                    "data": data,
+                }
+        except HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308}:
+                location = exc.headers.get("Location")
+                if not location:
+                    break
+                current = urljoin(current, location)
+                continue
+            if exc.code in {401, 403, 429}:
+                raise ValueError(f"公开页面返回 HTTP {exc.code}，MMN已停止，不会尝试绕过登录、验证码或风控。") from exc
+            raise
+    raise ValueError("公开链接重定向次数超过限制。")
+
+
 def safe_public_fetch(url, rate_limit_seconds=10):
     if not robots_allowed(url):
         raise ValueError("robots.txt 不允许抓取或无法确认权限")
@@ -4422,7 +4509,6 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/ai/fusion-strategy",
     "/api/ai/qwen-strategy",
     "/api/ai/creator-tags",
-    "/api/ai/founder-talk",
     "/api/ai/model-identities",
     "/api/ai/model-judgment",
     "/api/product-whitepaper/analyze",
@@ -4431,13 +4517,11 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
     "/api/agents/run",
     "/api/topic-planning/run",
     "/api/content-capability-kb/distill-account",
-    "/api/content-capability-kb/collect-public",
     "/api/content-capability-kb/script-jobs",
     "/api/opportunity-map/own-document",
     "/api/opportunity-map/generate",
     "/api/opportunity-map/review",
     "/api/opportunity-map/manual-reviews",
-    "/api/group-dashboard/cycle-review",
     "/api/attribution-reasoning/run",
     "/api/cockpit/execution-cycles",
     "/api/cockpit/execution-cycles/monitoring",
@@ -4454,34 +4538,88 @@ TRIAL_POST_ALLOWED_PATHS = frozenset({
 })
 
 
+def trial_post_allowed(path):
+    """Return whether a POST route is explicitly available to trial accounts."""
+    path = str(path or "")
+    creator_script_action = re.fullmatch(
+        r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", path
+    )
+    social_evidence_retry = re.fullmatch(r"/api/social-evidence/jobs/[^/]+/retry", path)
+    douyin_vehicle_radar_retry = re.fullmatch(
+        r"/api/douyin-vehicle-radar/runs/[^/]+/retry", path
+    )
+    return bool(
+        path in TRIAL_POST_ALLOWED_PATHS
+        or creator_script_action
+        or social_evidence_retry
+        or douyin_vehicle_radar_retry
+    )
+
+
 def cloud_post_required_roles(path):
     """Keep trial analysis actions explicit while defaulting mutations to admin-only."""
-    creator_script_action = re.fullmatch(
-        r"/api/content-capability-kb/script-jobs/[^/]+/(?:retry|revise)", str(path or "")
-    )
-    social_evidence_retry = re.fullmatch(r"/api/social-evidence/jobs/[^/]+/retry", str(path or ""))
-    douyin_vehicle_radar_retry = re.fullmatch(
-        r"/api/douyin-vehicle-radar/runs/[^/]+/retry", str(path or "")
-    )
-    return None if path in TRIAL_POST_ALLOWED_PATHS or creator_script_action or social_evidence_retry or douyin_vehicle_radar_retry else {"admin"}
+    return None if trial_post_allowed(path) else {"admin"}
+
+
+MIN_SECURITY_SECRET_LENGTH = 32
+UNSAFE_SECURITY_SECRETS = frozenset({
+    "change-this-auth-secret",
+    "change_this_long_random_secret",
+    "change_this_separate_long_random_secret",
+    "mmn-local-demo-secret",
+    "mmn-local-scheduler-secret",
+    "changeme",
+})
+
+
+def validated_security_secret(value, label):
+    secret = str(value or "").strip()
+    if (
+        len(secret) < MIN_SECURITY_SECRET_LENGTH
+        or secret.casefold() in UNSAFE_SECURITY_SECRETS
+        or len(set(secret)) < 8
+    ):
+        raise RuntimeError(f"{label} 必须配置为至少 {MIN_SECURITY_SECRET_LENGTH} 位的独立随机密钥，且不能使用示例占位值。")
+    return secret
 
 
 def auth_secret():
     secret = env_value("MMN_AUTH_SECRET")
     if secret:
-        return secret
+        return validated_security_secret(secret, "MMN_AUTH_SECRET")
     if cloud_login_required():
         raise RuntimeError("云端认证密钥未配置。")
-    return "mmn-local-demo-secret"
+    return LOCAL_EPHEMERAL_AUTH_SECRET
 
 
 def scheduler_secret():
     secret = env_value("MMN_SCHEDULER_SECRET")
     if secret:
-        return secret
+        return validated_security_secret(secret, "MMN_SCHEDULER_SECRET")
     if cloud_login_required():
         raise RuntimeError("内部调度密钥未配置。")
-    return "mmn-local-scheduler-secret"
+    return LOCAL_EPHEMERAL_SCHEDULER_SECRET
+
+
+def loopback_bind_host(host):
+    normalized = str(host or "").strip().lower().rstrip(".")
+    if normalized in {"localhost", "localhost.localdomain"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_runtime_security(host=None, login_required=None):
+    host = APP_HOST if host is None else host
+    login_required = cloud_login_required() if login_required is None else bool(login_required)
+    if not login_required and not loopback_bind_host(host):
+        raise RuntimeError("MMN 未启用登录时只能监听回环地址；局域网或公网监听必须启用登录。")
+    if login_required:
+        validated_security_secret(env_value("MMN_AUTH_SECRET"), "MMN_AUTH_SECRET")
+        validated_security_secret(env_value("MMN_SCHEDULER_SECRET"), "MMN_SCHEDULER_SECRET")
+    return True
 
 
 def scheduler_signature(method, path, timestamp, secret=None):
@@ -4642,6 +4780,44 @@ def clear_login_failures(source_ip, username):
     with LOGIN_RATE_LIMIT_LOCK:
         for key in _login_rate_limit_keys(source_ip, username):
             LOGIN_RATE_LIMITS.pop(key, None)
+
+
+def reset_trial_usage_limits():
+    with TRIAL_USAGE_LOCK:
+        TRIAL_USAGE.clear()
+
+
+def acquire_trial_usage(auth, path, current_time=None):
+    if not auth or auth.get("role") != "trial" or not trial_post_allowed(path):
+        return None, 0
+    current_time = float(time.time() if current_time is None else current_time)
+    window = max(10, int(os.getenv("MMN_TRIAL_REQUEST_WINDOW_SECONDS", "60")))
+    request_limit = max(1, int(os.getenv("MMN_TRIAL_REQUEST_LIMIT", "12")))
+    concurrency_limit = max(1, int(os.getenv("MMN_TRIAL_CONCURRENCY_LIMIT", "2")))
+    identity = str(auth.get("user_id") or auth.get("username") or auth.get("org_id") or "trial")
+    # One account-level budget prevents route rotation (including dynamic retry
+    # paths) from multiplying the configured request and concurrency limits.
+    key = identity
+    with TRIAL_USAGE_LOCK:
+        item = TRIAL_USAGE.setdefault(key, {"requests": [], "active": 0})
+        cutoff = current_time - window
+        item["requests"] = [stamp for stamp in item["requests"] if stamp >= cutoff]
+        if item["active"] >= concurrency_limit:
+            return None, 1
+        if len(item["requests"]) >= request_limit:
+            return None, max(1, math.ceil(item["requests"][0] + window - current_time))
+        item["requests"].append(current_time)
+        item["active"] += 1
+    return key, 0
+
+
+def release_trial_usage(key):
+    if not key:
+        return
+    with TRIAL_USAGE_LOCK:
+        item = TRIAL_USAGE.get(key)
+        if item:
+            item["active"] = max(0, int(item.get("active") or 0) - 1)
 
 
 def resolve_cloud_auth_scope(username):
@@ -13655,37 +13831,23 @@ def collect_public_content_source(account, source_url, platform="all", edition="
     source_url = str(source_url or "").strip()
     if not source_url:
         raise ValueError("请填写达人主页或单条公开视频/笔记链接。")
-    parsed = urlparse(source_url)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("仅支持 http/https 公开链接。")
+    if not validated_public_content_url(source_url):
+        raise ValueError("仅支持通过公网地址安全校验的 http/https 公开链接。")
     platform_name = detect_content_platform(source_url, platform)
     user_agent = "MMNContentCollector/1.0 (+public visible page only)"
-    if not robots_allowed(source_url, user_agent=user_agent):
+    try:
+        fetched = fetch_public_content_page(source_url, user_agent=user_agent)
+        source_url = fetched["url"]
+        status = fetched["status"]
+        ctype = fetched["content_type"]
+        data = fetched["data"]
+    except ValueError as exc:
         return {
             "ok": False,
             "status": "manual_required",
-            "message": "该公开链接的 robots.txt 权限无法确认或不允许读取，MMN已停止自动采集，请改用人工补全文本或授权导出文件。",
-            "source": {"account_name": account, "platform": platform_name, "source_url": source_url}
+            "message": f"{exc} MMN已停止自动采集，请改用人工补全文本或授权导出文件。",
+            "source": {"account_name": account, "platform": platform_name, "source_url": source_url},
         }
-    time.sleep(10)
-    try:
-        req = Request(source_url, headers={
-            "User-Agent": user_agent,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        })
-        with urlopen(req, timeout=18) as resp:
-            status = getattr(resp, "status", 200)
-            ctype = resp.headers.get("Content-Type", "")
-            data = resp.read(1024 * 768)
-    except HTTPError as exc:
-        if exc.code in (401, 403, 429):
-            return {
-                "ok": False,
-                "status": "manual_required",
-                "message": f"公开页面返回 HTTP {exc.code}，MMN已停止，不会尝试绕过登录、验证码或风控。",
-                "source": {"account_name": account, "platform": platform_name, "source_url": source_url}
-            }
-        raise
     text = data.decode("utf-8", errors="ignore")
     lowered = text.lower()
     if any(term.lower() in lowered for term in CONTENT_PUBLIC_BLOCK_TERMS):
@@ -15034,7 +15196,15 @@ def vehicle_decision_surface_inputs(model, org_id="local", edition="china"):
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
+        self._trial_usage_key = None
         super().__init__(*args, directory=str(ROOT), **kwargs)
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            release_trial_usage(self._trial_usage_key)
+            self._trial_usage_key = None
 
     def public_static_file(self):
         path = urlparse(self.path).path or "/"
@@ -16535,7 +16705,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if cloud_login_required() and not internal_scheduler:
             roles = cloud_post_required_roles(parsed.path)
-            if not self.require_cloud_auth(roles):
+            auth = self.require_cloud_auth(roles)
+            if not auth:
+                return
+            self._trial_usage_key, retry_after = acquire_trial_usage(auth, parsed.path)
+            if retry_after:
+                self.send_json(
+                    {"ok": False, "error": "当前试用额度已用完，请稍后重试。"},
+                    429,
+                    {"Retry-After": retry_after},
+                )
                 return
         if parsed.path == "/api/product-evaluation-catalog":
             try:
@@ -18413,9 +18592,7 @@ class Server(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 if __name__ == "__main__":
-    if cloud_login_required():
-        auth_secret()
-        scheduler_secret()
+    validate_runtime_security()
     init_db()
     schedule_founder_weekly_crawl()
     with Server((APP_HOST, PORT), Handler) as server:
