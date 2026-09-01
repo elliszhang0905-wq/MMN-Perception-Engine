@@ -28,7 +28,7 @@
 - Test: `tests/test_thailand_social_dashboard_ui.js`
 
 - [ ] Copy only the audited dashboard contract, renderer, stylesheet, focused test, and exact HTML/server integration points.
-- [ ] Update the application version to `beta-1.03-20260901-thailand-social-dashboard-1`.
+- [ ] Update the application version to `beta-1.03-20260901-thailand-social-dashboard-2`.
 - [ ] Run the focused test, syntax checks, static boundary test, full release gate, and state gate.
 
 ### Task 2: Create the auditable release commit

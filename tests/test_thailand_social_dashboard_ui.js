@@ -17,6 +17,7 @@ const css = fs.readFileSync(cssPath, "utf8");
 const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
 const server = fs.readFileSync(path.join(root, "server.py"), "utf8");
 const deploy = fs.readFileSync(path.join(root, "scripts", "deploy.sh"), "utf8");
+const nginx = fs.readFileSync(path.join(root, "deploy", "nginx.conf"), "utf8");
 
 assert.equal(data.market.code, "TH");
 assert.equal(data.primary_metric, "monthly_usage_penetration");
@@ -39,6 +40,8 @@ assert.match(server, /"thailand-social-dashboard\.css"/);
 assert.match(server, /"thailand-social-dashboard\.js"/);
 assert.match(server, /"data\/thailand_social_market_latest\.json"/);
 assert.match(deploy, /compose cp data\/thailand_social_market_latest\.json mmn-app:\/app\/data\/thailand_social_market_latest\.json/);
+assert.match(nginx, /location = \/data\/thailand_social_market_latest\.json/);
+assert.match(nginx, /location ~\* \^\/\(\?:data\|backups\|logs/);
 assert.match(js, /data\/thailand_social_market_latest\.json/);
 assert.match(js, /月度用户渗透率/);
 assert.match(js, /广告可触达率/);
