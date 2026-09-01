@@ -2,11 +2,11 @@
 
 ## 2026-09-01｜泰国 Social Media 核心看板生产交接
 
-- 当前发布候选为`beta-1.03-20260901-thailand-social-dashboard-3`。顶部仅显示一句中性名称“泰国主流 Social Media 平台份额看板”，不再承载策略结论、方法摘要或核验印章；数据、图表、筛选、静态证据合同和部署边界保持不变。
+- 当前生产版本为`beta-1.03-20260901-thailand-social-dashboard-3`，应用提交为`d2d3a542f6588007a7d75459c9c0126b8a6e3d9b`。顶部仅显示一句中性名称“泰国主流 Social Media 平台份额看板”，不再承载策略结论、方法摘要或核验印章；数据、图表、筛选、静态证据合同和部署边界保持不变。
 - 主排序只能使用2025 Q2月度用户渗透率；广告可触达率是独立指标，用户可跨平台重叠，因此所有平台比例不得相加。缺失广告触达保持`null`并显示“未公开”，不得补0或借用其他来源。
 - 客户界面使用中性证据标签，不展示数据服务商、模型、插件或技术供应商名称；加载失败必须显示“证据暂不可用”，不得渲染缓存外推值。
 - `data/thailand_social_market_latest.json`位于应用持久化数据挂载点，部署时必须由`scripts/deploy.sh`显式复制后再切流；后续修改该看板必须保留这条部署合同及对应自动化断言。
-- 完整发布闸门、精确归档SHA-256、GitHub主线/标签、ECS源码/环境/数据备份、真实管理员1440px/390px业务流、容器日志及生产数据库零漂移均已完成。归档SHA-256为`a7515a788c4dc564854ac502ae31a0fae9430e0f1a947c01a29ff8ccfdad8523`；回滚目录为`/opt/mmn-perception-engine/backups/releases/thailand_social_20260901_211850_pre`。域名ICP/TLS仍未修复，正式入口使用`http://121.40.60.90`。
+- 完整发布闸门、精确归档SHA-256、GitHub主线/标签、ECS源码与数据备份、真实管理员1440px/390px业务流、容器日志及生产数据库零漂移均已完成。归档SHA-256为`f1fc0e4e3af8c3eb0e6a3817c3d28161b482c4dff2a377a1eb77be4e851ae491`；本轮回滚目录为`/opt/mmn-perception-engine/backups/releases/thailand_social_header_20260901_222500_pre`。域名ICP/TLS仍未修复，正式入口使用`http://121.40.60.90`。
 
 ## 2026-08-10｜线索看板纵向业务模板生产交接
 
