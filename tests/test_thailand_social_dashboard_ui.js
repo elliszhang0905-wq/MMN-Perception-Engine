@@ -43,6 +43,10 @@ assert.match(deploy, /compose cp data\/thailand_social_market_latest\.json mmn-a
 assert.match(nginx, /location = \/data\/thailand_social_market_latest\.json/);
 assert.match(nginx, /location ~\* \^\/\(\?:data\|backups\|logs/);
 assert.match(js, /data\/thailand_social_market_latest\.json/);
+assert.match(js, /泰国主流 Social Media 平台份额看板/);
+assert.doesNotMatch(js, /泰国不是单平台市场/);
+assert.doesNotMatch(js, /主排序使用同口径的月度用户渗透率/);
+assert.doesNotMatch(js, /th-social-hero-seal/);
 assert.match(js, /月度用户渗透率/);
 assert.match(js, /广告可触达率/);
 assert.match(js, /未公开/);

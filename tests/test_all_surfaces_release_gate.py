@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
     ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
-    RELEASE_VERSION = "beta-1.03-20260901-thailand-social-dashboard-2"
+    RELEASE_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
     RELEASE_DATE = "2026-09-01"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):

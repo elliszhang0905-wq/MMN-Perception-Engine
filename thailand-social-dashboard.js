@@ -88,12 +88,7 @@
     const coreOver80 = data.platforms.filter((item) => item.monthly_usage_pct >= 80).length;
     container.innerHTML = `<div class="th-social-shell">
       <section class="th-social-hero" aria-labelledby="th-social-title">
-        <div class="th-social-hero-copy">
-          <span>THAILAND · SOCIAL DECISION SYSTEM</span>
-          <h2 id="th-social-title">泰国不是单平台市场，四个平台共同构成规模入口</h2>
-          <p>主排序使用同口径的月度用户渗透率；广告触达、新闻使用和外部引流只作为旁证。所有策略推论均保留数据边界。</p>
-        </div>
-        <div class="th-social-hero-seal" aria-label="数据核验状态"><small>最新可比受众期</small><b>${escapeHtml(data.audience_period)}</b><em>多源交叉核验</em></div>
+        <h2 id="th-social-title">泰国主流 Social Media 平台份额看板</h2>
       </section>
 
       <section class="th-social-kpis" aria-label="泰国社交媒体市场核心指标">

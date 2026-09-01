@@ -335,7 +335,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260901-thailand-social-dashboard-2"
+APP_VERSION_CODE = "beta-1.03-20260901-thailand-social-dashboard-3"
 APP_RELEASE_DATE = "2026-09-01"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
