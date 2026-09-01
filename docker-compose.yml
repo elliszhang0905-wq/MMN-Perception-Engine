@@ -132,6 +132,11 @@ services:
     volumes:
       - mmn_data:/app/data
       - mmn_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '[r]un_social_evidence_worker.py' >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     networks: [mmn_net]
 
   mmn-scheduler:

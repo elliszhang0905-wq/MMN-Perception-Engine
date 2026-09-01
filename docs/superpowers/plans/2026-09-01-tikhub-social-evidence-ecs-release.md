@@ -27,6 +27,7 @@
 **Files:**
 - Modify: `server.py`
 - Modify: `.env.example`
+- Modify: `docker-compose.yml`
 - Modify: `tests/test_all_surfaces_release_gate.py`
 - Modify: `MMN_CURRENT_STATE.md`
 - Modify: `release.md`
@@ -77,7 +78,7 @@ git diff --cached --check
 git diff --cached --name-only
 ```
 
-Expected: exactly the seven release paths listed in this task; `.env`, database files, raw responses, and local plans from other worktrees are absent.
+Expected: exactly the eight release paths listed in this task; `.env`, database files, raw responses, and local plans from other worktrees are absent.
 
 - [ ] **Step 5: Commit and fast-forward push**
 
