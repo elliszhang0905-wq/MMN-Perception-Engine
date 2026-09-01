@@ -235,6 +235,9 @@ docker tag "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${D
 sync_release_assets() {
   echo "同步随版本发布的数据资产到统一持久化根目录。"
   compose exec -T mmn-app mkdir -p /app/data/modules/product_evaluation /app/data/imports/raw/product_evaluation /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
+  if [[ -f data/thailand_social_market_latest.json ]]; then
+    compose cp data/thailand_social_market_latest.json mmn-app:/app/data/thailand_social_market_latest.json
+  fi
   for eval_fixture in data/eval/mmn_eval_seed_v0.1.jsonl data/eval/mmn_eval_seed_outputs_v0.1.jsonl; do
     if [[ -f "$eval_fixture" ]]; then
       compose cp "$eval_fixture" "mmn-app:/app/$eval_fixture"

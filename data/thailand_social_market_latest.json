@@ -1,0 +1,220 @@
+{
+  "schema_version": "thailand_social_market_v1",
+  "market": {
+    "code": "TH",
+    "name": "泰国",
+    "timezone": "Asia/Bangkok"
+  },
+  "as_of": "2026-09-01",
+  "audience_period": "2025 Q2",
+  "primary_metric": "monthly_usage_penetration",
+  "population": {
+    "internet_users_million": 67.8,
+    "social_user_identities_million": 56.6,
+    "social_penetration_total_population_pct": 79.1
+  },
+  "platforms": [
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "tier": "core",
+      "monthly_usage_pct": 89.1,
+      "ad_reach_internet_pct": 75.9,
+      "corroborated_range_pct": [89.1, 94.0],
+      "confidence": "high",
+      "source_count": 5,
+      "role": "全民覆盖与持续触达",
+      "decision_note": "承担广覆盖、再营销与成熟人群沟通。"
+    },
+    {
+      "id": "line",
+      "name": "LINE",
+      "tier": "core",
+      "monthly_usage_pct": 84.4,
+      "ad_reach_internet_pct": 82.6,
+      "corroborated_range_pct": [82.6, 95.0],
+      "confidence": "high",
+      "source_count": 4,
+      "role": "私域承接与用户运营",
+      "decision_note": "承担咨询、留资、活动提醒和用户关系沉淀。"
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "tier": "core",
+      "monthly_usage_pct": 83.4,
+      "ad_reach_internet_pct": 83.5,
+      "corroborated_range_pct": [76.0, 83.5],
+      "confidence": "high",
+      "source_count": 5,
+      "role": "短视频发现与年轻人增长",
+      "decision_note": "承担新品破圈、创作者扩散与高频内容测试。"
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "tier": "core",
+      "monthly_usage_pct": 81.7,
+      "ad_reach_internet_pct": 69.6,
+      "corroborated_range_pct": [81.7, 93.0],
+      "confidence": "high",
+      "source_count": 4,
+      "role": "长视频解释与搜索承接",
+      "decision_note": "承担深度评测、产品教育和高意向搜索内容。"
+    },
+    {
+      "id": "messenger",
+      "name": "Messenger",
+      "tier": "support",
+      "monthly_usage_pct": 74.4,
+      "ad_reach_internet_pct": 53.8,
+      "corroborated_range_pct": [74.4, 84.7],
+      "confidence": "medium",
+      "source_count": 3,
+      "role": "即时沟通补充",
+      "decision_note": "与主平台协同承接一对一沟通，不单独替代LINE。"
+    },
+    {
+      "id": "instagram",
+      "name": "Instagram",
+      "tier": "support",
+      "monthly_usage_pct": 66.9,
+      "ad_reach_internet_pct": 30.3,
+      "corroborated_range_pct": [66.9, 68.7],
+      "confidence": "high",
+      "source_count": 4,
+      "role": "生活方式与视觉种草",
+      "decision_note": "承担设计、生活方式、女性与年轻人群内容。"
+    },
+    {
+      "id": "x",
+      "name": "X",
+      "tier": "support",
+      "monthly_usage_pct": 45.6,
+      "ad_reach_internet_pct": 19.6,
+      "corroborated_range_pct": null,
+      "confidence": "medium",
+      "source_count": 3,
+      "role": "实时议题与舆情观察",
+      "decision_note": "承担新闻事件、话题监测和高时效沟通。"
+    },
+    {
+      "id": "lemon8",
+      "name": "Lemon8",
+      "tier": "emerging",
+      "monthly_usage_pct": 30.3,
+      "ad_reach_internet_pct": null,
+      "corroborated_range_pct": null,
+      "confidence": "medium_low",
+      "source_count": 1,
+      "role": "年轻生活方式增量",
+      "decision_note": "适合作为内容实验位，暂不承担规模覆盖目标。"
+    },
+    {
+      "id": "pinterest",
+      "name": "Pinterest",
+      "tier": "emerging",
+      "monthly_usage_pct": 24.6,
+      "ad_reach_internet_pct": null,
+      "corroborated_range_pct": null,
+      "confidence": "medium_low",
+      "source_count": 1,
+      "role": "灵感搜索与设计人群",
+      "decision_note": "适合作为设计灵感和长尾搜索内容补充。"
+    },
+    {
+      "id": "whatsapp",
+      "name": "WhatsApp",
+      "tier": "emerging",
+      "monthly_usage_pct": 21.4,
+      "ad_reach_internet_pct": null,
+      "corroborated_range_pct": null,
+      "confidence": "medium_low",
+      "source_count": 1,
+      "role": "国际沟通补充",
+      "decision_note": "保留国际客户服务能力，但泰国本地承接优先LINE。"
+    }
+  ],
+  "decision_layers": [
+    {
+      "key": "reach",
+      "label": "规模覆盖",
+      "platforms": ["Facebook", "YouTube"],
+      "objective": "建立全民认知并承接主动搜索"
+    },
+    {
+      "key": "growth",
+      "label": "内容增长",
+      "platforms": ["TikTok", "Instagram"],
+      "objective": "用短视频和视觉内容扩大年轻人群兴趣"
+    },
+    {
+      "key": "conversion",
+      "label": "关系承接",
+      "platforms": ["LINE", "Messenger"],
+      "objective": "沉淀咨询、留资、活动提醒与复访"
+    },
+    {
+      "key": "listening",
+      "label": "议题监听",
+      "platforms": ["X", "Lemon8"],
+      "objective": "识别实时议题与新兴生活方式信号"
+    }
+  ],
+  "source_classes": [
+    {
+      "id": "cross_market_survey",
+      "label": "跨市场网民月度调查",
+      "period": "2025 Q2",
+      "grain": "泰国16岁以上网民；过去一个月使用过",
+      "use": "主排名与平台渗透率",
+      "url": "https://datareportal.com/reports/digital-2026-thailand"
+    },
+    {
+      "id": "local_consumer_survey",
+      "label": "泰国本地消费者调查",
+      "period": "2024-01",
+      "grain": "全泰超过2,000名受访者",
+      "use": "交叉核验主流平台排序与区间",
+      "url": "https://www.thansettakij.com/technology/technology/604304"
+    },
+    {
+      "id": "platform_public_metrics",
+      "label": "平台公开触达与月活",
+      "period": "2024-06—2025-10",
+      "grain": "广告规划受众或平台公开月活",
+      "use": "核验规模，不等同于统一MAU",
+      "url": "https://www.linecorp.com/th/pr/news/th/2025/0304/"
+    },
+    {
+      "id": "thai_media_survey",
+      "label": "泰国媒体使用调查",
+      "period": "2024-09",
+      "grain": "社媒与视频分类问题",
+      "use": "验证排序方向，不能与月度使用率直接拼接",
+      "url": "https://www.tmrs.or.th/uploads/2795265B-5EF3-442D-9504-F923E6CBD962.pdf"
+    },
+    {
+      "id": "news_usage_survey",
+      "label": "新闻使用专项调查",
+      "period": "2026-06",
+      "grain": "过去一周通过平台获取新闻",
+      "use": "验证内容影响力，不代表整体平台使用率",
+      "url": "https://reutersinstitute.politics.ox.ac.uk/digital-news-report/2026/thailand"
+    },
+    {
+      "id": "web_referral_monitoring",
+      "label": "外部网站引流监测",
+      "period": "2026-08",
+      "grain": "社媒指向第三方网站的页面访问",
+      "use": "只衡量外链引流，不代表用户市场份额",
+      "url": "https://gs.statcounter.com/social-media-stats/all/thailand"
+    }
+  ],
+  "guardrails": [
+    "各平台用户高度重叠，月度使用率不能相加为100%。",
+    "广告可触达率不是月活用户，也不是平台收入或广告预算份额。",
+    "外部网站引流份额只衡量跳转能力，不能代表平台整体用户规模。",
+    "未公开指标保持为空，不用0或其他平台数据填充。"
+  ]
+}

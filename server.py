@@ -300,6 +300,9 @@ PUBLIC_STATIC_FILES = frozenset({
     "sales-warning-cycle-context.js",
     "style.css",
     "t-cycle.js",
+    "thailand-social-dashboard.css",
+    "thailand-social-dashboard.js",
+    "data/thailand_social_market_latest.json",
     "vehicle-decision.css",
     "vehicle-decision.js",
     "xhs-content-ranking-demo.js",
@@ -332,8 +335,8 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260824-p0-security-1"
-APP_RELEASE_DATE = "2026-08-24"
+APP_VERSION_CODE = "beta-1.03-20260901-thailand-social-dashboard-1"
+APP_RELEASE_DATE = "2026-09-01"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
