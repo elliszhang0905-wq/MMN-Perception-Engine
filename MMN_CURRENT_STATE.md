@@ -2,8 +2,9 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.62`
-- 最后核验时间：`2026-09-01`（Asia/Shanghai，泰国 Social Media 核心看板生产闭环）
+- 状态包版本：`v2.63`
+- 最后核验时间：`2026-09-01`（Asia/Shanghai，TikHub 公开社媒证据 ECS 发布候选）
+- 2026-09-01 TikHub 公开社媒证据 ECS 发布合同：现有 V2 QueryPlan、持久化队列、原始响应归档、CanonicalContent、Observation 和 Evidence Mart 代码保持不变；应用发布版本升级为 `beta-1.03-20260901-tikhub-social-evidence-1`。仓库示例配置继续失败关闭，只有生产环境同时显式设置 `MMN_SOCIAL_EVIDENCE_V2_ENABLED=true`、`MMN_SOCIAL_EVIDENCE_WORKER_MODE=external` 和 `COMPOSE_PROFILES=social-evidence-v2`，且密钥非空时，才允许独立 Worker 执行。发布前必须完成源码、环境配置与数据库备份；上线验收最多执行一次、预算上限为一次请求的最小真实抖音查询，不将本地数据库或未提交工作树内容同步到 ECS。生产启用、真实任务结果、费用和数据零漂移证据只能在部署完成后补录，不以本候选状态代替。
 - 2026-09-01 泰国 Social Media 核心看板生产闭环：仅为出海版决策驾驶舱新增泰国平台覆盖看板；主排序使用2025 Q2月度用户渗透率，广告可触达率保持独立口径，用户重叠数据不可相加，缺失值保持“未公开”。国内版隐藏该入口，客户界面不暴露数据供应商或技术供应商名称。数据由版本化只读JSON加载，部署脚本显式同步该文件到应用统一持久化数据根；Nginx只精确放行该JSON，其他`/data`及数据库路径继续404。不迁移、不覆盖生产业务数据库。版本`beta-1.03-20260901-thailand-social-dashboard-3`已将顶部结论式横幅收敛为一句中性看板名称，数据、图表和筛选合同不变。
 - Git应用基线：应用提交 `d2d3a542f6588007a7d75459c9c0126b8a6e3d9b`（`beta-1.03-20260901-thailand-social-dashboard-3`）已同步发布分支、GitHub `main`和同名标签，并由精确归档部署ECS；归档SHA-256为 `f1fc0e4e3af8c3eb0e6a3817c3d28161b482c4dff2a377a1eb77be4e851ae491`。宿主机与正式容器四项本轮核心文件哈希一致。
 - 当前分支：`codex/thailand-social-dashboard-release-20260901`；ECS六个Compose服务运行，应用、任务服务、数据库、缓存和调度器健康，候选容器为0且部署锁清零。原主工作树、本地8765、数据库、备份和其他实验改动未进入发布提交；生产真实密钥未轮换、未写入文档。

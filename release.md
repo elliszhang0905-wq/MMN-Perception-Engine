@@ -1,5 +1,13 @@
 # MMN Perception Engine 发布记录
 
+## 2026-09-01｜beta 1.03 TikHub 公开社媒证据生产启用
+
+- 发布版本：`beta-1.03-20260901-tikhub-social-evidence-1`。本轮不新增第二套采集实现，只启用主线已有的 TikHub 适配层、公开社媒证据 V2 API 与独立外部 Worker；客户界面继续使用中性能力名称，不展示供应商、密钥、提示词或内部错误。
+- Git 范围只包含版本标记、生产 Profile 的显式文档和发布计划；当前主工作区中的泰国社媒实验、月榜、销量数据、SQLite、截图、备份及其他未提交修改全部排除。
+- ECS 通过提交归档发布，不同步本地业务数据。生产 `.env` 只增加 `MMN_SOCIAL_EVIDENCE_V2_ENABLED=true`、`MMN_SOCIAL_EVIDENCE_WORKER_MODE=external`、`COMPOSE_PROFILES=social-evidence-v2`，并保留既有非空 `TIKHUB_API_KEY`。
+- 发布前必须完成源码、环境、Compose 状态和 SQLite 在线备份；归档双端 SHA-256 不一致、数据库 `quick_check` 非 `ok`、容器不健康、公开 5xx、密钥泄露或真实鉴权业务流失败时立即停止并恢复发布前源码与环境。
+- 生产验收只允许一次抖音计费请求，不自动重试。TikHub 响应不提供可核验的实际金额时，MMN 的 `actualCost=0` 不得解释为免费，最终费用以供应商账单为准。
+
 ## 2026-09-01｜beta 1.03 泰国 Social Media 核心看板
 
 - 发布版本：`beta-1.03-20260901-thailand-social-dashboard-3`。本版本只把顶部横幅收敛为一句“泰国主流 Social Media 平台份额看板”，移除结论、方法摘要与核验印章；数据、图表、筛选、静态证据合同及安全边界不变。范围不包含当前其他工作树中的周榜、社媒V2、数据库、备份或实验改动。

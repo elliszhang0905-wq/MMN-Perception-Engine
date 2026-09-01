@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class AllSurfacesReleaseGateTest(unittest.TestCase):
     ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
-    RELEASE_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
+    THAILAND_ASSET_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
+    RELEASE_VERSION = "beta-1.03-20260901-tikhub-social-evidence-1"
     RELEASE_DATE = "2026-09-01"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
@@ -46,8 +47,8 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn(f"app.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"group-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"lead-dashboard.js?v={self.ASSET_VERSION}", index)
-        self.assertIn(f"thailand-social-dashboard.css?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"thailand-social-dashboard.js?v={self.RELEASE_VERSION}", index)
+        self.assertIn(f"thailand-social-dashboard.css?v={self.THAILAND_ASSET_VERSION}", index)
+        self.assertIn(f"thailand-social-dashboard.js?v={self.THAILAND_ASSET_VERSION}", index)
         self.assertIn(f'APP_VERSION_CODE = "{self.RELEASE_VERSION}"', server)
         self.assertIn(f'APP_RELEASE_DATE = "{self.RELEASE_DATE}"', server)
 
