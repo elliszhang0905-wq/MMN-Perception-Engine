@@ -3,11 +3,16 @@
 ## 2026-09-01｜beta 1.03 TikHub 公开社媒证据生产启用
 
 - 发布版本：`beta-1.03-20260901-tikhub-social-evidence-1`。本轮不新增第二套采集实现，只启用主线已有的 TikHub 适配层、公开社媒证据 V2 API 与独立外部 Worker；客户界面继续使用中性能力名称，不展示供应商、密钥、提示词或内部错误。
-- Git 范围只包含版本标记、生产 Profile 的显式文档和发布计划；当前主工作区中的泰国社媒实验、月榜、销量数据、SQLite、截图、备份及其他未提交修改全部排除。
+- Git 范围包含版本标记、生产 Profile 文档、Worker 进程健康检查、状态包和发布记录；当前主工作区中的月榜、销量数据、SQLite、截图、备份及其他未提交修改全部排除。
 - ECS 通过提交归档发布，不同步本地业务数据。生产 `.env` 只增加 `MMN_SOCIAL_EVIDENCE_V2_ENABLED=true`、`MMN_SOCIAL_EVIDENCE_WORKER_MODE=external`、`COMPOSE_PROFILES=social-evidence-v2`，并保留既有非空 `TIKHUB_API_KEY`。
 - 独立 Worker 使用进程型健康检查，避免继承 Web 镜像的 8765 HTTP 健康检查后被误判为不健康。
 - 发布前必须完成源码、环境、Compose 状态和 SQLite 在线备份；归档双端 SHA-256 不一致、数据库 `quick_check` 非 `ok`、容器不健康、公开 5xx、密钥泄露或真实鉴权业务流失败时立即停止并恢复发布前源码与环境。
 - 生产验收只允许一次抖音计费请求，不自动重试。TikHub 响应不提供可核验的实际金额时，MMN 的 `actualCost=0` 不得解释为免费，最终费用以供应商账单为准。
+- 最终源码提交为 `abba8af266f19a738b906fdf87ca52b348679b98`，精确归档双端 SHA-256 为 `a4db650b55febd9a7cf374916d9e887f6b56396f9a6c8e9ebf22dbd621c4e382`。标准 Dockerfile 构建因镜像源低速触发20分钟硬超时且未切流；随后复用自动保留的上一健康镜像依赖层，覆盖精确提交源码，候选健康后热切流并替换正式实例。宿主机与正式容器 `server.py` 哈希一致。
+- ECS 七个服务均运行，应用、任务服务、调度器、数据库、缓存和独立社媒 Worker 健康，Worker 重启次数0。`http://mmnsh.com` 健康、能力、管理员登录、任务与 Mart 响应均直接200、0次重定向；公开响应排除调用方自定义项目ID后无供应商名、Bearer、API Key、Prompt或Traceback。
+- 唯一一次真实抖音任务 `se_job_4e8a3cabf82146eb95a193a7ccd73bb3` 计划与实际请求数均为1，状态`ready`；Mart `se_mart_a2d0521d167b4421944b73e84308f9a1` 含1条内容，平台作品ID、来源URL、发布时间、正文与原生指标均非空。`actualCost=0.0`仅表示响应未回传可核验金额。
+- 发布前后主库84张表、达人库9张表逻辑变化均为0；两库与新增社媒证据库均`quick_check=ok`。社媒库保留7张表、1次原始请求、1个任务、1条规范化内容和1个Mart。近15分钟应用、独立Worker、达人Worker、调度器与代理严重错误/5xx均为0。
+- 发布前回滚目录为 `/opt/mmn-perception-engine/backups/releases/tikhub_social_evidence_20260901_230657_pre`，包含源码、权限600的环境配置、Compose状态、SQLite全量归档、PostgreSQL dump与SHA-256清单。
 
 ## 2026-09-01｜beta 1.03 泰国 Social Media 核心看板
 
