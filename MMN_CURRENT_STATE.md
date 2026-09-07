@@ -2,8 +2,9 @@
 
 ## 状态基线
 
-- 状态包版本：`v2.64`
-- 最后核验时间：`2026-09-01`（Asia/Shanghai，TikHub 公开社媒证据 ECS 生产闭环）
+- 状态包版本：`v2.65`
+- 最后核验时间：`2026-09-08`（Asia/Shanghai，本次仅 S1 独立原型发布；下列其他业务保留原核验日期）
+- 2026-09-08 知识工作区 S1 独立预览发布准备：从远端主线 `8c28cfb` 建立 `codex/mmn-knowledge-workspace-s1-20260908` 干净工作树，只纳入隔离原型、测试与交接记录。原工作树的知识架构实验、业务修改和数据均未纳入。S2 正式 UI 接入、S3 写入审核未开始。计划独立 Nginx 容器绑定服务器 `127.0.0.1:18791`，仅通过 SSH 隧道访问；不修改正式 Nginx、MMN 容器或其持久卷。发布结果以本分支研发档案后续记录为准，目前尚不宣称已推送或部署。
 - 2026-09-01 TikHub 公开社媒证据 ECS 生产闭环：现有 V2 QueryPlan、持久化队列、原始响应归档、CanonicalContent、Observation 和 Evidence Mart 已在生产显式启用；仓库示例仍失败关闭，ECS 设置 `MMN_SOCIAL_EVIDENCE_V2_ENABLED=true`、`MMN_SOCIAL_EVIDENCE_WORKER_MODE=external` 和 `COMPOSE_PROFILES=social-evidence-v2`。应用版本为 `beta-1.03-20260901-tikhub-social-evidence-1`，独立 Worker 使用进程型健康检查。唯一一次真实抖音验收的计划与实际请求数均为1，任务 `se_job_4e8a3cabf82146eb95a193a7ccd73bb3` 为 `ready`，Mart `se_mart_a2d0521d167b4421944b73e84308f9a1` 保留1条内容、来源URL、发布时间、正文和原生指标。供应商未回传可核验费用，`actualCost=0.0` 不代表免费，最终以供应商账单为准。
 - 2026-09-01 泰国 Social Media 核心看板生产闭环：仅为出海版决策驾驶舱新增泰国平台覆盖看板；主排序使用2025 Q2月度用户渗透率，广告可触达率保持独立口径，用户重叠数据不可相加，缺失值保持“未公开”。国内版隐藏该入口，客户界面不暴露数据供应商或技术供应商名称。数据由版本化只读JSON加载，部署脚本显式同步该文件到应用统一持久化数据根；Nginx只精确放行该JSON，其他`/data`及数据库路径继续404。不迁移、不覆盖生产业务数据库。版本`beta-1.03-20260901-thailand-social-dashboard-3`已将顶部结论式横幅收敛为一句中性看板名称，数据、图表和筛选合同不变。
 - Git应用基线：最终源码与 Worker 健康检查提交 `abba8af266f19a738b906fdf87ca52b348679b98` 已同步发布分支与 GitHub `main`，精确归档双端 SHA-256 为 `a4db650b55febd9a7cf374916d9e887f6b56396f9a6c8e9ebf22dbd621c4e382`。宿主机与正式容器 `server.py` SHA-256 同为 `519cd508169e4c6934b0c307fd6812d514926b8c3870927af003fc9e993f3e1d`。

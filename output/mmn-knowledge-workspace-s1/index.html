@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>MMN · RAG资产库 · S1交互原型</title>
+  <link rel="icon" href="mmn-logo.png">
+  <link rel="stylesheet" href="prototype.css">
+  <script defer src="prototype.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到知识工作区</a>
+  <aside class="sidebar" aria-label="MMN全局导航">
+    <img class="logo" src="mmn-logo.png" alt="MMN 多市场营销网络" width="184" height="100">
+    <div class="edition"><button aria-pressed="true" data-shell>国内版</button><button aria-pressed="false" data-shell>出海版</button></div>
+    <button class="management" data-shell>管理层版 <small>打开集团看板</small></button>
+    <nav class="global-nav" aria-label="既有模块">
+      <div class="nav-label">核心工作流</div>
+      <details open><summary>决策驾驶舱</summary><button data-shell>品牌穿透中心</button><button data-shell>社媒趋势中心</button><button data-shell>政策环境分析</button></details>
+      <details open><summary>MMN策略输出</summary><button data-shell>策略输出总览</button><button data-shell>BF工厂</button></details>
+      <button data-shell>内容资产</button>
+      <details open><summary>诊断下钻</summary><button data-shell>声量数据</button><button data-shell>认知诊断</button><button data-shell>竞品格局</button></details>
+      <details open><summary>资产沉淀</summary><details open><summary>达人资产库</summary><button data-shell>博主蒸馏孵化</button></details><button aria-current="page" class="nav-active" data-shell>RAG资产库</button><button data-shell>BF资产库</button><button data-shell>打法知识库</button><button data-shell>人工结论</button></details>
+      <details><summary>系统设置</summary><button data-shell>空间权限</button><button data-shell>项目权重</button><button data-shell>Eval评测</button><button data-shell>版本架构</button></details>
+    </nav>
+    <div class="side-note"><b>国内版运行</b><span>MMN多模态 / 本土化RAG /<br>本土规则优先</span><small>以上为既有导航外壳 · 演示不切换</small></div>
+  </aside>
+  <main>
+    <header class="page-header"><div class="header-title"><button id="open-menu" class="mobile-menu" aria-label="打开现有导航">☰</button><div><p class="eyebrow">MMN PERCEPTION ENGINE · CHINA AUTO</p><h1>RAG资产库</h1></div></div><div class="shell-context"><span>国内销量快讯</span><small>原型不连接实时数据</small></div></header>
+    <div class="demo-banner"><span><i></i><b>S1 交互演示</b> · 全部为虚构样例，不连接正式资产库</span><button id="open-boundary">查看原型边界 ↗</button></div>
+    <details class="preserved-flows"><summary>原有策略对话、知识导入与赋能去向 <span>保持原流程 · 原型折叠示意</span></summary><p>本原型聚焦“知识地图 / 知识阅读”区域。MMN策略对话台、快速策略、深度复核、知识导入与赋能去向在正式接入时保留，不被新阅读层替换。</p><div><button disabled>MMN快速策略 · 未连接</button><button disabled>深度复核策略 · 未连接</button><button disabled>知识导入 · 未连接</button></div></details>
+    <section class="workspace-head" aria-labelledby="workspace-title"><div><p class="eyebrow">知识阅读与核对</p><h2 id="workspace-title">把知识和它的依据，一起看清楚。</h2><p class="subtle">沿用既有 RAG，增加正文、证据、关联与版本的阅读层。</p></div><div class="head-tools"><label for="scope">样例空间</label><select id="scope"><option value="a">演示项目 A · 内容策略</option><option value="b">演示项目 B · 空资产库</option></select></div></section>
+    <section class="metrics" aria-label="样例数据口径"><div><span>样例资产</span><strong id="asset-count">6</strong><small>当前演示空间全部记录</small></div><div><span>筛选命中</span><strong id="match-count">6</strong><small>仅指列表匹配，不等于召回</small></div><div><span>有审核记录的样例</span><strong id="review-count">2</strong><small>虚构记录，不代表真实审核</small></div><div><span>本次实际引用</span><strong class="metric-text">未生成</strong><small>未执行策略生成，不计引用数</small></div></section>
+    <section id="workspace" class="workspace" tabindex="-1" aria-label="知识工作区">
+      <aside class="library" aria-label="知识筛选与列表">
+        <div class="library-tools"><div class="section-label"><h3>知识目录</h3><span id="list-count">6 条样例</span></div><label class="search-box"><span class="sr-only">搜索知识</span><input id="search" type="search" placeholder="搜索标题、正文、关键词" autocomplete="off"><span aria-hidden="true">⌕</span></label><div class="filters"><label><span>品牌 / 模块</span><select id="category"><option value="all">全部品牌与模块</option><option>内容与达人</option><option>汽车技术</option><option>演示品牌</option><option>未分类</option></select></label><label><span>资产类型</span><select id="type"><option value="all">全部类型</option><option>方法论</option><option>知识结论</option><option>原始材料</option><option>案例</option><option>未分类</option></select></label></div><button id="clear-filters" class="text-button">清空筛选</button></div>
+        <div id="knowledge-list" class="knowledge-list"></div>
+        <p class="list-foot">样例仅用于验证阅读与核对流程</p>
+      </aside>
+      <section class="reader" aria-label="知识详情"><div id="detail"></div></section>
+    </section>
+    <footer class="prototype-controls"><div><b>原型验收场景</b><span>这些状态均为本地模拟，不是后端运行结果。</span></div><label>列表状态 <select id="scenario"><option value="normal">正常阅读</option><option value="error">模拟加载失败</option><option value="denied">模拟权限不足</option></select></label></footer>
+    <p class="page-foot">S1 / 交互原型 · 正式页面、知识数据与检索路径均未变更</p>
+  </main>
+  <dialog id="info-dialog" aria-labelledby="dialog-title"><div class="dialog-head"><h2 id="dialog-title"></h2><button id="close-dialog" aria-label="关闭对话框">关闭 ×</button></div><div id="dialog-body"></div></dialog>
+  <div id="toast" role="status" class="toast" hidden></div>
+  <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+</body>
+</html>
