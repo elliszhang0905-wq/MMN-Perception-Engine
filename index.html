@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="lead-dashboard.css?v=beta-1.03-20260811-lead-dashboard-entry-1">
   <link rel="stylesheet" href="group-dashboard-charts.css?v=beta-1.03-20260811-lead-dashboard-entry-1">
   <link rel="stylesheet" href="policy-intelligence.css?v=beta-1.03-20260811-lead-dashboard-entry-1">
+  <link rel="stylesheet" href="knowledge-workspace.css?v=beta-1.03-20260908-knowledge-workspace-s2-1">
 </head>
 <body>
   <section id="cloud-login-screen" class="cloud-login-screen" hidden>
@@ -1056,9 +1057,13 @@
         <div id="rag-results" class="rag-results"></div>
       </article>
       <article class="panel">
-        <div class="panel-title"><div><span>知识地图</span><h2>按品牌与模块下钻RAG材料</h2></div><em>默认不外显全部测试语料</em></div>
-        <div id="strategy-kb-map" class="kb-cluster-map"></div>
-        <div id="strategy-kb-list" class="kb-list"></div>
+        <div class="panel-title"><div><span>知识阅读工作区</span><h2>客户级共享知识阅读</h2></div><em>当前组织 · 当前版本</em></div>
+        <div id="knowledge-workspace" aria-live="polite"></div>
+        <details class="knowledge-workspace-legacy">
+          <summary>查看旧分类浏览</summary>
+          <div id="strategy-kb-map" class="kb-cluster-map"></div>
+          <div id="strategy-kb-list" class="kb-list"></div>
+        </details>
       </article>
       <div class="grid two">
         <article class="panel form-panel">
@@ -1316,7 +1321,8 @@
   <script src="xhs-content-ranking-demo.js?v=xhs-radar-3"></script>
   <script src="t-cycle.js?v=beta-1.02-t-cycle-1"></script>
   <script src="sales-warning-cycle-context.js?v=beta-1.03-20260811-lead-dashboard-entry-1"></script>
-  <script src="app.js?v=beta-1.03-20260811-lead-dashboard-entry-1"></script>
+  <script src="knowledge-workspace.js?v=beta-1.03-20260908-knowledge-workspace-s2-1"></script>
+  <script src="app.js?v=beta-1.03-20260908-knowledge-workspace-s2-1"></script>
   <script src="thailand-social-dashboard.js?v=beta-1.03-20260901-thailand-social-dashboard-3"></script>
   <script src="vehicle-decision.js?v=beta-1.03-20260811-lead-dashboard-entry-1"></script>
   <script src="group-dashboard.js?v=beta-1.03-20260811-lead-dashboard-entry-1"></script>

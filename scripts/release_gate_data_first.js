@@ -45,6 +45,12 @@ async function main() {
   const add = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
   page.on("pageerror", error => runtimeErrors.push(String(error.message || error)));
   page.on("console", message => { if (message.type() === "error") runtimeErrors.push(message.text()); });
+  // This gate exercises legacy social fixtures, never a live V2 collection job.
+  await page.route("**/api/social-evidence/capabilities", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ ok: true, enabled: false, clientEnabled: false, shadowMode: false, workerMode: "off", supportedCenters: [] }),
+  }));
   await page.route("**/api/product-evaluation-catalog", async route => {
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({

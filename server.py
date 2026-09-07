@@ -38,6 +38,13 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 
 from mmn_data import DATA_ROOT
+from knowledge_workspace_reader import (
+    KnowledgeWorkspaceDataError,
+    KnowledgeWorkspaceInputError,
+    KnowledgeWorkspaceUnavailable,
+    read_knowledge_workspace,
+    resolve_auth_scope_readonly,
+)
 
 from consulting_output import (
     CONSULTING_OUTPUT_INSTRUCTION,
@@ -289,6 +296,8 @@ PUBLIC_STATIC_FILES = frozenset({
     "group-dashboard.css",
     "group-dashboard.js",
     "knowhow.css",
+    "knowledge-workspace.css",
+    "knowledge-workspace.js",
     "lead-dashboard.css",
     "lead-dashboard.js",
     "legacy-product-evaluation.js",
@@ -335,8 +344,8 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260901-tikhub-social-evidence-1"
-APP_RELEASE_DATE = "2026-09-01"
+APP_VERSION_CODE = "beta-1.03-20260908-knowledge-workspace-s2-1"
+APP_RELEASE_DATE = "2026-09-08"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -15395,7 +15404,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return {}
         return self._json_body
 
-    def current_auth(self):
+    def current_auth(self, *, read_only=False):
         auth = self.headers.get("Authorization", "")
         payload = None
         self._auth_transport = ""
@@ -15414,8 +15423,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except (CookieError, ValueError):
                 payload = None
         if payload and (not payload.get("org_id") or not payload.get("user_id")):
-            payload.update(resolve_cloud_auth_scope(payload.get("username")))
-        if payload and payload.get("role") == "admin" and payload.get("org_id"):
+            if read_only:
+                account = cloud_accounts().get(str(payload.get("username") or "")) or {}
+                scope = resolve_auth_scope_readonly(
+                    DB_PATH, username=payload.get("username"), account_org=account.get("org", ""),
+                ) if account.get("org") else {}
+                if not scope:
+                    return None
+                payload.update(scope)
+            else:
+                payload.update(resolve_cloud_auth_scope(payload.get("username")))
+        if not read_only and payload and payload.get("role") == "admin" and payload.get("org_id"):
             ensure_legacy_vertical_claim(payload["org_id"])
         return payload
 
@@ -15515,6 +15533,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/social-evidence/capabilities":
             self.send_json({"ok": True, **social_evidence_capabilities()})
+            return
+        if parsed.path == "/api/knowledge-workspace":
+            auth = ({"org_id": "local", "user_id": "local", "role": "admin"}
+                    if not cloud_login_required() else self.current_auth(read_only=True))
+            if not auth:
+                self.send_json({"ok": False, "error": "请先登录 MMN 云端演示系统。"}, 401)
+                return
+            try:
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                if any(key in query for key in ("org_id", "orgId", "project", "projectId", "project_id")):
+                    raise KnowledgeWorkspaceInputError("不支持客户端指定组织或项目范围")
+                for key in ("edition", "q", "type", "brand", "module", "offset", "limit"):
+                    if len(query.get(key, [])) > 1:
+                        raise KnowledgeWorkspaceInputError(f"{key}参数不能重复")
+                payload = read_knowledge_workspace(
+                    DB_PATH,
+                    org_id=auth.get("org_id", ""),
+                    edition=query.get("edition", ["china"])[0],
+                    q=query.get("q", [""])[0],
+                    item_type=query.get("type", [""])[0],
+                    brand=query.get("brand", [""])[0],
+                    module=query.get("module", [""])[0],
+                    offset=query.get("offset", [0])[0],
+                    limit=query.get("limit", [50])[0],
+                )
+                self.send_json(payload)
+            except KnowledgeWorkspaceInputError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, 422)
+            except KnowledgeWorkspaceDataError:
+                self.send_json({"ok": False, "error": "知识记录数据无效，无法安全展示。"}, 500)
+            except KnowledgeWorkspaceUnavailable:
+                self.send_json({"ok": False, "error": "知识库暂不可用。"}, 503)
             return
         if parsed.path == "/api/social-evidence/nsr-context":
             try:

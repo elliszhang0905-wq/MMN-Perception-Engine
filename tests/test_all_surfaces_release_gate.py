@@ -8,12 +8,18 @@ ROOT = Path(__file__).resolve().parents[1]
 class AllSurfacesReleaseGateTest(unittest.TestCase):
     ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
     THAILAND_ASSET_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
-    RELEASE_VERSION = "beta-1.03-20260901-tikhub-social-evidence-1"
-    RELEASE_DATE = "2026-09-01"
+    RELEASE_VERSION = "beta-1.03-20260908-knowledge-workspace-s2-1"
+    RELEASE_DATE = "2026-09-08"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")
         self.assertIn("scripts/release_gate_all_surfaces.js", release_gate)
+
+    def test_legacy_social_browser_fixture_cannot_select_real_v2_collection(self):
+        gate = (ROOT / "scripts" / "release_gate_data_first.js").read_text(encoding="utf-8")
+        self.assertIn('page.route("**/api/social-evidence/capabilities"', gate)
+        self.assertIn("clientEnabled: false", gate)
+        self.assertLess(gate.index('page.route("**/api/social-evidence/capabilities"'), gate.index("await page.goto"))
 
     def test_all_surfaces_gate_covers_navigation_management_views_and_responsive_layout(self):
         source = (ROOT / "scripts" / "release_gate_all_surfaces.js").read_text(encoding="utf-8")
@@ -44,7 +50,9 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn(f"style.css?v={self.ASSET_VERSION}", index)
         self.assertIn(f"group-dashboard.css?v={self.ASSET_VERSION}", index)
         self.assertIn(f"lead-dashboard.css?v={self.ASSET_VERSION}", index)
-        self.assertIn(f"app.js?v={self.ASSET_VERSION}", index)
+        self.assertIn(f"app.js?v={self.RELEASE_VERSION}", index)
+        self.assertIn(f"knowledge-workspace.js?v={self.RELEASE_VERSION}", index)
+        self.assertIn(f"knowledge-workspace.css?v={self.RELEASE_VERSION}", index)
         self.assertIn(f"group-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"lead-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"thailand-social-dashboard.css?v={self.THAILAND_ASSET_VERSION}", index)

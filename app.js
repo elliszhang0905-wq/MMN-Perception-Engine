@@ -303,6 +303,7 @@ function setEdition(next){
  restoreOpportunityContext();
  restoreVerticalAssetsFromServer();
  loadSalesMarquee();
+ syncKnowledgeWorkspaceContext();
  toast(`已切换为${editions[edition].label}，数据域已隔离`);
 }
 function setDomesticMode(next){
@@ -461,7 +462,7 @@ function saveStrategyKb(){
  let localSaved=true;
  try{localStorage.setItem(storageKey("mmnStrategyKnowledgeBase"),JSON.stringify(strategyKb))}
  catch(err){localSaved=false;console.warn("策略知识浏览器缓存保存失败",err)}
- api("/api/asset-library",{method:"POST",body:JSON.stringify({edition:activeEdition(),org_id:session?.org_id||"local",strategyAssets:strategyKb})}).catch(e=>console.warn("资产库持久化失败",e));
+ api("/api/asset-library",{method:"POST",body:JSON.stringify({edition:activeEdition(),org_id:session?.org_id||"local",strategyAssets:strategyKb})}).then(()=>{invalidateKnowledgeWorkspace();syncKnowledgeWorkspaceContext()}).catch(e=>console.warn("资产库持久化失败",e));
  queueWorkspaceSnapshot();
  return localSaved;
 }
@@ -779,6 +780,7 @@ function saveSession(s,persist=!sessionCookieMode){
  else localStorage.removeItem("mmnCommercialSession");
  if(previousScope!==browserStorageScope(activeEdition()).identityKey){loadEditionData({syncServer:false});resetBrowserScopeTransientState();resetOpportunityContextState();render()}
  renderAccount();
+ syncKnowledgeWorkspaceContext();
 }
 function authHeaders(extra={}){
  const headers={"X-MMN-CSRF":"1",...extra};
@@ -789,6 +791,23 @@ async function api(path,options={}){
  const raw=await res.text();
  return parseApiResponse(res,raw);
 }
+let knowledgeWorkspaceView=null;
+function knowledgeWorkspaceContext(){
+ return{active:document.querySelector("#strategykb")?.classList.contains("active")===true,authReady:window.mmnAuthReady===true,orgId:session?.org_id||session?.org||"local",userId:session?.user_id||session?.username||session?.email||session?.name||"local",edition:activeEdition(),project:state?.config?.project||""};
+}
+async function knowledgeWorkspaceFetchJson(path,options={}){
+ const res=await fetch(path,options),raw=await res.text();return parseApiResponse(res,raw);
+}
+function ensureKnowledgeWorkspace(){
+ const root=document.querySelector("#knowledge-workspace");
+ if(!knowledgeWorkspaceView&&root&&window.MmnKnowledgeWorkspace)knowledgeWorkspaceView=window.MmnKnowledgeWorkspace.createKnowledgeWorkspaceView(root,{fetchJson:knowledgeWorkspaceFetchJson,getHeaders:()=>authHeaders(),getContext:knowledgeWorkspaceContext});
+ return knowledgeWorkspaceView;
+}
+function syncKnowledgeWorkspaceContext(){
+ const view=ensureKnowledgeWorkspace();if(!view)return;
+ const context=knowledgeWorkspaceContext();if(context.active&&context.authReady)view.activate();else view.setContext();
+}
+function invalidateKnowledgeWorkspace(){knowledgeWorkspaceView?.invalidate()}
 function parseApiResponse(res,raw){
  let data=null;
  try{data=raw?JSON.parse(raw):{}}catch{
@@ -1761,6 +1780,7 @@ function renderAccount(){
 }
 async function logoutSession(){
  if(!session||!confirm("确认退出当前MMN客户空间？"))return;
+ invalidateKnowledgeWorkspace();
  try{await api("/api/logout",{method:"POST",body:"{}"})}catch(_){}
  localStorage.removeItem("mmnCommercialSession");
  session=null;runtimeBrowserSession=null;
@@ -5172,7 +5192,7 @@ function field(name,label,value,type="text",options=[]){return`<div class="field
 function renderConfig(){
  document.querySelector("#project-form").innerHTML=field("project","项目名称",state.config.project)+field("brand","本品品牌",state.config.brand)+field("model","本品车型",state.config.model,"text",modelOptions())+field("competitor","核心竞品",state.config.competitor)+field("targetIdentity","目标身份",state.config.targetIdentity,"text",Object.keys(identityWeights))+field("budget","营销预算（万元）",state.config.budget,"number");
  document.querySelector("#threshold-form").innerHTML=field("priorityThreshold","行动优先级阈值",state.config.priorityThreshold,"number")+field("riskThreshold","风险预警阈值",state.config.riskThreshold,"number");
- document.querySelectorAll("[data-config]").forEach(el=>{if(el.dataset.config==="model"){el.onchange=()=>selectDashboardVehicleContext(el.value,{source:"project-config"});return}const update=()=>{state.config[el.dataset.config]=el.type==="number"?+el.value:el.value;save()};el.oninput=update;el.onchange=()=>{update();toast("项目参数已保存")}});
+ document.querySelectorAll("[data-config]").forEach(el=>{if(el.dataset.config==="model"){el.onchange=()=>selectDashboardVehicleContext(el.value,{source:"project-config"});return}const update=()=>{state.config[el.dataset.config]=el.type==="number"?+el.value:el.value;save();if(el.dataset.config==="project")syncKnowledgeWorkspaceContext()};el.oninput=update;el.onchange=()=>{update();toast("项目参数已保存")}});
  document.querySelector("#platform-weights").innerHTML=Object.entries(state.platforms).map(([k,v])=>`<div class="weight-item"><b>${k}</b><input type="number" step=".05" value="${v}" data-platform="${k}"></div>`).join("");
  document.querySelectorAll("[data-platform]").forEach(el=>el.onchange=()=>{state.platforms[el.dataset.platform]=+el.value;save();render();toast("平台权重已更新")});
 }
@@ -5190,6 +5210,7 @@ function showPage(id){
   if(group)group.open=true;
  }
  document.querySelector("#page-title").textContent=pageNames[requestedId]||pageNames[id]||"内容资产中心";
+ syncKnowledgeWorkspaceContext();
  if(id==="creatorassets")loadCreatorAssets();
  if(id==="socialtrends"&&!socialTrendState.result&&!socialTrendState.mart){const input=document.querySelector("#social-trend-keyword");if(input&&!input.value)input.value=state.config.model||"";if(!socialTrendState.competitors.length)socialTrendState.competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);socialTrendState.competitors=sanitizeSocialCompetitors(input?.value||state.config.model,socialTrendState.competitors);renderSocialCompetitorPicker();loadLatestSocialTrendSnapshot()}
  if(id==="brandpenetration")loadBrandPenetrationSnapshot();
@@ -5675,8 +5696,8 @@ document.querySelector("#clear-video-data").onclick=()=>{if(confirm("确认清�
 document.querySelector("#csv-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await importDataFile(file,{merge:true})}catch(err){toast(`CSV导入失败：${err.message}`)}finally{e.target.value=""}};
 document.querySelector("#learning-form").onsubmit=async e=>{e.preventDefault();const f=e.target,item={edition:activeEdition(),model:f.elements.model.value||state.config.model,label:f.elements.label.value,conclusion:f.elements.conclusion.value.trim(),recommendation:f.elements.recommendation.value.trim(),evidence:f.elements.evidence.value.trim(),platform:f.elements.platform.value.trim(),kpi:f.elements.kpi.value.trim(),stage:f.elements.stage.value,savedAt:new Date().toISOString()};if(!item.conclusion&&!item.recommendation){toast("请先填写结论或建议");return}try{if(session){const data=await api("/api/learnings",{method:"POST",body:JSON.stringify({...item,org_id:session.org_id,user_id:session.user_id})});serverLearnings.unshift({...data.item,savedAt:data.item.saved_at});}else{const items=learnings();items.push(item);saveLearnings(items)}f.elements.conclusion.value="";f.elements.recommendation.value="";f.elements.evidence.value="";f.elements.platform.value="";f.elements.kpi.value="";render();toast(session?"已保存到当前版本企业知识库":"已保存到当前版本本机学习库")}catch(err){toast(`保存失败：${err.message}`)}};
 document.querySelector("#clear-learning").onclick=async()=>{if(confirm(session?"确认清空当前企业空间、当前版本的学习记录？":"确认清空本机当前版本学习记录？")){try{if(session){await api(`/api/learnings?org_id=${encodeURIComponent(session.org_id)}&edition=${encodeURIComponent(activeEdition())}`,{method:"DELETE"});serverLearnings=[]}else saveLearnings([]);render();toast("当前版本学习记录已清空")}catch(err){toast(`清空失败：${err.message}`)}}};
-document.querySelector("#strategy-kb-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入RAG材料…");try{const res=await fetch(`/api/import-rag-file?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");mergeStrategyKnowledge(json.dataset.items||[]);render();showPage("strategykb");toast(`已导入 ${json.dataset.count} 条RAG知识`)}catch(err){toast(`RAG材料导入失败：${err.message}`)}finally{e.target.value=""}};
-document.querySelector("#import-rag-seed").onclick=async()=>{toast("正在导入MMN训练包v1…");try{const data=await api("/api/import-rag-seed",{method:"POST",body:"{}"});mergeStrategyKnowledge(data.dataset.items||[]);render();showPage("strategykb");document.querySelector("#rag-query").value="智己LS8 最大传播问题 下一阶段怎么打";renderRagResults();toast(`MMN训练包已导入 ${data.dataset.count} 条知识`)}catch(err){toast(`训练包导入失败：${err.message}`)}};
+document.querySelector("#strategy-kb-file").onchange=async e=>{const file=e.target.files[0];if(!file)return;toast("正在导入RAG材料…");try{const res=await fetch(`/api/import-rag-file?filename=${encodeURIComponent(file.name)}`,{method:"POST",headers:authHeaders(),body:await file.arrayBuffer()});const json=await res.json();if(!json.ok)throw new Error(json.error||"导入失败");invalidateKnowledgeWorkspace();mergeStrategyKnowledge(json.dataset.items||[]);render();showPage("strategykb");toast(`已导入 ${json.dataset.count} 条RAG知识`)}catch(err){toast(`RAG材料导入失败：${err.message}`)}finally{e.target.value=""}};
+document.querySelector("#import-rag-seed").onclick=async()=>{toast("正在导入MMN训练包v1…");try{const data=await api("/api/import-rag-seed",{method:"POST",body:"{}"});invalidateKnowledgeWorkspace();mergeStrategyKnowledge(data.dataset.items||[]);render();showPage("strategykb");document.querySelector("#rag-query").value="智己LS8 最大传播问题 下一阶段怎么打";renderRagResults();toast(`MMN训练包已导入 ${data.dataset.count} 条知识`)}catch(err){toast(`训练包导入失败：${err.message}`)}};
 document.querySelector("#import-strategy-kb").onclick=()=>{const input=document.querySelector("#strategy-kb-input"),text=input.value.trim();if(!text){toast("请先粘贴策略对话，或上传RAG材料");return}const items=summarizeKnowledgeText(text);if(!items.length){toast("暂未提取到可用策略知识，请补充更完整的对话内容");return}mergeStrategyKnowledge(items);input.value="";render();showPage("strategykb");toast(`已归纳 ${items.length} 条策略知识`)};
 document.querySelector("#clear-strategy-kb").onclick=()=>{if(confirm("确认清空策略知识库？")){strategyKb=[];saveStrategyKb();renderStrategyKb();render();toast("策略知识库已清空")}};
 document.querySelector("#run-rag-search").onclick=()=>{ragResultsExpanded=false;runMmnSmartStrategy("fast")};
@@ -5727,6 +5748,7 @@ function startAppDataLoads(){
 function signalAppAuthReady(){
  window.mmnAuthReady=true;
  window.dispatchEvent(new CustomEvent("mmn:auth-ready"));
+ syncKnowledgeWorkspaceContext();
 }
 initCloudLoginGate().then(ok=>{
  if(!ok)return;

@@ -1,0 +1,26 @@
+.knowledge-workspace{display:grid;gap:12px}
+.knowledge-workspace-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) repeat(3,minmax(120px,180px)) auto;gap:8px;align-items:center}
+.knowledge-workspace-toolbar input,.knowledge-workspace-toolbar select{width:100%;min-width:0;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--text);padding:0 11px;font:inherit}
+.knowledge-workspace-toolbar :focus-visible,.knowledge-workspace button:focus-visible,.knowledge-workspace a:focus-visible{outline:3px solid color-mix(in srgb,var(--blue) 35%,transparent);outline-offset:2px}
+.knowledge-workspace-status{min-height:24px;color:var(--muted);font-size:12px;display:flex;gap:6px;align-items:center}
+.knowledge-workspace-status button{padding:4px 8px}
+.knowledge-workspace-grid{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(320px,1.35fr) minmax(210px,.72fr);min-height:480px;border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface)}
+.knowledge-workspace-list,.knowledge-workspace-body,.knowledge-workspace-evidence{min-width:0;max-height:620px;overflow:auto;padding:14px}
+.knowledge-workspace-list,.knowledge-workspace-body{border-right:1px solid var(--hairline)}
+.knowledge-workspace-item{display:grid;width:100%;gap:5px;padding:11px 10px;border:0;border-bottom:1px solid var(--hairline);background:transparent;color:var(--text);text-align:left;cursor:pointer}
+.knowledge-workspace-item:hover,.knowledge-workspace-item.active{background:color-mix(in srgb,var(--blue) 8%,var(--surface))}
+.knowledge-workspace-item.active{box-shadow:inset 3px 0 var(--blue)}
+.knowledge-workspace-item span,.knowledge-workspace-kicker{color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
+.knowledge-workspace-item b{font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.knowledge-workspace-body h3,.knowledge-workspace-evidence h3{margin:7px 0 14px;color:var(--ink);font-size:18px;line-height:1.4;overflow-wrap:anywhere}
+.knowledge-workspace-copy{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.75;color:var(--text)}
+.knowledge-workspace-evidence dl{display:grid;grid-template-columns:76px 1fr;margin:0;gap:0}
+.knowledge-workspace-evidence dt,.knowledge-workspace-evidence dd{margin:0;padding:9px 0;border-bottom:1px solid var(--hairline);font-size:12px;overflow-wrap:anywhere}
+.knowledge-workspace-evidence dt{color:var(--muted)}
+.knowledge-workspace-source-link{display:inline-block;margin-top:14px;color:var(--blue);font-weight:800;font-size:12px}
+.knowledge-workspace-pager{display:flex;justify-content:space-between;gap:8px;padding-top:12px}
+.knowledge-workspace-back,.knowledge-workspace-evidence-open{display:none}
+.knowledge-workspace-legacy{margin-top:12px;border-top:1px solid var(--hairline);padding-top:10px}
+.knowledge-workspace-legacy summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:800}
+@media(max-width:900px){.knowledge-workspace-toolbar{grid-template-columns:1fr 1fr}.knowledge-workspace-toolbar input{grid-column:1/-1}.knowledge-workspace-toolbar button{justify-self:start}.knowledge-workspace-grid{grid-template-columns:minmax(190px,.8fr) 1.2fr}.knowledge-workspace-evidence{grid-column:1/-1;border-top:1px solid var(--hairline)}}
+@media(max-width:520px){.knowledge-workspace-toolbar{grid-template-columns:1fr}.knowledge-workspace-toolbar input{grid-column:auto}.knowledge-workspace-grid{display:block;min-height:420px}.knowledge-workspace-list,.knowledge-workspace-body,.knowledge-workspace-evidence{display:none;height:min(64vh,620px);min-height:420px;max-height:620px;overflow:auto;border:0}.knowledge-workspace[data-mobile-pane="list"] .knowledge-workspace-list,.knowledge-workspace[data-mobile-pane="body"] .knowledge-workspace-body,.knowledge-workspace[data-mobile-pane="evidence"] .knowledge-workspace-evidence{display:block}.knowledge-workspace-back,.knowledge-workspace-evidence-open{display:inline-flex;margin-bottom:12px}.knowledge-workspace-evidence-open{margin-top:18px}.knowledge-workspace-legacy{display:none}}
