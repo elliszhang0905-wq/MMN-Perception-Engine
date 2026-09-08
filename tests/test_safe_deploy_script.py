@@ -43,9 +43,12 @@ class SafeDeployScriptTest(unittest.TestCase):
         self.assertIn('CANDIDATE_CONTAINER_NAME="mmn-app-candidate"', self.script)
         candidate_route = self.script.index('route_web_to "$CANDIDATE_CONTAINER_NAME"')
         formal_replace = self.script.index(
-            "compose up -d --no-build --no-deps --force-recreate "
-            "mmn-app mmn-creator-worker mmn-scheduler",
+            "if ! recreate_release_services; then",
             candidate_route,
+        )
+        self.assertIn(
+            "compose up -d --no-build --no-deps --force-recreate "
+            "mmn-app mmn-creator-worker mmn-scheduler", self.script,
         )
         route_back = self.script.index("route_web_to mmn-app", formal_replace)
         self.assertLess(candidate_route, formal_replace)

@@ -1,0 +1,94 @@
+[
+  {
+    "caseId": "synthetic-action-direction-only-disagreement",
+    "sourceKind": "synthetic",
+    "packet": {
+      "ownBrand": "合成甲品牌",
+      "competitors": [],
+      "brands": ["合成甲品牌"],
+      "dateWindow": {"start": "2099-01-01", "end": "2099-01-07"},
+      "platforms": ["synthetic-platform"],
+      "evidence": [
+        {"id": "syn-own-1", "brand": "合成甲品牌", "platform": "synthetic-platform", "text": "封闭体验日仅记录到一条座舱演示内容", "sentiment": "neutral", "heat": 1, "sourceUrl": "https://example.invalid/synthetic/syn-own-1"}
+      ],
+      "brandEvidenceIds": {"合成甲品牌": ["syn-own-1"]},
+      "boundary": "纯合成复现证据，不代表任何真实品牌、平台或市场事实。",
+      "status": "ready",
+      "fingerprint": "synthetic-action-direction-only-v1"
+    },
+    "reviews": {
+      "review_1": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "monitor", "conclusion": "仅观察到一条座舱演示内容", "communicationTheme": "座舱演示", "representativeAction": "记录封闭体验日内容", "opportunity": "继续观察同类内容", "risk": "单条样本不能外推", "recommendedAction": "补充公开样本后判断", "leadingIndicator": "新增同类内容数量", "resultIndicator": "有效证据覆盖数量", "stopCondition": "仍无新增有效证据", "uncertainty": "当前仅有一条合成证据", "evidenceIds": ["syn-own-1"], "confidence": 0.8}
+        ],
+        "pairwiseConclusions": []
+      },
+      "review_2": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "monitor", "conclusion": "仅观察到一条座舱演示内容", "communicationTheme": "座舱演示", "representativeAction": "记录封闭体验日内容", "opportunity": "继续观察同类内容", "risk": "单条样本不能外推", "recommendedAction": "补充公开样本后判断", "leadingIndicator": "新增同类内容数量", "resultIndicator": "有效证据覆盖数量", "stopCondition": "仍无新增有效证据", "uncertainty": "当前仅有一条合成证据", "evidenceIds": ["syn-own-1"], "confidence": 0.8}
+        ],
+        "pairwiseConclusions": []
+      },
+      "review_3": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "amplify", "conclusion": "仅观察到一条座舱演示内容", "communicationTheme": "座舱演示", "representativeAction": "记录封闭体验日内容", "opportunity": "继续观察同类内容", "risk": "单条样本不能外推", "recommendedAction": "补充公开样本后判断", "leadingIndicator": "新增同类内容数量", "resultIndicator": "有效证据覆盖数量", "stopCondition": "仍无新增有效证据", "uncertainty": "当前仅有一条合成证据", "evidenceIds": ["syn-own-1"], "confidence": 0.8}
+        ],
+        "pairwiseConclusions": []
+      }
+    },
+    "expected": {
+      "schemaVersion": "brand-penetration-analysis-v3",
+      "validationStatus": "manual_required",
+      "claims": [
+        {"claimId": "brand:合成甲品牌", "status": "manual_required", "reasonContains": "actionDirection", "publishedText": false}
+      ],
+      "goldHumanLabel": {"status": "unavailable", "reason": "没有经授权的人类标注者，不能把合成期望冒充 Gold 标签。"}
+    }
+  },
+  {
+    "caseId": "synthetic-median-confidence-ungrounded-text",
+    "sourceKind": "synthetic",
+    "packet": {
+      "ownBrand": "合成甲品牌",
+      "competitors": [],
+      "brands": ["合成甲品牌"],
+      "dateWindow": {"start": "2099-01-01", "end": "2099-01-07"},
+      "platforms": ["synthetic-platform"],
+      "evidence": [
+        {"id": "syn-own-1", "brand": "合成甲品牌", "platform": "synthetic-platform", "text": "封闭体验日仅记录到一条座舱演示内容", "sentiment": "neutral", "heat": 1, "sourceUrl": "https://example.invalid/synthetic/syn-own-1"}
+      ],
+      "brandEvidenceIds": {"合成甲品牌": ["syn-own-1"]},
+      "boundary": "纯合成复现证据，不代表任何真实品牌、平台或市场事实。",
+      "status": "ready",
+      "fingerprint": "synthetic-median-confidence-v1"
+    },
+    "reviews": {
+      "review_1": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "monitor", "conclusion": "仅观察到一条座舱演示内容", "communicationTheme": "座舱演示", "representativeAction": "记录封闭体验日内容", "opportunity": "继续观察同类内容", "risk": "单条样本不能外推", "recommendedAction": "补充公开样本后判断", "leadingIndicator": "新增同类内容数量", "resultIndicator": "有效证据覆盖数量", "stopCondition": "仍无新增有效证据", "uncertainty": "当前仅有一条合成证据", "evidenceIds": ["syn-own-1"], "confidence": 0.7}
+        ],
+        "pairwiseConclusions": []
+      },
+      "review_2": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "monitor", "conclusion": "该品牌已经覆盖全国全部用户需求", "communicationTheme": "全国用户需求", "representativeAction": "覆盖全部用户需求", "opportunity": "主导全国市场", "risk": "不存在传播风险", "recommendedAction": "立即全国扩大传播", "leadingIndicator": "全国用户一致认可", "resultIndicator": "全国市场全面领先", "stopCondition": "全国领先地位消失", "uncertainty": "没有任何不确定性", "evidenceIds": ["syn-own-1"], "confidence": 0.8}
+        ],
+        "pairwiseConclusions": []
+      },
+      "review_3": {
+        "brandConclusions": [
+          {"brand": "合成甲品牌", "status": "ready", "judgement": "stable", "primaryIntent": "technology", "actionDirection": "monitor", "conclusion": "单条内容不足以判断传播趋势", "communicationTheme": "座舱演示", "representativeAction": "记录封闭体验日内容", "opportunity": "等待更多有效证据", "risk": "证据覆盖范围有限", "recommendedAction": "保持观察暂不外推", "leadingIndicator": "新增有效内容数量", "resultIndicator": "多来源证据覆盖数", "stopCondition": "观察期结束仍无新增", "uncertainty": "无法推断更广泛表现", "evidenceIds": ["syn-own-1"], "confidence": 0.9}
+        ],
+        "pairwiseConclusions": []
+      }
+    },
+    "expected": {
+      "schemaVersion": "brand-penetration-analysis-v3",
+      "validationStatus": "aligned",
+      "claims": [
+        {"claimId": "brand:合成甲品牌", "status": "aligned", "selectedConclusion": "该品牌已经覆盖全国全部用户需求", "groundingStatus": "unsupported_by_packet"}
+      ],
+      "goldHumanLabel": {"status": "unavailable", "reason": "没有经授权的人类标注者，不能把合成期望冒充 Gold 标签。"}
+    }
+  }
+]

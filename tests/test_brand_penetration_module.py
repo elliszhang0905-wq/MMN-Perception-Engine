@@ -66,8 +66,12 @@ class BrandPenetrationModuleTest(unittest.TestCase):
         app = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("mmn-brand-penetration-project-request',config:projectConfig", demo)
         self.assertIn("runBrandPenetrationProject", app)
-        self.assertIn('if(event.data?.type==="mmn-brand-penetration-project-save")loadBrandPenetrationSnapshot();else runBrandPenetrationProject(config)', app)
-        self.assertIn('event.source!==frame?.contentWindow', app)
+        self.assertIn('if(message.type==="mmn-brand-penetration-project-save")loadBrandPenetrationSnapshot();else runBrandPenetrationProject(config)', app)
+        # The shared dispatcher now authenticates every iframe message before
+        # handling either existing project action. Behavioral source/origin
+        # rejection tests live in test_brand_review_ui.js.
+        self.assertIn('if(!isBrandReviewFrameMessage(event))return;', app)
+        self.assertIn('function isBrandReviewFrameMessage(event)', app)
         self.assertIn('Array.isArray(config)', app)
 
     def test_collection_progress_is_visible_and_uses_async_job_polling(self):

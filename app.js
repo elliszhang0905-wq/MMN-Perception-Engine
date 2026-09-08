@@ -291,6 +291,7 @@ function save(){localStorage.setItem(storageKey("mmnEngineState"),JSON.stringify
 function loadEdition(){try{return localStorage.getItem("mmnEngineEdition")==="global"?"global":"china"}catch{return"china"}}
 function loadEditionData({syncServer=true}={}){state=load();reconcileProductEvaluationBinding();videoState=loadVideoState();creatorState=loadCreatorState();verticalState=loadVerticalState();strategyKb=loadStrategyKb();modelJudgments=loadModelJudgments();modelIdentities=loadModelIdentities();founderState=loadFounderState();serverLearnings=[];ragResultsExpanded=false;selectedKnowledgeCluster="";if(syncServer){loadServerLearnings();loadWorkspace()}}
 function setEdition(next){
+ invalidateBrandReview();brandPenetrationRunToken++;brandPenetrationLoadToken++;
  edition=next==="global"?"global":"china";
  managementDashboardVisible=false;
  localStorage.setItem("mmnEngineEdition",edition);
@@ -789,7 +790,7 @@ function authHeaders(extra={}){
 async function api(path,options={}){
  const res=await fetch(path,{credentials:"same-origin",...options,headers:authHeaders({"Content-Type":"application/json",...(options.headers||{})})});
  const raw=await res.text();
- return parseApiResponse(res,raw);
+ try{return parseApiResponse(res,raw)}catch(error){error.status=res.status;throw error}
 }
 let knowledgeWorkspaceView=null;
 function knowledgeWorkspaceContext(){
@@ -5197,6 +5198,7 @@ function renderConfig(){
  document.querySelectorAll("[data-platform]").forEach(el=>el.onchange=()=>{state.platforms[el.dataset.platform]=+el.value;save();render();toast("平台权重已更新")});
 }
 function showPage(id){
+ if(id!=="brandpenetration"){invalidateBrandReview();brandPenetrationLoadToken++;brandPenetrationRunToken++}
  if(hiddenPages.has(id))id="dashboard";
  const requestedId=id;
  if(id==="founder"){contentAssetView="founderDistill";id="videos"}
@@ -5257,10 +5259,62 @@ function brandPenetrationResultMatchesProject(result,config){
  return expected.length===actual.length&&expected.every((model,index)=>model===actual[index]);
 }
 let brandPenetrationRunToken=0,brandPenetrationLoadToken=0,brandPenetrationLoadedProjectFingerprint="";
+// Brand review authenticated bridge: the sandbox is intentionally opaque.
+let brandReviewGeneration=0,brandReviewState=null,brandReviewJob=null;
+function isBrandReviewFrameMessage(event){const frame=document.querySelector('#brand-penetration-frame');return Boolean(frame?.contentWindow&&event.source===frame.contentWindow&&event.origin==='null')}
+function postBrandReview(message){document.querySelector('#brand-penetration-frame')?.contentWindow?.postMessage(message,'*')}
+function invalidateBrandReview(){brandReviewGeneration++;brandReviewState=null;postBrandReview({type:'mmn-brand-review-invalidated'})}
+async function cancelBrandReview(message){
+ const job=brandReviewJob;
+ if(!job||job.cancelling||message.cancellationToken!==job.token||job.runToken!==brandPenetrationRunToken||job.edition!==activeEdition()||job.fingerprint!==brandPenetrationProjectFingerprint(readBrandPenetrationProject()))return;
+ job.cancelling=true;
+ try{await api(`/api/brand-reviews/jobs/${encodeURIComponent(job.jobId)}/cancel`,{method:'POST',body:'{}'});if(brandReviewJob!==job)return;postBrandReview({type:'mmn-brand-review-cancel-status',message:'正在取消；已经发出的请求可能仍会结束，但其迟到结果不会作为本轮结果保存。'})}
+ catch(error){if(brandReviewJob!==job)return;job.cancelling=false;postBrandReview({type:'mmn-brand-review-cancel-status',message:Number(error.status)===409?'结果已保存，无法取消，请重新读取。':Number(error.status)===403?'当前账号没有取消权限。':'取消未成功，请稍后重试。'})}
+}
+function currentBrandReview(state){return Boolean(state&&state===brandReviewState&&state.generation===brandReviewGeneration&&state.edition===activeEdition()&&state.fingerprint===brandPenetrationProjectFingerprint(readBrandPenetrationProject()))}
+function matchingBrandReview(review,scope){return Boolean(review&&review.reviewId&&Number.isInteger(review.version)&&review.version>0&&review.projectId===scope.projectId&&review.snapshotId===scope.snapshotId&&review.edition===scope.edition&&review.decision?.schemaVersion==='brand-penetration-analysis-v4')}
+async function attachBrandReview(result,config){
+ const generation=brandReviewGeneration,edition=activeEdition(),fingerprint=brandPenetrationProjectFingerprint(config);
+ if(!result?.snapshot?.id)return;
+ const query=new URLSearchParams({keyword:brandPenetrationSnapshotKeyword(config),edition,centerType:'brand_penetration',timeRange:`${config.range||30}d`});(config.competitors||[]).forEach(value=>query.append('competitor',value));
+ let data;try{data=await api(`/api/brand-reviews/latest?${query}`)}catch{return}
+ if(generation!==brandReviewGeneration||edition!==activeEdition()||fingerprint!==brandPenetrationProjectFingerprint(readBrandPenetrationProject()))return;
+ if(data.mode!=='enabled'||data.snapshotId!==result.snapshot.id||data.edition!==edition||!matchingBrandReview(data.review,data)){
+  if(data.mode==='enabled'&&data.cacheStatus==='stale')result.brandDecision=null;
+  return;
+ }
+ const review=data.review,contextToken=crypto.randomUUID();
+ brandReviewState={generation,edition,fingerprint,contextToken,review,result,saving:false,writable:true};
+ result.brandDecision=review.decision;
+ postBrandReview({type:'mmn-brand-review-context',contextToken,reviewId:review.reviewId,version:review.version,snapshotId:review.snapshotId,projectId:review.projectId,edition});
+}
+async function submitBrandReview(message){
+ const state=brandReviewState;
+ if(!currentBrandReview(state)||state.saving||!state.writable||message.contextToken!==state.contextToken||message.expectedVersion!==state.review.version)return;
+ const {claimId,action,reason,edit,requestId}=message;
+ if(typeof requestId!=='string'||!requestId||requestId.length>100||typeof claimId!=='string'||claimId.length>200||!['accept','modify','reject'].includes(action)||typeof reason!=='string'||!reason.trim()||reason.length>1000||action==='modify'&&(typeof edit!=='string'||!edit.trim()||edit.length>1200))return;
+ const claims=[...(state.review.decision.brandConclusions||[]),...(state.review.decision.pairwiseConclusions||[])].flatMap(row=>['facts','insights','actionOptions','disputes','unknowns'].flatMap(layer=>row[layer]||[]));
+ if(!claims.some(claim=>claim.claimId===claimId))return;
+ state.saving=true;
+ const body={reviewId:state.review.reviewId,expectedVersion:state.review.version,idempotencyKey:requestId,claimId,action,reason:reason.trim(),...(action==='modify'?{edit:edit.trim()}:{})};
+ try{
+  const data=await api('/api/brand-reviews/decisions',{method:'POST',body:JSON.stringify(body)});
+  if(!currentBrandReview(state))return;
+  if(!matchingBrandReview(data.review,state.review)||data.review.version<=state.review.version)throw new Error('Invalid review response');
+  state.review=data.review;state.result.brandDecision=data.review.decision;
+  postBrandReview({type:'mmn-brand-review-result',contextToken:state.contextToken,requestId,ok:true,review:data.review});
+ }catch(error){
+  if(!currentBrandReview(state))return;
+  const status=Number(error.status)||0;
+  if(status===403||status===409)state.writable=false;
+  postBrandReview({type:'mmn-brand-review-result',contextToken:state.contextToken,requestId,ok:false,status,message:status===403?'当前账号没有保存权限。':status===409?'结果已有更新，请重新读取后再处理。':'保存未成功，请稍后重试。'});
+ }finally{if(currentBrandReview(state))state.saving=false}
+}
 async function loadBrandPenetrationSnapshot(){
  const frame=document.querySelector("#brand-penetration-frame"),status=document.querySelector("#brand-penetration-snapshot-state"),meta=document.querySelector("#brand-penetration-snapshot-meta");
  if(!frame)return;
- const loadToken=++brandPenetrationLoadToken;
+ invalidateBrandReview();
+ const loadToken=++brandPenetrationLoadToken,edition=activeEdition();
  try{
   const config=readBrandPenetrationProject();
   renderBrandPenetrationProjectContext(config);
@@ -5281,6 +5335,7 @@ async function loadBrandPenetrationSnapshot(){
   brandPenetrationLoadedProjectFingerprint=brandPenetrationProjectFingerprint(config);
   if(status)status.textContent="真实数据库快照";
   if(meta)meta.textContent=`MMN 三平台 · ${matchingCount}条品牌匹配内容 · ${String(result.snapshot?.createdAt||"").slice(0,10)}`;
+  await attachBrandReview(result,config);if(loadToken!==brandPenetrationLoadToken||edition!==activeEdition())return;
   frame.contentWindow?.postMessage({type:"mmn-brand-penetration-snapshot",result},"*");
  }catch(error){if(loadToken!==brandPenetrationLoadToken)return;brandPenetrationLoadedProjectFingerprint="";if(status)status.textContent="快照读取失败";if(meta)meta.textContent=error.message||"请重新采集";frame.contentWindow?.postMessage({type:"mmn-brand-penetration-unavailable",message:error.message||"真实快照不可用"},"*")}
 }
@@ -5288,11 +5343,12 @@ function updateBrandPenetrationProgress(job){
  const frame=document.querySelector("#brand-penetration-frame"),status=document.querySelector("#brand-penetration-snapshot-state"),meta=document.querySelector("#brand-penetration-snapshot-meta"),progress=Math.max(0,Math.min(100,Number(job?.progress)||0));
  if(status)status.textContent=["completed","ready"].includes(job?.status)?"分析完成":["failed","degraded","manual_required"].includes(job?.status)?"分析未完成":`正在分析 ${progress}%`;
  if(meta)meta.textContent=job?.message||"正在准备数据源";
- frame?.contentWindow?.postMessage({type:"mmn-brand-penetration-progress",progress,status:job?.status||"running",stage:job?.stage||"prepare",message:job?.message||"正在准备数据源"},"*");
+ frame?.contentWindow?.postMessage({type:"mmn-brand-penetration-progress",progress,status:job?.status||"running",stage:job?.stage||"prepare",message:job?.message||"正在准备数据源",canCancel:Boolean(job?.canCancel&&brandReviewJob&&!['completed','failed','cancelled','cancelling'].includes(job.status)),cancellationToken:brandReviewJob?.token},"*");
 }
 async function runBrandPenetrationProject(config){
  const frame=document.querySelector("#brand-penetration-frame"),status=document.querySelector("#brand-penetration-snapshot-state"),meta=document.querySelector("#brand-penetration-snapshot-meta");
  config=normalizeBrandPenetrationProject(config);
+ invalidateBrandReview();
  brandPenetrationLoadToken++;
  const runToken=++brandPenetrationRunToken,deadline=Date.now()+15*60*1000;
  const isOfficial=brandPenetrationSnapshotKeyword(config)==="上汽奥迪品牌传播穿透",reuseExisting=brandPenetrationLoadedProjectFingerprint===brandPenetrationProjectFingerprint(config);
@@ -5310,9 +5366,11 @@ async function runBrandPenetrationProject(config){
   }
   const started=await api("/api/social-trends/jobs",{method:"POST",body:JSON.stringify({keyword:config.ownBrand,competitors:(config.competitors||[]).slice(0,5),platforms:["douyin","xiaohongshu","weibo"],timeRange:`${config.range||30}d`,edition:activeEdition(),centerType:"brand_penetration",analysisOnly:reuseExisting,snapshotKeyword:reuseExisting?(isOfficial?"上汽奥迪品牌传播穿透":config.ownBrand):""})});
   let job=started.job;
+  if(runToken!==brandPenetrationRunToken)return;
   if(!job?.jobId)throw new Error("采集任务未成功创建");
+  brandReviewJob=job.canCancel?{jobId:job.jobId,runToken,edition:activeEdition(),fingerprint:brandPenetrationProjectFingerprint(config),token:crypto.randomUUID(),cancelling:false}:null;
   updateBrandPenetrationProgress(job);
-  while(!["completed","failed"].includes(job.status)){
+  while(!["completed","failed","cancelled"].includes(job.status)){
    if(Date.now()>=deadline)throw new Error("采集分析超过15分钟，请检查数据源后重试");
    await new Promise(resolve=>setTimeout(resolve,700));
    job=(await api(`/api/social-trends/jobs/${encodeURIComponent(job.jobId)}`)).job;
@@ -5321,6 +5379,8 @@ async function runBrandPenetrationProject(config){
    updateBrandPenetrationProgress(job);
   }
   if(runToken!==brandPenetrationRunToken)return;
+  brandReviewJob=null;
+  if(job.status==="cancelled"){if(status)status.textContent="分析已取消";if(meta)meta.textContent="本轮未保存新复核结果，可重新读取已有快照。";postBrandReview({type:'mmn-brand-penetration-unavailable',status:'cancelled',message:'分析已取消，本轮未保存新复核结果。'});return}
   if(job.status==="failed")throw new Error(job.error||job.message||"采集任务失败");
   const result=job.result;
   if(!brandPenetrationDisplayItems(result).length)throw new Error("本次采集没有返回可用内容");
@@ -5328,11 +5388,24 @@ async function runBrandPenetrationProject(config){
   if(status)status.textContent="真实数据库快照";
   const thresholdFallback=result.admission?.thresholdFallback?.applied;
   if(meta)meta.textContent=`MMN 三平台 · ${brandPenetrationDisplayItems(result).length}条品牌匹配内容${thresholdFallback?" · 高热门槛无结果，已回退时间窗内有效内容":""} · 刚刚更新`;
+  await attachBrandReview(result,config);if(runToken!==brandPenetrationRunToken)return;
   frame.contentWindow?.postMessage({type:"mmn-brand-penetration-snapshot",result},"*");
  }catch(error){if(runToken!==brandPenetrationRunToken)return;if(status)status.textContent="分析失败";if(meta)meta.textContent=error.message||"请稍后重试";frame.contentWindow?.postMessage({type:"mmn-brand-penetration-unavailable",message:error.message||"分析失败"},"*")}
 }
 document.querySelector("#brand-penetration-frame")?.addEventListener("load",()=>{if(document.querySelector("#brandpenetration")?.classList.contains("active"))loadBrandPenetrationSnapshot()});
-window.addEventListener("message",event=>{const frame=document.querySelector("#brand-penetration-frame"),rawConfig=event.data?.config;if(event.source!==frame?.contentWindow||!["mmn-brand-penetration-project-save","mmn-brand-penetration-project-request"].includes(event.data?.type)||!rawConfig||typeof rawConfig!=="object"||Array.isArray(rawConfig))return;const config=normalizeBrandPenetrationProject(rawConfig);try{localStorage.setItem(BRAND_PENETRATION_PROJECT_STORAGE_KEY,JSON.stringify(config))}catch(_){}renderBrandPenetrationProjectContext(config);if(event.data?.type==="mmn-brand-penetration-project-save")loadBrandPenetrationSnapshot();else runBrandPenetrationProject(config)});
+window.addEventListener("message",event=>{
+ if(!isBrandReviewFrameMessage(event))return;
+ const message=event.data;if(!message||typeof message!=="object")return;
+ if(message.type==="mmn-brand-review-decision"){submitBrandReview(message);return}
+ if(message.type==="mmn-brand-review-cancel"){cancelBrandReview(message);return}
+ if(message.type==="mmn-brand-review-project-edit"){invalidateBrandReview();brandPenetrationRunToken++;brandPenetrationLoadToken++;brandReviewJob=null;return}
+ if(message.type==="mmn-brand-review-refresh"){if(message.contextToken===brandReviewState?.contextToken)loadBrandPenetrationSnapshot();return}
+ const rawConfig=message.config;
+ if(!["mmn-brand-penetration-project-save","mmn-brand-penetration-project-request"].includes(message.type)||!rawConfig||typeof rawConfig!=="object"||Array.isArray(rawConfig)||typeof rawConfig.ownBrand!=="string"||rawConfig.ownBrand.length>100||!Array.isArray(rawConfig.competitors)||rawConfig.competitors.length>5||rawConfig.competitors.some(x=>typeof x!=="string"||x.length>100))return;
+ invalidateBrandReview();brandPenetrationRunToken++;brandPenetrationLoadToken++;
+ const config=normalizeBrandPenetrationProject(rawConfig);try{localStorage.setItem(BRAND_PENETRATION_PROJECT_STORAGE_KEY,JSON.stringify(config))}catch(_){}
+ renderBrandPenetrationProjectContext(config);if(message.type==="mmn-brand-penetration-project-save")loadBrandPenetrationSnapshot();else runBrandPenetrationProject(config);
+});
 
 function creatorTaskStageLabel(stage){return({preflight:"链接预检",awaiting_worker:"等待任务 Worker",resolve_identity:"账号身份解析",collect:"数据采集",normalize:"字段标准化与评分",persist:"资产入库",review:"等待人工审核",media:"素材获取",transcribe:"转写",ocr:"OCR",shots:"镜头与视觉",comments:"评论采集",opinion:"车型舆情辅助验证",evidence:"证据结构化",dna:"DNA 生成",paused:"已暂停",retry:"等待重试"})[stage]||stage||"等待处理"}
 function creatorAvailabilityLabel(value){return value==="available"?"可用":value==="not_returned"?"接口未返回":value||"未知"}

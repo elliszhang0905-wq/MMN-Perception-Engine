@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Deployment intent is explicit at invocation, not overridden by sourced .env.
+readonly MMN_CODE_ONLY_RELEASE="${MMN_DEPLOY_CODE_ONLY:-false}"
+case "$MMN_CODE_ONLY_RELEASE" in
+  true|false) ;;
+  *) echo "MMN_DEPLOY_CODE_ONLY 只能是 true 或 false；发布已停止。" >&2; exit 1 ;;
+esac
+
 if [[ ! -f .env ]]; then
   echo "未找到 .env。请先复制 .env.example 为 .env 并填写配置。"
   exit 1
@@ -74,6 +81,14 @@ ensure_build_capacity() {
 
 compose() {
   docker compose --env-file .env "$@"
+}
+
+recreate_release_services() {
+  if [[ "$MMN_CODE_ONLY_RELEASE" == "true" ]]; then
+    compose up -d --no-build --no-deps --force-recreate mmn-app
+  else
+    compose up -d --no-build --no-deps --force-recreate mmn-app mmn-creator-worker mmn-scheduler
+  fi
 }
 
 wait_for_app_health() {
@@ -230,9 +245,12 @@ if ! docker run --rm --entrypoint python "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_
   echo "候选镜像烟雾检查失败；旧版本保持在线，本次发布停止。" >&2
   exit 1
 fi
-docker tag "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"
 
 sync_release_assets() {
+  if [[ "$MMN_CODE_ONLY_RELEASE" == "true" ]]; then
+    echo "仅代码发布：保留全部持久化数据，不同步版本数据资产。"
+    return 0
+  fi
   echo "同步随版本发布的数据资产到统一持久化根目录。"
   compose exec -T mmn-app mkdir -p /app/data/modules/product_evaluation /app/data/imports/raw/product_evaluation /app/data/dongchedi_sales /app/data/rag_training/dongchedi_sales /app/data/eval
   if [[ -f data/thailand_social_market_latest.json ]]; then
@@ -283,6 +301,15 @@ remove_candidate_container() {
   docker rm "$CANDIDATE_CONTAINER_NAME" >/dev/null 2>&1 || true
 }
 
+restore_previous_route() {
+  if route_web_to mmn-app && wait_for_web_health 30; then
+    remove_candidate_container
+    return 0
+  fi
+  echo "旧路由尚未确认恢复，保留健康候选实例；需人工核对入口。" >&2
+  return 1
+}
+
 restore_previous_image() {
   if [[ "$APP_WAS_RUNNING" != "true" ]]; then
     echo "发布前没有可回退的运行版本。" >&2
@@ -291,7 +318,7 @@ restore_previous_image() {
   echo "新版本未通过健康检查，候选实例继续承接流量并恢复上一运行镜像。" >&2
   docker tag "${IMAGE_REPOSITORY}:${ROLLBACK_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"
   export MMN_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-  compose up -d --no-build --no-deps --force-recreate mmn-app mmn-creator-worker mmn-scheduler
+  recreate_release_services
   wait_for_app_health 60
   route_web_to mmn-app
   wait_for_web_health 30
@@ -318,14 +345,20 @@ fi
 
 echo "候选实例健康，反向代理切换到候选实例。"
 if ! route_web_to "$CANDIDATE_CONTAINER_NAME"; then
-  route_web_to mmn-app || true
-  remove_candidate_container
+  restore_previous_route || true
   exit 1
 fi
 
 echo "候选实例承接流量，后台替换正式应用与任务服务。"
+# Only an accepted candidate may become the restartable formal image. Failed
+# pre-cutover checks leave both the old container and its deploy tag untouched.
+if ! docker tag "${IMAGE_REPOSITORY}:${CANDIDATE_IMAGE_TAG}" "${IMAGE_REPOSITORY}:${DEPLOY_IMAGE_TAG}"; then
+  echo "正式镜像标签更新失败，恢复旧版本路由。" >&2
+  restore_previous_route || true
+  exit 1
+fi
 export MMN_IMAGE_TAG="$DEPLOY_IMAGE_TAG"
-if ! compose up -d --no-build --no-deps --force-recreate mmn-app mmn-creator-worker mmn-scheduler; then
+if ! recreate_release_services; then
   restore_previous_image
   exit 1
 fi

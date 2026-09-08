@@ -82,7 +82,7 @@ test("original RAG page loads the isolated reader and lifecycle hooks", () => {
   assert.match(html,/id="knowledge-workspace"/);
   assert.match(html,/<span>知识阅读工作区<\/span><h2>客户级共享知识/);
   assert.match(html,/knowledge-workspace\.js\?v=beta-1\.03-20260908-knowledge-workspace-s2-1/);
-  assert.match(html,/app\.js\?v=beta-1\.03-20260908-knowledge-workspace-s2-1/);
+  assert.match(html,/app\.js\?v=beta-1\.03-20260908-brand-review-v4-1/);
   assert.match(app,/function syncKnowledgeWorkspaceContext/);
   assert.match(app,/showPage[\s\S]*?syncKnowledgeWorkspaceContext\(\)/);
   assert.match(app,/function saveSession[\s\S]*?syncKnowledgeWorkspaceContext\(\)/);

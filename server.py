@@ -344,7 +344,7 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260908-knowledge-workspace-s2-1"
+APP_VERSION_CODE = "beta-1.03-20260908-brand-review-v4-1"
 APP_RELEASE_DATE = "2026-09-08"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
@@ -1039,7 +1039,7 @@ def save_nsr_validation_adjudication(mart_id, body, *, org_id="local", user_id="
 
 def active_local_job_summary():
     """Return restart-safety state for the project-local service watchdog."""
-    active_statuses = {"queued", "running"}
+    active_statuses = {"queued", "running", "cancelling"}
     task_maps = (
         ("socialTrend", SOCIAL_TREND_JOB_LOCK, SOCIAL_TREND_JOB_TASKS),
         ("douyinCollector", DOUYIN_COLLECTOR_LOCK, DOUYIN_COLLECTOR_TASKS),
@@ -2206,7 +2206,7 @@ def analyze_brand_penetration_mart(plan, items, provider_runner=None):
         result["verifiedComparisonItems"] = comparison_items
         return run_brand_penetration_conclusions(result, provider_runner=provider_runner)
     return validate_social_trends_with_models(result).get("brandDecision")
-def validate_social_trends_with_models(result):
+def validate_social_trends_with_models(result, *, skip_brand_conclusions=False):
     """Run three blind evidence reviews and publish one neutral MMN conclusion."""
     # Metrics continue to use the complete collected dataset. Model QA reviews the
     # deterministic, heat-ranked evidence set that is actually eligible for the
@@ -2364,6 +2364,8 @@ def validate_social_trends_with_models(result):
         "evidenceIds": verified, "limitations": limitations,
     }
     qa["strategyOutput"] = result["unifiedInsight"]["headline"]
+    if skip_brand_conclusions:
+        return result
     result["brandDecision"] = (
         run_brand_penetration_conclusions(result)
         if complete and verified_items
@@ -11714,7 +11716,100 @@ def _normalize_social_trend_body(body):
     return normalized
 
 
-def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callback=None):
+def brand_review_provider_runner(slot, packet, repair, timeout, cancel):
+    """Exactly three fixed server identities; never accept provider names from HTTP."""
+    import brand_review_policy as policy
+    messages = [{"role": "system", "content": (
+        '仅依据冻结包返回JSON {"claims":[]}。每条包含claimId,kind(inference|action),'
+        'brand或ownBrand+competitor,predicate,topic,evidenceRefs[{evidenceId,quote}],dependsOn。'
+        '自动解释仅sample_mentions或both_samples_mention，topic必须是来源正文原词；'
+        '不得推断销量、总体、趋势或优劣，不要附加text或confidence。'
+        '动作仅manual_observation，并完整采用给定actionContract。无法满足则不提交该条。'
+    )}, {"role": "user", "content": json.dumps({"packet": packet, "actionContract": policy.OBSERVATION_CONTRACT, "repair": repair}, ensure_ascii=False)}]
+    if cancel.is_set():
+        raise ValueError("复核已取消")
+    kwargs = dict(temperature=.05, profile="deep", timeout=min(timeout, BRAND_PENETRATION_MODEL_TIMEOUT), max_tokens=12000)
+    callers = {"review_1": call_qwen, "review_2": call_deepseek, "review_3": call_kimi}
+    return callers[slot](messages, **kwargs)
+
+
+def brand_review_task_mode(body, org_id):
+    """Resolve task opt-in without trusting caller projectId or scope fields."""
+    import brand_review_runtime as runtime
+    if os.getenv("MMN_BRAND_CONCLUSIONS_MODE", "legacy") not in {"enabled", "shadow"} or not os.getenv("MMN_BRAND_CONCLUSIONS_ALLOWLIST", "").strip():
+        return "legacy"
+    normalized = _normalize_social_trend_body(body)
+    if normalized.get("centerType") != "brand_penetration":
+        return "legacy"
+    if normalized.get("analysisOnly"):
+        edition = edition_from(normalized.get("edition", "china"))
+        keyword = normalized.get("snapshotKeyword") or normalized.get("keyword")
+        with sqlite3.connect(DB_PATH.as_uri() + "?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            existing = (brand_penetration_snapshot(conn, org_id, edition) if keyword == "上汽奥迪品牌传播穿透"
+                        else latest_social_trend_snapshot(conn, keyword, org_id, edition,
+                            {"competitors": normalized.get("competitors", []), "timeRange": normalized.get("timeRange", "30d"), "centerType": "brand_penetration"}))
+        return runtime.mode_for(runtime.scope_for_snapshot(existing, org_id, edition)) if existing else "legacy"
+    return runtime.mode_for({"orgId": org_id, "projectId": runtime.project_id_for(normalized.get("keyword"), normalized.get("competitors", []))})
+
+
+def brand_review_latest(existing, org_id, edition):
+    import brand_review_runtime as runtime
+    from brand_review_repository import get_review_projection, latest_version
+    if not existing:
+        return {"mode": "legacy", "enabledForScope": False, "review": None}
+    scope = runtime.scope_for_snapshot(existing, org_id, edition)
+    mode = runtime.mode_for(scope)
+    review = None
+    cache_status = "empty"
+    if mode == "enabled" and DB_PATH.exists():
+        with sqlite3.connect(DB_PATH.as_uri() + "?mode=ro", uri=True) as conn:
+            review = get_review_projection(conn, scope, current_result=existing)
+            cache_status = "current" if review else "stale" if latest_version(conn, scope) else "empty"
+    return {"mode": mode, "enabledForScope": mode == "enabled", "projectId": scope["projectId"],
+            "snapshotId": scope["snapshotId"], "edition": edition, "review": review,
+            "cacheStatus": cache_status, "message": "证据或复核规则已更新，请重新分析。" if cache_status == "stale" else ""}
+
+
+def brand_review_analyze_existing(existing, org_id, edition, *, cancel=None):
+    if cancel and cancel.is_set():
+        raise ValueError("复核已取消")
+    if os.getenv("MMN_BRAND_CONCLUSIONS_MODE", "legacy") not in {"enabled", "shadow"} or not os.getenv("MMN_BRAND_CONCLUSIONS_ALLOWLIST", "").strip():
+        if cancel:
+            cancel.set()
+            raise ValueError("复核范围已关闭")
+        return analyze_existing_brand_penetration_snapshot(existing)
+    import brand_review_runtime as runtime
+    scope = runtime.scope_for_snapshot(existing, org_id, edition)
+    mode = runtime.mode_for(scope)
+    if mode == "legacy":
+        if cancel:
+            cancel.set()
+            raise ValueError("复核范围已关闭")
+        return analyze_existing_brand_penetration_snapshot(existing)
+    # Shadow is an explicit task only, and public legacy result remains exact.
+    legacy = json.loads(json.dumps(existing, ensure_ascii=False)) if mode == "shadow" else None
+    cancel = cancel or runtime.CancellationToken()
+    cancel.authorized_check = lambda: runtime.mode_for(scope) == mode
+    def bounded_runner(slot, packet, repair, timeout, stop):
+        if runtime.mode_for(scope) != mode:
+            cancel.set()
+        if cancel.is_set():
+            raise ValueError("复核已取消")
+        return brand_review_provider_runner(slot, packet, repair, timeout, stop)
+    with sqlite3.connect(DB_PATH.as_uri() + "?mode=rw", uri=True) as conn:
+        review = runtime.analyze_snapshot(conn, existing, scope, bounded_runner, cancel=cancel)
+    if mode == "shadow":
+        return legacy
+    if runtime.mode_for(scope) != mode:
+        return json.loads(json.dumps(existing, ensure_ascii=False))
+    result = json.loads(json.dumps(existing, ensure_ascii=False))
+    result["brandReview"] = review
+    result["brandDecision"] = review["decision"]
+    return result
+
+
+def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callback=None, cancel=None):
     body = _normalize_social_trend_body(body)
     platforms = body.get("platforms") or ["douyin", "xiaohongshu", "weibo"]
     edition = edition_from(body.get("edition", "china"))
@@ -11729,6 +11824,12 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
         raise ValueError("请输入本品品牌或车型")
 
     def report(stage, progress, message):
+        if (cancel and not getattr(cancel, "published", False)
+                and getattr(cancel, "authorized_mode", None)
+                and brand_review_task_mode(body, org_id) != cancel.authorized_mode):
+            cancel.set()
+        if cancel and cancel.is_set():
+            raise ValueError("复核已取消")
         if progress_callback:
             progress_callback(stage, progress, message)
 
@@ -11746,7 +11847,13 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
         if not existing:
             raise ValueError("当前品牌组合没有可复用的已验证证据")
         report("brand_validation", 35, "三路独立复核正在生成品牌与逐竞品结论")
-        result = analyze_existing_brand_penetration_snapshot(existing)
+        import brand_review_runtime as review_runtime
+        selected_review_mode = review_runtime.mode_for(review_runtime.scope_for_snapshot(existing, org_id, edition))
+        result = (brand_review_analyze_existing(existing, org_id, edition, cancel=cancel)
+                  if cancel is not None else brand_review_analyze_existing(existing, org_id, edition))
+        if cancel is not None or selected_review_mode != "legacy":
+            report("storage", 99, "品牌复核版本已保存，原证据保持不变")
+            return result
         report("brand_fusion", 90, "正在核对共同证据、分歧与行动方向")
         with db() as conn:
             snapshot = save_social_trend_snapshot(conn, result, org_id, edition, {
@@ -11780,7 +11887,12 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
     )
     result = apply_social_trend_history(result, previous)
     report("validation", 88, "正在执行MMN实体与三路独立审阅")
-    result = validate_social_trends_with_models(result)
+    import brand_review_runtime as review_runtime
+    review_mode = review_runtime.mode_for({"orgId": org_id, "projectId": review_runtime.project_id_for(keyword, competitors)}) if body.get("centerType") == "brand_penetration" else "legacy"
+    # Shadow is only supported for an explicit frozen analysisOnly task. New
+    # collection retains the exact legacy path; no extra blind brand round.
+    result = (validate_social_trends_with_models(result, skip_brand_conclusions=True)
+              if review_mode == "enabled" else validate_social_trends_with_models(result))
     review_status = (result.get("qa", {}).get("threeFlagships") or {}).get("status")
     report("storage", 96, "三路审阅一致，正在写入正式快照" if review_status == "aligned" else "审阅或采集未完整，仅保存受限快照")
     with db() as conn:
@@ -11790,6 +11902,12 @@ def run_social_trend_collection_pipeline(body, *, org_id="local", progress_callb
             "centerType": body.get("centerType") or "social_trend",
         })
     result["snapshot"] = snapshot
+    if review_mode == "enabled":
+        # Bind only AFTER the immutable source has a server-generated ID.
+        result["snapshot"]["filters"] = {"competitors": competitors, "startDate": start_date,
+                                           "endDate": end_date, "centerType": "brand_penetration"}
+        result = (brand_review_analyze_existing(result, org_id, edition, cancel=cancel)
+                  if cancel is not None else brand_review_analyze_existing(result, org_id, edition))
     report("storage", 99, "快照已写入，正在刷新看板")
     return result
 
@@ -11820,7 +11938,7 @@ def _social_trend_job_request_key(body):
 def _prune_social_trend_jobs(now_dt=None):
     """Bound completed in-memory jobs without interrupting active collection."""
     now_dt = now_dt or datetime.now(timezone.utc)
-    terminal = {"completed", "failed"}
+    terminal = {"completed", "failed", "cancelled"}
     completed = []
     for job_id, job in SOCIAL_TREND_JOB_TASKS.items():
         if job.get("status") not in terminal:
@@ -11850,8 +11968,35 @@ def get_social_trend_job(job_id, org_id=""):
         return _public_social_trend_job(job)
 
 
+def cancel_brand_review_job(job_id, org_id):
+    """Cancel only an authenticated tenant's opted-in brand review task."""
+    from brand_review_repository import ReviewConflict
+    with SOCIAL_TREND_JOB_LOCK:
+        job = SOCIAL_TREND_JOB_TASKS.get(str(job_id))
+        if not job or job.get("_org_id") != org_id or not job.get("canCancel"):
+            return None
+        token = job.get("_cancel")
+    with token.publication_lock:
+        with SOCIAL_TREND_JOB_LOCK:
+            if token.published or job.get("status") == "completed":
+                raise ReviewConflict("复核结果已保存，无法取消，请刷新")
+            if job.get("status") in {"failed", "cancelled"}:
+                return _public_social_trend_job(job)
+            token.set()
+            job.update(status="cancelling", stage="cancelling", cancelRequested=True,
+                       message="正在停止后续复核，已发出的请求可能仍在结束中。", updatedAt=now())
+            return _public_social_trend_job(job)
+
+
 def start_social_trend_job(body, *, org_id="local", runner=None):
     body = _normalize_social_trend_body(body)
+    review_mode = brand_review_task_mode(body, org_id)
+    if review_mode in {"enabled", "shadow"}:
+        from brand_review_runtime import CancellationToken
+        cancel = CancellationToken()
+        cancel.authorized_mode = review_mode
+    else:
+        cancel = None
     runner = runner or run_social_trend_collection_pipeline
     job_id = str(uuid.uuid4())
     stamp = now()
@@ -11861,10 +12006,12 @@ def start_social_trend_job(body, *, org_id="local", runner=None):
         "message": "采集任务已提交，正在准备数据源", "createdAt": stamp, "updatedAt": stamp,
         "result": None, "error": "", "_org_id": org_id, "_request_key": request_key,
     }
+    if cancel is not None:
+        job.update(canCancel=True, cancelRequested=False, _cancel=cancel)
     with SOCIAL_TREND_JOB_LOCK:
         _prune_social_trend_jobs()
         active = next((active_job for active_job in SOCIAL_TREND_JOB_TASKS.values()
-                       if active_job.get("_org_id") == org_id and active_job.get("status") in {"queued", "running"}), None)
+                       if active_job.get("_org_id") == org_id and active_job.get("status") in {"queued", "running", "cancelling"}), None)
         if active:
             if active.get("_request_key") != request_key:
                 raise ValueError("当前项目已有不同条件的社媒趋势分析在运行，请完成后再发起新的分析")
@@ -11874,7 +12021,7 @@ def start_social_trend_job(body, *, org_id="local", runner=None):
     def update(stage, progress, message):
         with SOCIAL_TREND_JOB_LOCK:
             current = SOCIAL_TREND_JOB_TASKS.get(job_id)
-            if current:
+            if current and not (cancel and cancel.is_set()):
                 current.update({
                     "status": "running", "stage": str(stage or "running"),
                     "progress": max(0, min(99, int(progress or 0))),
@@ -11884,14 +12031,23 @@ def start_social_trend_job(body, *, org_id="local", runner=None):
     def work():
         update("prepare", 1, "正在连接社媒数据源")
         try:
-            result = runner(body, org_id=org_id, progress_callback=update)
+            result = (runner(body, org_id=org_id, progress_callback=update, cancel=cancel)
+                      if cancel is not None else runner(body, org_id=org_id, progress_callback=update))
             with SOCIAL_TREND_JOB_LOCK:
+                if cancel and cancel.is_set():
+                    SOCIAL_TREND_JOB_TASKS[job_id].update(status="cancelled", stage="cancelled", result=None,
+                        message="本轮复核已取消，已保存的来源快照保留。", updatedAt=now())
+                    return
                 SOCIAL_TREND_JOB_TASKS[job_id].update({
                     "status": "completed", "stage": "completed", "progress": 100,
                     "message": "采集、校验与快照入库已完成", "result": result, "updatedAt": now(),
                 })
         except Exception as exc:
             with SOCIAL_TREND_JOB_LOCK:
+                if cancel and cancel.is_set():
+                    SOCIAL_TREND_JOB_TASKS[job_id].update(status="cancelled", stage="cancelled", result=None, error="",
+                        message="本轮复核已取消，已保存的来源快照保留。", updatedAt=now())
+                    return
                 SOCIAL_TREND_JOB_TASKS[job_id].update({
                     "status": "failed", "stage": "failed", "progress": 100,
                     "message": "采集任务失败", "error": str(exc), "updatedAt": now(),
@@ -15252,7 +15408,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' "
-            "'sha256-NjgdjrAdMxFv7tkSt7BFruzxL1Uk/dSWzWUOD2nKvSs='; "
+            "'sha256-Di2gLLKBXOga1tA8U1H/iokRn1jVuaO0rxl2NBLuhrY='; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; "
             "media-src 'self' blob: https:; object-src 'none'; base-uri 'none'; "
@@ -15445,6 +15601,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         request_host = str(self.headers.get("Host") or "").strip().lower()
         return parsed.scheme in {"http", "https"} and parsed.netloc.lower() == request_host
 
+    def require_brand_review_auth(self, *, write=False):
+        """Read-only identity resolution, including on GET; local writes need CSRF."""
+        local = not cloud_login_required()
+        auth = ({"username": "local", "role": "admin", "org_id": "local", "user_id": "local"}
+                if local else self.current_auth(read_only=True))
+        if not auth or not auth.get("org_id") or not auth.get("user_id"):
+            self.send_json({"ok": False, "error": "请先登录。"}, 401)
+            return None
+        if write:
+            request_host = urlparse("http://" + str(self.headers.get("Host") or "")).hostname
+            if (auth.get("role") != "admin"
+                    or (local and request_host not in {"localhost", "127.0.0.1", "::1"})
+                    or ((local or self._auth_transport == "cookie") and not self.valid_cookie_csrf())):
+                self.send_json({"ok": False, "error": "复核权限或请求来源校验失败。"}, 403)
+                return None
+        return auth
+
     def require_cloud_auth(self, roles=None):
         if not cloud_login_required():
             return {"username": "local", "role": "admin", "org_id": "local", "user_id": "local", "local": True}
@@ -15514,6 +15687,24 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path == "/api/brand-reviews/latest":
+            auth = self.require_brand_review_auth()
+            if not auth:
+                return
+            try:
+                query = parse_qs(parsed.query)
+                edition = edition_from(query.get("edition", ["china"])[0])
+                keyword = query.get("keyword", [""])[0]
+                with sqlite3.connect(DB_PATH.as_uri() + "?mode=ro", uri=True) as conn:
+                    conn.row_factory = sqlite3.Row
+                    existing = (brand_penetration_snapshot(conn, auth["org_id"], edition)
+                                if keyword == "上汽奥迪品牌传播穿透" else latest_social_trend_snapshot(
+                                    conn, keyword, auth["org_id"], edition,
+                                    {"competitors": query.get("competitor", []), "timeRange": query.get("timeRange", [""])[0], "centerType": "brand_penetration"}))
+                self.send_json({"ok": True, **brand_review_latest(existing, auth["org_id"], edition)})
+            except Exception:
+                self.send_json({"ok": False, "error": "复核暂不可读取。"}, 400)
+            return
         if self.headers.get("Content-Length") and not self.prepare_json_request(parsed.path):
             return
         if parsed.path == "/api/health":
@@ -16643,6 +16834,47 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if not self.prepare_json_request(parsed.path):
             return
+        cancel_match = re.fullmatch(r"/api/brand-reviews/jobs/([a-zA-Z0-9-]{1,100})/cancel", parsed.path)
+        if cancel_match:
+            auth = self.require_brand_review_auth(write=True)
+            if not auth:
+                return
+            from brand_review_repository import ReviewConflict
+            try:
+                if int(self.headers.get("Content-Length", "0")) > 1000 or self.read_json() != {}:
+                    raise ValueError("取消请求无效")
+                job = cancel_brand_review_job(cancel_match.group(1), auth["org_id"])
+                self.send_json({"ok": True, "job": job} if job else {"ok": False, "error": "任务不存在或无权取消。"}, 200 if job else 404)
+            except ReviewConflict:
+                self.send_json({"ok": False, "error": "复核结果已保存，无法取消，请刷新。"}, 409)
+            except (ValueError, TypeError):
+                self.send_json({"ok": False, "error": "取消请求无效。"}, 400)
+            return
+        if parsed.path == "/api/brand-reviews/decisions":
+            auth = self.require_brand_review_auth(write=True)
+            if not auth:
+                return
+            import brand_review_repository as repository
+            import brand_review_runtime as runtime
+            try:
+                if int(self.headers.get("Content-Length", "0")) > 16000:
+                    raise ValueError("请求过大")
+                body = self.read_json()
+                with sqlite3.connect(DB_PATH.as_uri() + "?mode=rw", uri=True) as conn:
+                    scope = repository.resolve_review_scope(conn, auth["org_id"], body.get("reviewId"))
+                    if runtime.mode_for(scope) != "enabled":
+                        raise repository.ReviewForbidden("当前范围未开启复核")
+                    review = repository.append_review_decision(conn, scope, auth, body)
+                self.send_json({"ok": True, "review": review})
+            except repository.ReviewForbidden:
+                self.send_json({"ok": False, "error": "无复核写入权限。"}, 403)
+            except repository.ReviewNotFound:
+                self.send_json({"ok": False, "error": "复核不存在或无权访问。"}, 404)
+            except repository.ReviewConflict:
+                self.send_json({"ok": False, "error": "复核版本或重复请求冲突，请刷新。"}, 409)
+            except Exception:
+                self.send_json({"ok": False, "error": "裁决内容无效或复核尚未初始化。"}, 400)
+            return
         internal_scheduler = (
             parsed.path in SCHEDULER_POST_PATHS
             and valid_scheduler_signature(self.headers, self.command, parsed.path)
@@ -17531,6 +17763,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 auth = self.current_auth() or {}
+                if brand_review_task_mode(body, auth.get("org_id", "local")) != "legacy":
+                    auth = self.require_brand_review_auth(write=True)
+                    if not auth:
+                        return
                 result = run_social_trend_collection_pipeline(body, org_id=auth.get("org_id", "local"))
                 self.send_json({"ok": True, "result": result}, 201)
             except Exception as exc:
@@ -17540,6 +17776,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = self.read_json()
                 auth = self.current_auth() or {}
+                if brand_review_task_mode(body, auth.get("org_id", "local")) != "legacy":
+                    auth = self.require_brand_review_auth(write=True)
+                    if not auth:
+                        return
                 self.send_json({"ok": True, "job": start_social_trend_job(body, org_id=auth.get("org_id", "local"))}, 202)
             except Exception as exc:
                 self.send_json({"ok": False, "error": str(exc)}, 400)

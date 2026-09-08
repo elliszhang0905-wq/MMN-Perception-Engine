@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class AllSurfacesReleaseGateTest(unittest.TestCase):
     ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
     THAILAND_ASSET_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
-    RELEASE_VERSION = "beta-1.03-20260908-knowledge-workspace-s2-1"
+    RELEASE_VERSION = "beta-1.03-20260908-brand-review-v4-1"
+    KNOWLEDGE_ASSET_VERSION = "beta-1.03-20260908-knowledge-workspace-s2-1"
     RELEASE_DATE = "2026-09-08"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
@@ -51,8 +52,8 @@ class AllSurfacesReleaseGateTest(unittest.TestCase):
         self.assertIn(f"group-dashboard.css?v={self.ASSET_VERSION}", index)
         self.assertIn(f"lead-dashboard.css?v={self.ASSET_VERSION}", index)
         self.assertIn(f"app.js?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"knowledge-workspace.js?v={self.RELEASE_VERSION}", index)
-        self.assertIn(f"knowledge-workspace.css?v={self.RELEASE_VERSION}", index)
+        self.assertIn(f"knowledge-workspace.js?v={self.KNOWLEDGE_ASSET_VERSION}", index)
+        self.assertIn(f"knowledge-workspace.css?v={self.KNOWLEDGE_ASSET_VERSION}", index)
         self.assertIn(f"group-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"lead-dashboard.js?v={self.ASSET_VERSION}", index)
         self.assertIn(f"thailand-social-dashboard.css?v={self.THAILAND_ASSET_VERSION}", index)
