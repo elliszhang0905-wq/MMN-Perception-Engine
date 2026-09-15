@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 标准库、unittest、Bash、既有 Node 检查。
 
+**后续状态（2026-09-16）：** 用户另行授权提交、部署与启用，双环境已完成，发布标签为 `beta-1.03-20260916-weekly-refresh-1`。本计划下方限制记录隔离开发阶段；当前事实以同日 deployment 计划及《MMN周度刷新_双环境部署与启用回执》为准。
+
 ## Global Constraints
 
 - 工单 `MMN-REFRESH-RELIABILITY-20260916-001`；用户“开工”授权隔离实施，不包含推送、部署、启用或业务数据刷新。
