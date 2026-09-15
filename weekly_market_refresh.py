@@ -256,18 +256,22 @@ def _validate(payload):
     return normalized
 
 
+def _load_refresh_status(data_dir):
+    try:
+        status = json.loads((Path(data_dir) / STATUS_FILE).read_text(encoding="utf-8"))
+        return status if isinstance(status, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def load_weekly_market_snapshot(data_dir, baseline):
     data_dir = Path(data_dir)
     path = data_dir / SNAPSHOT_FILE
-    status_path = data_dir / STATUS_FILE
     try:
         snapshot = _validate(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else _validate(baseline)
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         snapshot = _validate(baseline)
-    try:
-        status = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        status = {}
+    status = _load_refresh_status(data_dir)
     stored_label = str(status.get("statusLabel") or "")
     if stored_label in {"本周数据已更新", "当前为已发布周度数据"}:
         stored_label = "最近一期已发布 · 指标为月内累计"
@@ -280,7 +284,7 @@ def load_weekly_market_snapshot(data_dir, baseline):
         "status": status.get("status") or "baseline",
         "statusLabel": stored_label or "最近一期已发布 · 指标为月内累计",
         "lastAttemptAt": status.get("lastAttemptAt") or "",
-        "lastSuccessAt": status.get("lastSuccessAt") or snapshot.get("publishedAt", ""),
+        "lastSuccessAt": status.get("lastSuccessAt") or "",
         "error": status.get("error") or "",
         "batchId": snapshot["batchId"],
         "sourcePeriod": snapshot["source"]["period"],
@@ -306,6 +310,7 @@ def _stored_natural_week_end(data_dir):
 def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetcher=None, official_fetcher=None, today=None):
     data_dir = Path(data_dir)
     attempted_at = _now()
+    previous_status = _load_refresh_status(data_dir)
     try:
         if payload is None:
             payload = fetch_latest_official_market_payload(fetch_text=official_fetcher)
@@ -364,7 +369,7 @@ def refresh_weekly_market_snapshot(data_dir, payload=None, feed_url=None, fetche
                 )
             ),
             "lastAttemptAt": attempted_at,
-            "lastSuccessAt": "",
+            "lastSuccessAt": previous_status.get("lastSuccessAt") or "",
             "error": error,
         }
         if latest_parse_failed:

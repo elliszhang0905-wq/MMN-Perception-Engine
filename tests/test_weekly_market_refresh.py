@@ -2,6 +2,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from datetime import date
 
 from weekly_market_refresh import (
     LatestArticleParseError,
@@ -28,6 +30,37 @@ BASELINE = {
 
 
 class WeeklyMarketRefreshTests(unittest.TestCase):
+    def test_failed_refresh_preserves_verified_success_time_and_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("weekly_market_refresh._now", return_value="2026-07-13T01:00:00+00:00"):
+                first = refresh_weekly_market_snapshot(directory, payload=BASELINE, today=date(2026, 7, 13))
+            snapshot_path = Path(directory) / "weekly_market_snapshot.json"
+            before = snapshot_path.read_bytes()
+            with patch("weekly_market_refresh._now", return_value="2026-07-14T01:00:00+00:00"):
+                failed = refresh_weekly_market_snapshot(directory, payload={}, today=date(2026, 7, 14))
+            self.assertEqual(failed["lastSuccessAt"], first["lastSuccessAt"])
+            self.assertEqual(failed["lastAttemptAt"], "2026-07-14T01:00:00+00:00")
+            self.assertEqual(snapshot_path.read_bytes(), before)
+            _, loaded = load_weekly_market_snapshot(directory, BASELINE)
+            self.assertEqual(loaded["lastSuccessAt"], first["lastSuccessAt"])
+
+    def test_baseline_or_failed_first_attempt_does_not_invent_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, baseline = load_weekly_market_snapshot(directory, BASELINE)
+            self.assertEqual(baseline["lastSuccessAt"], "")
+            refresh_weekly_market_snapshot(directory, payload={})
+            _, failed = load_weekly_market_snapshot(directory, BASELINE)
+            self.assertEqual(failed["lastSuccessAt"], "")
+
+    def test_non_object_status_is_treated_as_unknown_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status_path = Path(directory) / "weekly_market_refresh_status.json"
+            for raw in ("[]", "null", '"invalid"', "broken json"):
+                with self.subTest(raw=raw):
+                    status_path.write_text(raw, encoding="utf-8")
+                    _, loaded = load_weekly_market_snapshot(directory, BASELINE)
+                    self.assertEqual(loaded["lastSuccessAt"], "")
+
     def test_valid_batch_is_published_atomically(self):
         payload = json.loads(json.dumps(BASELINE, ensure_ascii=False))
         payload["facts"][0]["value"] = 51.0
