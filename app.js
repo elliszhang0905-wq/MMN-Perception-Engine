@@ -244,7 +244,7 @@ const editions={
  }
 };
 const headers=["车型","类型","平台","一级赛道","认知标签","情绪","用户身份","购买意向","有效评论","Impact","Growth","Competition"];
-const pageNames={dashboard:"决策驾驶舱",brandpenetration:"品牌穿透中心",socialtrends:"社媒趋势中心",policyintelligence:"政策环境分析",data:"声量数据",cognition:"认知诊断",vertical:"竞品格局",videos:"内容资产",creatorassets:"达人资产诊断",bloggerskill:"博主蒸馏孵化",contentstrategy:"MMN策略输出",actions:"行动预算",knowhow:"打法知识库",strategykb:"RAG资产库",learning:"人工结论",architecture:"版本架构",workspace:"空间权限",config:"项目权重",eval:"Eval评测"};
+const pageNames={geo:"GEO",dashboard:"决策驾驶舱",brandpenetration:"品牌穿透中心",socialtrends:"社媒趋势中心",policyintelligence:"政策环境分析",data:"声量数据",cognition:"认知诊断",vertical:"竞品格局",videos:"内容资产",creatorassets:"达人资产诊断",bloggerskill:"博主蒸馏孵化",contentstrategy:"MMN策略输出",actions:"行动预算",knowhow:"打法知识库",strategykb:"RAG资产库",learning:"人工结论",architecture:"版本架构",workspace:"空间权限",config:"项目权重",eval:"Eval评测"};
 const hiddenPages=new Set(["actions"]);
 const creatorAssetState={tab:"distill",tasks:[],creators:[],methods:[],selectedCreator:null,selectedAsset:null,processingAssetId:"",loading:false,error:""};
 const socialTrendState={loading:false,restoring:false,restoreKey:"",result:null,mart:null,queryPlan:null,error:"",stage:"idle",stageTimer:null,progressTimer:null,progress:0,startedAt:0,runToken:0,jobId:"",competitors:[],visibleModels:[],evidencePlatform:"all",evidenceScope:"all",evidencePool:"all"};
@@ -5198,6 +5198,7 @@ function renderConfig(){
  document.querySelectorAll("[data-platform]").forEach(el=>el.onchange=()=>{state.platforms[el.dataset.platform]=+el.value;save();render();toast("平台权重已更新")});
 }
 function showPage(id){
+ if(id==="geo"&&document.querySelector("#geo-nav-entry")?.hidden)id="dashboard";
  if(id!=="brandpenetration"){invalidateBrandReview();brandPenetrationLoadToken++;brandPenetrationRunToken++}
  if(hiddenPages.has(id))id="dashboard";
  const requestedId=id;
@@ -5217,6 +5218,8 @@ function showPage(id){
  if(id==="socialtrends"&&!socialTrendState.result&&!socialTrendState.mart){const input=document.querySelector("#social-trend-keyword");if(input&&!input.value)input.value=state.config.model||"";if(!socialTrendState.competitors.length)socialTrendState.competitors=String(state.config.competitor||"").split("/").map(x=>x.trim()).filter(Boolean);socialTrendState.competitors=sanitizeSocialCompetitors(input?.value||state.config.model,socialTrendState.competitors);renderSocialCompetitorPicker();loadLatestSocialTrendSnapshot()}
  if(id==="brandpenetration")loadBrandPenetrationSnapshot();
  if(id==="policyintelligence")window.PolicyIntelligenceModule?.load?.();
+ if(id==="geo")window.MMNGeo?.load?.();
+ if(id==="dashboard")window.MMNGeo?.loadSummary?.();
  if(id==="eval"&&!mmnEvalState.data&&!mmnEvalState.loading)loadMmnEvalDashboard();
 }
 

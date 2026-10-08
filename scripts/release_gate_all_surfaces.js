@@ -108,7 +108,11 @@ async function auditViewport(browser, viewport) {
 
     const navSelector = '#nav button[data-page]:not([hidden])';
     const pageIds = await page.locator(navSelector).evaluateAll(nodes => nodes.map(node => node.dataset.page));
-    add(`${viewport.name}: all customer navigation entries are present`, pageIds.length === 19, JSON.stringify(pageIds));
+    const geoCapabilities = await page.evaluate(() => api('/api/geo/capabilities'));
+    const expectedPageIds = ["dashboard", "brandpenetration", "socialtrends", "policyintelligence", "contentstrategy", "bffactory", "videos", "data", "cognition", "vertical", "bloggerskill", "strategykb", "bflibrary", "knowhow", "learning", "workspace", "config", "eval", "architecture"];
+    if (geoCapabilities?.data?.enabled === true) expectedPageIds.push("geo");
+    add(`${viewport.name}: all customer navigation entries are present`,
+      pageIds.length === expectedPageIds.length && expectedPageIds.every(id => pageIds.includes(id)), JSON.stringify(pageIds));
 
     for (const pageId of pageIds) {
       const button = page.locator(`${navSelector}[data-page="${pageId}"]`);

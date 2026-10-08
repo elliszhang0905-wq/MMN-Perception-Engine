@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 class AllSurfacesReleaseGateTest(unittest.TestCase):
     ASSET_VERSION = "beta-1.03-20260811-lead-dashboard-entry-1"
     THAILAND_ASSET_VERSION = "beta-1.03-20260901-thailand-social-dashboard-3"
-    RELEASE_VERSION = "beta-1.03-20260916-weekly-refresh-1"
+    RELEASE_VERSION = "beta-1.03-20261008-geo-1"
     KNOWLEDGE_ASSET_VERSION = "beta-1.03-20260908-knowledge-workspace-s2-1"
-    RELEASE_DATE = "2026-09-16"
+    RELEASE_DATE = "2026-10-08"
 
     def test_all_surfaces_browser_gate_is_part_of_release_gate(self):
         release_gate = (ROOT / "scripts" / "release_gate.sh").read_text(encoding="utf-8")

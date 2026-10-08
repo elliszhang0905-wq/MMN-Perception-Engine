@@ -285,6 +285,8 @@ ROOT = Path(__file__).resolve().parent
 PUBLIC_STATIC_FILES = frozenset({
     "index.html",
     "app.js",
+    "geo.js",
+    "geo.css",
     "bf-factory.js",
     "data_20260608.js",
     "demo-brand-weekly-radar.html",
@@ -344,8 +346,8 @@ SCHEDULER_POST_PATHS = frozenset({
 })
 LEAD_DASHBOARD_MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 APP_VERSION = "beta 1.03"
-APP_VERSION_CODE = "beta-1.03-20260916-weekly-refresh-1"
-APP_RELEASE_DATE = "2026-09-16"
+APP_VERSION_CODE = "beta-1.03-20261008-geo-1"
+APP_RELEASE_DATE = "2026-10-08"
 APP_HOST = os.getenv("MMN_HOST", os.getenv("HOST", "localhost"))
 PORT = int(os.getenv("MMN_PORT", os.getenv("PORT", "8765")))
 PUBLIC_BASE_URL = os.getenv("MMN_PUBLIC_BASE_URL", f"http://{APP_HOST}:{PORT}")
@@ -15687,6 +15689,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/geo/"):
+            if self.headers.get("Content-Length") and not self.prepare_json_request(parsed.path):
+                return
+            from geo.api import dispatch as dispatch_geo
+            dispatch_geo(self, parsed, DB_PATH)
+            return
         if parsed.path == "/api/brand-reviews/latest":
             auth = self.require_brand_review_auth()
             if not auth:
@@ -16833,6 +16841,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         if not self.prepare_json_request(parsed.path):
+            return
+        if parsed.path.startswith("/api/geo/"):
+            from geo.api import dispatch as dispatch_geo
+            dispatch_geo(self, parsed, DB_PATH)
             return
         cancel_match = re.fullmatch(r"/api/brand-reviews/jobs/([a-zA-Z0-9-]{1,100})/cancel", parsed.path)
         if cancel_match:
